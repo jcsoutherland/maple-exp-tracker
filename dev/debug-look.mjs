@@ -36,4 +36,6 @@ const box = await p.evaluate(() => { const r = document.querySelector('.stage').
 for (let k = 0; k < 4; k++) { await p.screenshot({ path: `${out}_idle${k}.png`, clip: box }); await new Promise(r => setTimeout(r, 500)); }
 await p.evaluate(() => { window.met.lastActive = Date.now() + 1e7; window.met.notify(); });
 for (let k = 0; k < 8; k++) { await new Promise(r => setTimeout(r, 120)); await p.screenshot({ path: `${out}_atk${k}.png`, clip: box }); }
+const sheet = await p.evaluate(() => { const r = document.querySelector('.sheet-char, .sheet > div, .stage').parentElement.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; });
+await p.screenshot({ path: `${out}_sheet.png`, clip: sheet });
 await b.close(); await server.close();

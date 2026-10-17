@@ -1,19 +1,19 @@
-import { cached, getBlob, setBlob } from '../data/cache';
-import { inClassic } from '../data/osms';
+import { getBlob, setBlob } from '../data/cache';
 import { classLook, type Look as Branch } from '../pixelart';
+import { FACE, GEAR, HAIR, WEAPONS, type GearRow } from './catalog';
 
 /**
  * Real MapleStory character sprites from maplestory.io (the same renderer meowdb's character builder uses).
- * A random class-appropriate look is rolled once per character; its idle and weapon-attack frames are requested
- * one at a time, gently, and every frame is kept in IndexedDB on this device forever, so each is fetched only once.
- * Sprites are game assets: they are fetched at runtime and never copied into this repository.
+ * A look is rolled instantly from a small built-in catalog of item ids (catalog.ts); its idle and weapon-attack
+ * frames are then requested one at a time, gently, and kept in IndexedDB on this device forever, so each is fetched
+ * only once. Sprites are game assets: they are fetched at runtime and never copied into this repository.
  */
 const API = 'https://maplestory.io/api';
-const VER = 'GMS/83';
-const DAY = 864e5;
+/** bump when the look format or rules change, so older saved looks are re-rolled */
+export const LOOK_V = 2;
 
 export interface CharLook {
-  v: 1;
+  v: number;
   branch: Branch;
   gender: 0 | 1;
   skin: number;
@@ -31,57 +31,23 @@ export interface CharLook {
   shot: 'arrow' | 'star' | 'orb' | null;
 }
 
-// ---------- item lists (fetched once, kept 30 days) ----------
-
-/** [id, subCategory, required jobs, required level, gender (0 m, 1 f, 2 any), cash] */
-type Row = [number, string, string[], number, number, boolean];
-interface RawListItem { id: number; requiredJobs?: string[] | null; requiredLevel?: number | null; requiredGender?: number; isCash?: boolean; typeInfo?: { subCategory?: string } }
-
-/** GET JSON, retrying a few times: the API often times out under load. */
-async function getJson<T>(url: string, tries = 4): Promise<T> {
-  for (let k = 1; ; k++) {
-    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 60_000);
-    try {
-      const res = await fetch(url, { signal: ctl.signal });
-      if (!res.ok) throw new Error(`${res.status} ${url}`);
-      return await res.json() as T;
-    } catch (e) {
-      if (k >= tries) throw e;
-      await new Promise(r => setTimeout(r, 2000 * k));
-    } finally { clearTimeout(timer); }
-  }
-}
-
-const list = (q: string) => cached<Row[]>('msio-list:' + q, async () => {
-  const d = await getJson<RawListItem[]>(`${API}/${VER}/item?${q}`);
-  return d.map(x => [x.id, x.typeInfo?.subCategory || '', x.requiredJobs || [], x.requiredLevel || 0, x.requiredGender ?? 2, !!x.isCash] as Row);
-}, 30 * DAY);
-
-/**
- * The animations an item has sprites for (action → frame count), kept 30 days. Empty when maplestory.io has no
- * sprite data for the item: the renderer then silently leaves it off, so such items are never picked.
- */
-const itemActions = (id: number) => cached<Record<string, number>>('msio-actions:' + id, async () => {
-  const d = await getJson<{ frameBooks?: Record<string, { frames: unknown[] }> } | null>(`${API}/${VER}/item/${id}`);
-  return Object.fromEntries(Object.entries(d?.frameBooks || {}).map(([k, v]) => [k, v.frames.length]));
-}, 30 * DAY);
-
 // ---------- rolling a look ----------
 
 const JOB_NAME: Record<Branch, string> = { warrior: 'Warrior', magician: 'Magician', bowman: 'Bowman', thief: 'Thief', beginner: 'Beginner' };
 
-/** Weapon types a job uses (by 2nd/3rd/4th job name where it matters). */
-function weaponTypes(cls: string, branch: Branch): string[] {
+/** The weapon type a job fights with (by 2nd/3rd/4th job name where it matters). */
+function weaponType(cls: string, branch: Branch): string {
   const c = cls.toLowerCase();
   switch (branch) {
-    case 'bowman': return /crossbow|sniper|marksman/.test(c) ? ['Crossbow'] : ['Bow'];
-    case 'thief': return /bandit|shadower/.test(c) ? ['Dagger'] : ['Claw'];
-    case 'magician': return ['Wand', 'Staff'];
+    case 'bowman': return /crossbow|sniper|marksman/.test(c) ? 'Crossbow' : 'Bow';
+    case 'thief': return /bandit|shadower/.test(c) ? 'Dagger' : 'Claw';
+    case 'magician': return 'Wand';
     case 'warrior':
-      if (/spear|dragon knight|dark knight/.test(c)) return ['Spear', 'Pole Arm'];
-      if (/page|white knight|paladin/.test(c)) return ['One-Handed Blunt Weapon', 'Two-Handed Blunt', 'One-Handed Sword', 'Two-Handed Sword'];
-      return ['One-Handed Sword', 'Two-Handed Sword', 'One-Handed Axe', 'Two-Handed Axe'];
-    default: return ['One-Handed Sword', 'One-Handed Axe', 'One-Handed Blunt Weapon', 'Dagger'];
+      if (/spear|dragon knight|dark knight/.test(c)) return 'Spear';
+      if (/page|white knight|paladin/.test(c)) return 'One-Handed Blunt Weapon';
+      if (/fighter|crusader|hero/.test(c)) return 'Two-Handed Sword';
+      return 'One-Handed Sword';
+    default: return 'One-Handed Sword';
   }
 }
 
@@ -96,55 +62,37 @@ const ATTACKS: Record<string, string[]> = {
 const SHOT: Record<string, CharLook['shot']> = { Bow: 'arrow', Crossbow: 'arrow', Claw: 'star', Wand: 'orb', Staff: 'orb' };
 
 const rand = <T,>(a: T[]): T | undefined => a[Math.floor(Math.random() * a.length)];
-const shuffle = <T,>(a: T[]): T[] => { const b = a.slice(); for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
 
-/** First of these ids (in order) that the renderer can draw, with its animations; tries at most `max`. */
-async function firstDrawable(ids: number[], max = 8): Promise<{ id: number; acts: Record<string, number> } | null> {
-  for (const id of ids.slice(0, max)) {
-    const acts = await itemActions(id).catch(() => null);
-    if (acts && Object.keys(acts).length) return { id, acts };
-  }
-  return null;
-}
-
-/** Roll a random look for a job and level: skin, hair, face and class-legal gear (MapleStory Classic items only). */
-export async function rollLook(cls: string, level: number | null): Promise<CharLook> {
+/**
+ * Roll a random look for a job and level, instantly (no network): skin, hair, face and gear from the catalog that the
+ * job and gender can wear (preferring gear at or below the level), and the job's weapon for that level.
+ */
+export function rollLook(cls: string, level: number | null): CharLook {
   const branch = classLook(cls), lv = level || 1, gender: 0 | 1 = Math.random() < 0.5 ? 0 : 1;
-  const [armor, one, two, hair, face] = await Promise.all([
-    list('categoryFilter=Armor'), list('categoryFilter=One-Handed%20Weapon'), list('categoryFilter=Two-Handed%20Weapon'),
-    list('subCategoryFilter=Hair'), list('subCategoryFilter=Face'),
-  ]);
-  const usable = (r: Row) => !r[5] && (r[4] === 2 || r[4] === gender) && r[3] <= lv && inClassic(r[0])
-    && (r[2].includes(JOB_NAME[branch]) || r[2].includes('Beginner'));
-  /** usable items of these types in random order, gear close to the character's level first */
-  const candidates = (rows: Row[], subs: string[]) => {
-    const ok = rows.filter(r => subs.includes(r[1]) && usable(r));
-    return [...shuffle(ok.filter(r => r[3] >= lv - 30)), ...shuffle(ok.filter(r => r[3] < lv - 30))].map(r => r[0]);
+  const wears = (r: GearRow) => (r[3] === 2 || r[3] === gender) && (r[4].split('|').includes(JOB_NAME[branch]) || r[4].includes('Beginner'));
+  const pick = (slot: string) => {
+    const ok = (GEAR[slot] || []).filter(wears), fit = ok.filter(r => r[2] <= lv);
+    return rand(fit.length ? fit : ok)?.[0] ?? null;
   };
-  const pick = async (rows: Row[], subs: string[]) => (await firstDrawable(candidates(rows, subs)))?.id ?? null;
-
-  const weaponRows = [...one, ...two];
-  const w = await firstDrawable(candidates(weaponRows, weaponTypes(cls, branch)));
   const items: number[] = [];
-  if (Math.random() < 0.85) { const h = await pick(armor, ['Hat']); if (h) items.push(h); }
-  const overall = Math.random() < 0.5 ? await pick(armor, ['Overall']) : null;
-  if (overall) items.push(overall);
-  else for (const s of ['Top', 'Bottom']) { const it = await pick(armor, [s]); if (it) items.push(it); }
-  for (const s of ['Shoes', 'Glove']) { const it = await pick(armor, [s]); if (it) items.push(it); }
-  if (Math.random() < 0.3) { const c = await pick(armor, ['Cape']); if (c) items.push(c); }
-  if (w) items.push(w.id);
+  const add = (id: number | null) => { if (id) items.push(id); };
+  if (Math.random() < 0.85) add(pick('Hat'));
+  const overall = Math.random() < 0.5 ? pick('Overall') : null;
+  if (overall) add(overall); else { add(pick('Top')); add(pick('Bottom')); }
+  add(pick('Shoes')); add(pick('Glove'));
+  if (Math.random() < 0.5) add(pick('Earrings'));
 
-  // hair / face: the game's ids encode gender (30xxx/20xxx male, 31xxx/21xxx female) and colour (last digit / hundreds)
-  const hairId = (await firstDrawable(shuffle(hair.filter(r => Math.floor(r[0] / 1000) === 30 + gender).map(r => r[0]))))?.id ?? (gender ? 31000 : 30030);
-  const faceId = (await firstDrawable(shuffle(face.filter(r => Math.floor(r[0] / 1000) === 20 + gender).map(r => r[0]))))?.id ?? (gender ? 21000 : 20000);
-
-  // the weapon decides the stance and the attack animation (two-handers stand and swing differently)
-  const acts = w?.acts ?? {}, sub = w ? weaponRows.find(r => r[0] === w.id)?.[1] ?? '' : '';
-  const attack = (ATTACKS[sub] || ['swingO1']).find(a => acts[a]) ?? Object.keys(acts).find(a => /^(swing|stab|shoot)/.test(a)) ?? 'swingO1';
+  // the job's weapon: the best one of its type the character's level allows
+  const type = weaponType(cls, branch), ladder = WEAPONS[type] || [];
+  const w = [...ladder].reverse().find(r => r[2] <= lv) ?? ladder[0] ?? null;
+  if (w) items.push(w[0]);
+  const acts = w?.[3] ?? {};
+  const attack = (ATTACKS[type] || ['swingO1']).find(a => acts[a]) ?? Object.keys(acts).find(a => /^(swing|stab|shoot)/.test(a)) ?? 'swingO1';
   const stand = acts.stand2 ? 'stand2' : 'stand1';
+  const g = gender ? 'f' : 'm';
   return {
-    v: 1, branch, gender, skin: rand([0, 1, 2, 3, 4])!, hair: hairId, face: faceId, items, weapon: w?.id ?? null,
-    stand, standFrames: acts[stand] || 3, attack, attackFrames: acts[attack] || 3, shot: SHOT[sub] ?? null,
+    v: LOOK_V, branch, gender, skin: rand([0, 1, 2, 3, 4])!, hair: rand(HAIR[g])?.[0] ?? 30030, face: rand(FACE[g])?.[0] ?? 20000,
+    items, weapon: w?.[0] ?? null, stand, standFrames: acts[stand] || 3, attack, attackFrames: acts[attack] || 3, shot: SHOT[type] ?? null,
   };
 }
 

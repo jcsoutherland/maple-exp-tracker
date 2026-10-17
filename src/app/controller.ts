@@ -1,5 +1,5 @@
 import { Capture } from '../core/capture';
-import { rollLook, SpriteLoader } from '../core/avatar/msio';
+import { LOOK_V, rollLook, SpriteLoader } from '../core/avatar/msio';
 import { classAvatar, classLook, type Animations } from '../core/pixelart';
 import { themeFor, type Theme } from '../core/scene';
 import { REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
@@ -365,27 +365,19 @@ export class Controller {
   /** Load the character's saved look (if it suits the current job) and its frames. */
   private loadLook() {
     const look = store.loadChars()[this.identity.name]?.look;
-    this.sprites.load(look && look.branch === classLook(this.identity.cls) ? look : null, () => this.onSpriteFrame());
+    this.sprites.load(look && look.v === LOOK_V && look.branch === classLook(this.identity.cls) ? look : null, () => this.onSpriteFrame());
   }
   /** A session starts with a look: roll a random one for the job if the character has none (or changed branch). */
-  private async ensureLook() {
+  private ensureLook() {
     const { name, cls, level } = this.identity;
     if (!name || name === 'Unknown') return;
     const cur = store.loadChars()[name]?.look;
-    if (cur && cur.branch === classLook(cls)) { if (JSON.stringify(this.sprites.look) !== JSON.stringify(cur)) this.loadLook(); return; }
-    try {
-      await loadOsms(); // gear is limited to items that exist in MapleStory Classic
-      const look = await rollLook(cls, level);
-      const ch = store.loadChars();
-      ch[name] = { ...ch[name], look, thumb: undefined };
-      store.saveChars(ch);
-      this.tracker?.event('info', 'New character look rolled');
-      this.loadLook();
-    } catch (e) {
-      // maplestory.io is often overloaded: try again in a minute while the session runs
-      console.warn('could not roll a character look; retrying in 60s', e);
-      if (this.sess) setTimeout(() => { if (this.sess) this.ensureLook(); }, 60_000);
-    }
+    if (cur && cur.v === LOOK_V && cur.branch === classLook(cls)) { if (JSON.stringify(this.sprites.look) !== JSON.stringify(cur)) this.loadLook(); return; }
+    const ch = store.loadChars();
+    ch[name] = { ...ch[name], look: rollLook(cls, level), thumb: undefined };
+    store.saveChars(ch);
+    this.tracker?.event('info', 'New character look rolled');
+    this.loadLook();
   }
   /** Keep a small still of the character for History once the first idle frame is in. */
   private onSpriteFrame() {

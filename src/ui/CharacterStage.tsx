@@ -32,15 +32,19 @@ export function AvatarCanvas({ cls, zoom, fighting = false }: { cls: string; zoo
   return <canvas ref={ref} width={a.w * zoom} height={a.h * zoom} />;
 }
 
-const Z = 2; // scene and sprites share this zoom (maplestory.io frames are rendered at the game's own 1:1 size)
-const FEET_X = 104; // where the character stands (native px); room on the left for projectiles
+/**
+ * Scene and sprites share one pixel grid (maplestory.io frames are the game's own 1:1 size). The canvas is drawn at
+ * 3× and shown at half that, so each game pixel is 1.5 CSS pixels: crisp on high-DPI screens, even elsewhere.
+ */
+const Z = 3, SHOW = 1.5;
+const FEET_X = SCENE_W / 2; // centred; the character faces right (toward the stats)
 const TICK = 60;
 /** frame delays (ms) for an attack with n frames, like the game's swing/stab/shoot timing */
 const attackDelays = (n: number) => (n === 2 ? [350, 450] : n === 3 ? [300, 150, 350] : new Array(n).fill(200));
 const REST = 300; // pause between attacks
 const IDLE_MS = 500;
 
-/** projectile sprites (native pixels), facing left */
+/** projectile sprites (native pixels), drawn facing left and mirrored when shown */
 const SHOTS: Record<NonNullable<CharLook['shot']>, { rows: string[][]; pal: Record<string, string>; speed: number }> = {
   arrow: { speed: 9, pal: { o: '#2a1e1e', w: '#8a5a2c', s: '#e4e9f2', f: '#ffffff' }, rows: [['..s......f.', '.swwwwwwwff', '..s......f.']] },
   star: { speed: 8, pal: { o: '#24182a', s: '#d8dde8', d: '#7c8496' }, rows: [['..o..', '.oso.', 'osdso', '.oso.', '..o..'], ['o...o', '.sos.', '.odo.', '.sos.', 'o...o']] },
@@ -69,23 +73,24 @@ export function CharacterStage() {
       g.drawImage(bg, 0, 0, SCENE_W * Z, SCENE_H * Z);
 
       const fr = sp.frames, look = sp.look;
-      const idleOk = fr.idle.length > 0 && fr.idle.every(Boolean), atkOk = fr.attack.length > 0 && fr.attack.every(Boolean);
-      if (look && idleOk) {
-        // real sprite: idle ping-pongs (0,1,2,1); attack plays through, then a short rest
-        let img = fr.idle[0]!, shotAge = -1;
+      // show the real sprite as soon as any idle frame is in; the attack once all its frames are
+      const idleIn = fr.idle.filter((f): f is ImageBitmap => !!f), atkOk = fr.attack.length > 0 && fr.attack.every(Boolean);
+      if (look && idleIn.length) {
+        // idle ping-pongs (0,1,2,1); attack plays through, then a short rest
+        let img = idleIn[0], shotAge = -1;
         if (fighting && atkOk) {
           const d = attackDelays(fr.attack.length), cycle = d.reduce((a, b) => a + b, 0) + REST, ct = t % cycle;
           let acc = 0, k = 0;
           while (k < d.length && ct >= acc + d[k]) acc += d[k++];
-          img = k < d.length ? fr.attack[k]! : fr.idle[0]!;
+          img = k < d.length ? fr.attack[k]! : idleIn[0];
           const fire = d.slice(0, -1).reduce((a, b) => a + b, 0); // the last frame is the release
           shotAge = ct >= fire ? ct - fire : -1;
         } else {
-          const seq = fr.idle.length > 2 ? [...fr.idle.keys(), ...[...fr.idle.keys()].slice(1, -1).reverse()] : [...fr.idle.keys()];
-          img = fr.idle[seq[Math.floor(t / IDLE_MS) % seq.length]]!;
+          const n = idleIn.length, seq = n > 2 ? [...Array(n).keys(), ...[...Array(n).keys()].slice(1, -1).reverse()] : [...Array(n).keys()];
+          img = idleIn[seq[Math.floor(t / IDLE_MS) % seq.length]];
         }
-        // FeetCenter frames: the image centre is the feet
-        g.drawImage(img, FEET_X * Z - img.width * Z / 2, GROUND_Y * Z - img.height * Z / 2, img.width * Z, img.height * Z);
+        // FeetCenter frames: the image centre is the feet. Maple sprites face left, so mirror them to face right.
+        mirrored(g, () => g.drawImage(img, -img.width * Z / 2, GROUND_Y * Z - img.height * Z / 2, img.width * Z, img.height * Z));
         if (look.shot && shotAge >= 0) drawShot(g, look.shot, shotAge);
       } else {
         // pixel-art stand-in until the real frames are in
@@ -93,7 +98,7 @@ export function CharacterStage() {
         const im = list[Math.floor(t / (fighting ? a.attackMs : a.idleMs)) % list.length];
         px.width = a.w; px.height = a.h;
         px.getContext('2d')!.putImageData(im, 0, 0);
-        g.drawImage(px, (FEET_X - 50) * Z, (GROUND_Y - 50) * Z, a.w * Z, a.h * Z);
+        mirrored(g, () => g.drawImage(px, -50 * Z, (GROUND_Y - 50) * Z, a.w * Z, a.h * Z)); // stand-in's feet are at x=50
       }
     }, TICK);
     return () => clearInterval(id);
@@ -104,20 +109,26 @@ export function CharacterStage() {
     : `Fetching your character from maplestory.io (${sp.done}/${sp.total})${sp.failures ? ' · renderer busy, retrying' : ''}…`;
   return (
     <div className="stage">
-      <canvas ref={ref} width={SCENE_W * Z} height={SCENE_H * Z} />
+      <canvas ref={ref} width={SCENE_W * Z} height={SCENE_H * Z} style={{ width: SCENE_W * SHOW, maxWidth: '100%' }} />
       <div className="stage-cap">{status}</div>
     </div>
   );
 }
 
+/** Draw with x mirrored around the character's feet. */
+function mirrored(g: CanvasRenderingContext2D, draw: () => void) {
+  g.save(); g.translate(FEET_X * Z, 0); g.scale(-1, 1); draw(); g.restore();
+}
+
+/** A projectile flying right from the character's hands (it may leave the box). */
 function drawShot(g: CanvasRenderingContext2D, kind: NonNullable<CharLook['shot']>, age: number) {
-  const s = SHOTS[kind], steps = Math.floor(age / TICK), x0 = FEET_X - 24 - steps * s.speed, y0 = GROUND_Y - 34;
-  if (x0 < -12) return;
-  const rows = s.rows[steps % s.rows.length];
+  const s = SHOTS[kind], steps = Math.floor(age / TICK), rows = s.rows[steps % s.rows.length];
+  const w = rows[0].length, x0 = FEET_X + 24 - w + steps * s.speed, y0 = GROUND_Y - 34;
+  if (x0 > SCENE_W) return;
   rows.forEach((row, j) => [...row].forEach((ch, i) => {
     const col = s.pal[ch];
     if (!col) return;
     g.fillStyle = col;
-    g.fillRect((x0 + i) * Z, (y0 + j) * Z, Z, Z);
+    g.fillRect((x0 + w - 1 - i) * Z, (y0 + j) * Z, Z, Z); // sprites are drawn facing left: mirror them
   }));
 }
