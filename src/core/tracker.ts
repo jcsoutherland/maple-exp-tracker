@@ -12,10 +12,16 @@ export interface TrackerDeps {
   canonMap?: (raw: string) => string | null;
   /** true once the full item list is loaded, so unmatched names can be treated as OCR noise */
   itemsKnown?: () => boolean;
+  /** true once the real map list is loaded: then only names found in it are accepted */
+  mapsKnown?: () => boolean;
   now?: () => number;
 }
 
 interface Bar { buf: number[]; cur: number | null; max: number | null; votes: Record<number, number>; regen: number }
+/** EXP earned where the map name couldn't be read or isn't a real map */
+export const UNKNOWN_MAP = 'Cannot determine';
+const LEGACY_UNKNOWN = 'Undefined';
+
 const newBar = (): Bar => ({ buf: [], cur: null, max: null, votes: {}, regen: 0 });
 
 /**
@@ -37,6 +43,7 @@ export class Tracker {
   // map
   mapCur: string | null = null;
   private mapCand: string | null = null;
+  private mapMiss = 0;
   // bars
   hp = newBar();
   mp = newBar();
@@ -52,7 +59,7 @@ export class Tracker {
     s.events.unshift({ t: elapsed(s, this.now()), type, text });
     if (s.events.length > 60) s.events.length = 60;
   }
-  get mapName() { return this.mapCur || 'Undefined'; }
+  get mapName() { return this.mapCur || UNKNOWN_MAP; }
 
   /** Forget bar/log baselines (after a pause) so changes while paused aren't counted. */
   rebaseline() {
@@ -191,11 +198,28 @@ export class Tracker {
     }
   }
 
-  /** Feed a map-name reading (already cleaned; null = no title visible). */
+  /**
+   * Feed a map-name reading (already cleaned; null = no title visible). Once the real map list is loaded, a name
+   * must match it: text that isn't a real map (OCR noise like "Cette Wonio") twice in a row means we can't tell
+   * where we are, and EXP goes to "Cannot determine" until a real name is read.
+   */
   onMap(raw: string | null) {
     if (!raw) return;
-    const name = this.deps.canonMap?.(raw) ?? raw;
-    const known = Object.keys(this.sess.maps).concat(this.mapCur ? [this.mapCur] : []).find(k => k !== 'Undefined' && sim(k, name) >= 0.8);
+    const canon = this.deps.canonMap?.(raw) ?? null;
+    if (!canon && this.deps.mapsKnown?.()) {
+      if (this.mapCur && this.mapMiss++ >= 1) { this.mapCur = null; this.mapCand = null; this.event('map', `Map: ${UNKNOWN_MAP}`); }
+      return;
+    }
+    this.mapMiss = 0;
+    if (canon) { // a real map name: exact (similar names like "Line 1 <Area 1>" / "Line 2 <Area 1>" are different maps)
+      if (canon !== this.mapCur) { this.mapCur = canon; this.event('map', `Map: ${canon}`); }
+      this.mapCand = null;
+      return;
+    }
+    // free text (map list unavailable): fuzzy-merge with names already seen, new names need two matching reads
+    const name = raw;
+    const known = Object.keys(this.sess.maps).concat(this.mapCur ? [this.mapCur] : [])
+      .find(k => k !== UNKNOWN_MAP && k !== LEGACY_UNKNOWN && sim(k, name) >= 0.8);
     if (known) {
       if (known !== this.mapCur) { this.mapCur = known; this.event('map', `Map: ${known}`); }
       this.mapCand = null;

@@ -45,9 +45,9 @@ export function loadOsms(): Promise<void> {
         const d = await (await fetch(OSMS_BASE + 'items.json')).json() as { items: RawItem[] };
         return d.items.filter(i => i.name).map(i => ({ id: i.id, name: i.name, cat: i.category || '', price: i.stats?.price ?? null, desc: i.description || '' }));
       }),
-      cached('maps', async () => {
+      cached('maps-v2', async () => {
         const d = await (await fetch(OSMS_BASE + 'maps.json')).json() as { regions: { maps: RawMap[] }[] };
-        return d.regions.flatMap(r => r.maps).map(m => ({ id: m.id, name: m.name, street: m.street_name || '' }));
+        return d.regions.flatMap(r => r.maps).map(m => ({ id: m.id, name: m.name.trim(), street: (m.street_name || '').trim() }));
       }),
       cached('monsters', async () => {
         const d = await (await fetch(OSMS_BASE + 'monsters.json')).json() as { monsters: { name: string }[] };
@@ -63,6 +63,7 @@ export function loadOsms(): Promise<void> {
 }
 
 export const osmsReady = () => items !== null;
+export const mapsReady = () => maps !== null && maps.length > 0;
 export const onOsmsLoaded = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 export const itemByName = (name: string) => byName.get(name.toLowerCase()) || null;
 export const allItems = () => items ?? [];
@@ -88,12 +89,24 @@ export function canonItem(raw: string): { name: string; id: number } | null {
   return bs >= need ? { name: best.name, id: best.id } : null;
 }
 
-/** Snap an OCR'd map name to a real map name. */
+const mapKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+let mapKeys: { name: string; key: string; full: string }[] = [];
+
+/**
+ * Snap an OCR'd map name to a real map name (null when it isn't one). Compared without punctuation or case, and
+ * also against "street + name", since the minimap bar reads "Street : Map" and the colon is often lost.
+ */
 export function canonMap(raw: string): string | null {
   if (!maps) return null;
+  if (mapKeys.length !== maps.length) mapKeys = maps.map(m => ({ name: m.name, key: mapKey(m.name), full: mapKey(m.street + m.name) }));
+  const r = mapKey(raw);
+  if (r.length < 3) return null;
   let best: string | null = null, bs = 0;
-  for (const m of maps) { const s = sim(m.name, raw); if (s > bs) { bs = s; best = m.name; } }
-  return bs >= 0.7 ? best : null;
+  for (const m of mapKeys) {
+    const s = Math.max(sim(m.key, r), sim(m.full, r));
+    if (s > bs) { bs = s; best = m.name; }
+  }
+  return bs >= (r.length <= 6 ? 0.85 : 0.75) ? best : null;
 }
 
 const iconUrls = new Map<number, Promise<string | null>>();

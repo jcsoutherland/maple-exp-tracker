@@ -38,7 +38,7 @@ const out = await page.evaluate(async (from, to, step, name) => {
   if (!cuts.length) return { found, samples: L.sampleCount, mask: L.maskReady };
   const area = c => { let n = 0; for (let i = 3; i < c.data.length; i += 4) if (c.data[i] > 128) n++; return n; };
   const pick = cuts.map(c => ({ c, a: area(c) })).sort((x, y) => x.a - y.a)[cuts.length >> 1].c;
-  const base = px.pixelize(pick, 48);
+  const base = px.pixelize(pick);
   const fams = ['bow', 'sword', 'wand', 'stars', 'gun', 'fist'], S = 3;
   const anims = fams.map(fm => px.buildAnimations(base, fm, 'left'));
   const cols = 9, fw = anims[0].w, fh = anims[0].h;
@@ -48,8 +48,8 @@ const out = await page.evaluate(async (from, to, step, name) => {
   anims[0].idle.forEach((im, i) => put(im, i * fw * S, 0));
   anims.forEach((an, r) => an.attack.forEach((im, i) => put(im, i * fw * S, (r + 1) * fh * S)));
   g.fillStyle = '#fff'; g.font = '14px sans-serif'; g.fillText('idle', 4, 16); fams.forEach((fm, r) => g.fillText(fm, 4, (r + 1) * fh * S + 16));
-  return { found, samples: L.sampleCount, mask: L.maskReady, cut: sheet.toDataURL(), raw: px.imageDataToUrl(base) };
+  return { found, samples: L.sampleCount, mask: L.maskReady, cut: sheet.toDataURL(), raw: px.imageDataToUrl(base), src: px.imageDataToUrl(pick), cuts: cuts.slice(0, 8).map(px.imageDataToUrl) };
 }, +from, +to, +step, name);
-console.log(JSON.stringify({ ...out, cut: !!out.cut, raw: !!out.raw }));
-if (out.cut) { fs.writeFileSync(prefix + '_sheet.png', Buffer.from(out.cut.split(',')[1], 'base64')); fs.writeFileSync(prefix + '_base.png', Buffer.from(out.raw.split(',')[1], 'base64')); }
+console.log(JSON.stringify({ ...out, cut: !!out.cut, raw: !!out.raw, src: !!out.src, cuts: out.cuts?.length }));
+if (out.cut) { fs.writeFileSync(prefix + '_sheet.png', Buffer.from(out.cut.split(',')[1], 'base64')); fs.writeFileSync(prefix + '_base.png', Buffer.from(out.raw.split(',')[1], 'base64')); fs.writeFileSync(prefix + '_src.png', Buffer.from(out.src.split(',')[1], 'base64')); out.cuts.forEach((u, i) => fs.writeFileSync(prefix + '_cut' + i + '.png', Buffer.from(u.split(',')[1], 'base64'))); }
 await browser.close(); await server.close();

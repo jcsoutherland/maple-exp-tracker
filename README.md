@@ -5,7 +5,7 @@ A lightweight, browser-based overlay for **MapleStory Classic World**. It watche
 - **EXP gained** from the EXP bar, which stays exact even when individual reads fail. Also shows EXP/hr, last-10-minute rate, and time to level.
 - **EXP lost** from deaths without a safety charm, tracked separately from gains.
 - **Mesos and item drops** from the pickup log, with names matched to the real item list, plus icons and NPC prices.
-- **EXP per map.** Maps under 1,000 EXP are dropped when a session is saved, and unreadable map names count as "Undefined".
+- **EXP per map.** Maps under 1,000 EXP are dropped when a session is saved, and map names that can't be read or aren't real maps (checked against the OSMS map list) count as "Cannot determine".
 - **HP/MP used**, converted to potion counts and cost (Meat, Lemon, Red/Orange/White/Blue Potion, Mana Elixir), plus net mesos.
 - **History per character**, with a character snapshot, copyable summaries, and JSON export/import.
 - **Pop-out overlay** using Document Picture-in-Picture, which stays on top of the game.

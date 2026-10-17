@@ -32,6 +32,8 @@ export interface CharInfo {
   /** pixel-art avatar (PNG data URL) made from one idle frame, and which way it faces */
   pixel?: string;
   facing?: 'left' | 'right';
+  /** avatar format version */
+  pixelV?: number;
 }
 export const loadChars = () => read<Record<string, CharInfo>>(K.chars, {});
 export const saveChars = (c: Record<string, CharInfo>) => write(K.chars, c);

@@ -60,6 +60,21 @@ describe('EXP bar', () => {
     t.onExp(R(1000)); t.onExp(R(1500));
     expect(s.maps['Map A']).toBe(500);
   });
+  it('only accepts real map names once the map list is loaded', () => {
+    const s = newSession('Flynny', 'Hunter', 37, 0);
+    const real = ['Hunting Ground I', 'Pig Beach'];
+    const t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => 0, mapsKnown: () => true, canonMap: raw => real.find(m => m.toLowerCase() === raw.toLowerCase()) ?? null });
+    t.onMap('Cette Wonio'); // OCR noise at the start: not a map
+    t.onExp(R(1000)); t.onExp(R(1300));
+    expect(t.mapName).toBe('Cannot determine');
+    t.onMap('pig beach');
+    expect(t.mapName).toBe('Pig Beach');
+    t.onMap('Cette Wonio'); // one bad read keeps the map…
+    expect(t.mapName).toBe('Pig Beach');
+    t.onMap('Cette Wonio'); // …two in a row mean we can't tell any more
+    expect(t.mapName).toBe('Cannot determine');
+    expect(s.maps['Cannot determine']).toBe(300);
+  });
 });
 
 describe('HP/MP bars', () => {

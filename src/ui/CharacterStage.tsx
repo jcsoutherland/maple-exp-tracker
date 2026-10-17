@@ -5,6 +5,8 @@ import { useCtrl } from './hooks';
  * The character as pixel art: a breathing idle loop, or the class attack (bow / sword / wand / stars / gun / punch)
  * while EXP or loot is coming in. Until the avatar exists, shows the live capture while it's being made.
  */
+const ZOOM = 3;
+
 export function CharacterStage() {
   const c = useCtrl();
   const ref = useRef<HTMLCanvasElement>(null);
@@ -16,15 +18,18 @@ export function CharacterStage() {
     const id = window.setInterval(() => {
       const cv = ref.current;
       if (!cv) return;
+      const frames = c.avatarFrames();
+      // the avatar is drawn at a whole-number zoom (crisp pixels); CSS then fits the canvas to the panel
+      const w = frames.length ? frames[0].width * ZOOM : 300, h = frames.length ? frames[0].height * ZOOM : 190;
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
       const g = cv.getContext('2d')!;
       g.imageSmoothingEnabled = false;
       g.clearRect(0, 0, cv.width, cv.height);
-      const frames = c.avatarFrames();
       if (frames.length) {
-        const fr = frames[i++ % frames.length], sc = Math.max(1, Math.floor(Math.min(cv.width / fr.width, cv.height / fr.height)));
+        const fr = frames[i++ % frames.length];
         scratch.width = fr.width; scratch.height = fr.height;
         scratch.getContext('2d')!.putImageData(fr, 0, 0);
-        g.drawImage(scratch, Math.round((cv.width - fr.width * sc) / 2), cv.height - fr.height * sc, fr.width * sc, fr.height * sc);
+        g.drawImage(scratch, 0, 0, fr.width * ZOOM, fr.height * ZOOM);
         return;
       }
       // still capturing: show the live crop softly
@@ -48,13 +53,10 @@ export function CharacterStage() {
 
   return (
     <div className="stage">
-      <canvas ref={ref} width={300} height={190} />
+      <canvas ref={ref} width={300} height={190} className={a ? 'avatar' : ''} />
       <div className="stage-cap">
         {caption}
-        {a && <>
-          <button className="sm" title="Make a new pixel character from the next good frames" onClick={() => c.retakeAvatar()}>↻ Retake</button>
-          <button className="sm" title="Flip which way the character faces (attacks fire that way)" onClick={() => c.setFacing(a.facing === 'left' ? 'right' : 'left')}>⇄ Flip</button>
-        </>}
+        {a && <button className="sm" title="Make a new pixel character from the next good frames" onClick={() => c.retakeAvatar()}>↻ Retake</button>}
       </div>
     </div>
   );

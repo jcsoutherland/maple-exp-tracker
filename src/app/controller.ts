@@ -2,7 +2,7 @@ import { Capture } from '../core/capture';
 import { buildAnimations, classFamily, imageDataToUrl, pixelize, urlToImageData, type Animations, type Facing } from '../core/pixelart';
 import { findTagCandidates, grabBox, spriteBox, SpriteLearner, tagOcrCanvas, TagTracker, toDataUrl, type Box } from '../core/character';
 import { REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
-import { canonItem, canonMap, loadOsms, monsterNames, osmsReady } from '../core/data/osms';
+import { canonItem, canonMap, loadOsms, mapsReady, monsterNames, osmsReady } from '../core/data/osms';
 import { logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
@@ -24,6 +24,15 @@ export interface OcrTestRow { key: RegionKey | 'log'; label: string; color: stri
  *  - name/class once per session; level at session start and after each detected level-up
  * The UI subscribes for change notifications; nothing here touches React.
  */
+/** bump when the avatar format changes so saved avatars are remade */
+const PIXEL_V = 2;
+
+/** Map title text: cleaned, or — when cleaning rejects it (a stray symbol like "{ine 2") — raw if it still matches a real map. */
+const mapText = (raw: string) => {
+  const last = (raw.split('\n').pop() || '').trim();
+  return cleanMap(raw) ?? (canonMap(last) ? last : null);
+};
+
 export class Controller {
   readonly capture = new Capture();
   engine: OcrEngine = new TesseractEngine();
@@ -107,7 +116,7 @@ export class Controller {
   private makeTracker(s: Session) {
     return new Tracker(s, {
       hpMin: () => this.settings.hpMin, mpMin: () => this.settings.mpMin,
-      canonItem: raw => canonItem(raw), canonMap: raw => canonMap(raw), itemsKnown: osmsReady,
+      canonItem: raw => canonItem(raw), canonMap: raw => canonMap(raw), itemsKnown: osmsReady, mapsKnown: mapsReady,
     });
   }
   private get canRun() { return !!this.sess && !this.sess.paused && this.capture.ready && this.ocrState === 'ready'; }
@@ -313,16 +322,18 @@ export class Controller {
     const v = this.capture.video;
     const sig = regionSignature(v, this.regions.map, this.scratch.sig) ^ regionSignature(v, this.regions.mapBar, this.scratch.sig);
     this.lastMapRead = Date.now();
-    if (!force && sig === this.mapSig) return; // title pixels unchanged: same map
+    // title pixels unchanged: same map — unless we couldn't tell which map it is, then keep trying
+    if (!force && sig === this.mapSig && this.tracker?.mapCur) return;
     this.busy.map = true;
     try {
       this.mapSig = sig;
       this.mapExpAt = this.sess?.exp ?? 0;
       // minimap title (two lines: street, map) or, when the minimap is collapsed, its bar ('Street : Map')
       const [full, bar] = await Promise.all([this.read('map', v), this.read('mapBar', v)]);
-      const fromBar = cleanMap((bar.split(':').pop() || '').trim());
-      const fromFull = cleanMap(full);
+      const fromBar = mapText((bar.split(':').pop() || '').trim()) ?? mapText(bar);
+      const fromFull = mapText(full);
       const pick = [fromFull, fromBar].find(n => n && canonMap(n)) ?? fromFull ?? fromBar;
+      if (pick && !canonMap(pick)) console.debug('map name not in the database:', pick);
       this.tracker?.onMap(pick);
       this.notify();
     } catch (e) { console.error(e); } finally { this.busy.map = false; }
@@ -384,7 +395,7 @@ export class Controller {
       // one good idle frame → pixel-art avatar (kept across sessions until 'Retake')
       if (this.sprite.maskReady && (!this.avatar || this.avatar.name !== name) && !this.avatarBusy) {
         this.avatarBusy = true;
-        try { if (store.loadChars()[name]?.pixel) await this.loadAvatar(name); else this.captureAvatar(name); } finally { this.avatarBusy = false; }
+        try { if (store.loadChars()[name]?.pixelV === PIXEL_V) await this.loadAvatar(name); else this.captureAvatar(name); } finally { this.avatarBusy = false; }
       }
     } catch (e) { console.error(e); } finally { this.busySprite = false; }
   }
@@ -439,7 +450,8 @@ export class Controller {
   /** Load the saved avatar for a character (if any) and build its animations for the current class. */
   async loadAvatar(name = this.identity.name) {
     const ch = store.loadChars()[name];
-    if (!name || !ch?.pixel) { this.avatar = null; this.notify(); return; }
+    // avatars from older versions (48px, no rig) are remade from the capture
+    if (!name || !ch?.pixel || ch.pixelV !== PIXEL_V) { this.avatar = null; this.notify(); return; }
     const base = await urlToImageData(ch.pixel), facing = ch.facing ?? 'left';
     this.avatar = { name, base, facing, anim: buildAnimations(base, classFamily(this.identity.cls || ch.cls || ''), facing) };
     this.notify();
@@ -453,10 +465,10 @@ export class Controller {
     // pick the frame whose silhouette size is the median: avoids frames where a stray patch of scenery got in
     const area = (c: ImageData) => { let n = 0; for (let i = 3; i < c.data.length; i += 4) if (c.data[i] > 128) n++; return n; };
     const sorted = cuts.map(c => ({ c, a: area(c) })).sort((x, y) => x.a - y.a);
-    const base = pixelize(sorted[sorted.length >> 1].c, 48);
+    const base = pixelize(sorted[sorted.length >> 1].c);
     const ch = store.loadChars();
     const facing = ch[name]?.facing ?? 'left';
-    ch[name] = { ...ch[name], pixel: imageDataToUrl(base), snap: imageDataToUrl(base) };
+    ch[name] = { ...ch[name], pixel: imageDataToUrl(base), pixelV: PIXEL_V, snap: imageDataToUrl(base) };
     store.saveChars(ch);
     this.avatar = { name, base, facing, anim: buildAnimations(base, classFamily(this.identity.cls), facing) };
     this.historyVersion++;
@@ -468,17 +480,6 @@ export class Controller {
     const name = this.identity.name, ch = store.loadChars();
     if (ch[name]) { delete ch[name].pixel; store.saveChars(ch); }
     this.avatar = null;
-    this.notify();
-  }
-
-  /** Which way the character faces in the picture (attacks fire that way). */
-  setFacing(facing: Facing) {
-    const a = this.avatar;
-    if (!a) return;
-    const ch = store.loadChars();
-    ch[a.name] = { ...ch[a.name], facing };
-    store.saveChars(ch);
-    this.avatar = { ...a, facing, anim: buildAnimations(a.base, classFamily(this.identity.cls), facing) };
     this.notify();
   }
 
@@ -532,7 +533,7 @@ export class Controller {
         case 'hp': case 'mp': { const v = parsePair(raw); parsed = v ? v.join(' / ') : '✗'; break; }
         case 'exp': { const v = parseExp(raw); parsed = v ? `${v.exp.toLocaleString()} @ ${v.pct}%` : '✗'; break; }
         case 'level': parsed = String(parseLevel(raw) ?? '✗'); break;
-        case 'map': case 'mapBar': { const c = cleanMap(key === 'mapBar' ? (raw.split(':').pop() || '').trim() : raw); parsed = c ? (canonMap(c) ? `${canonMap(c)} ✓` : c) : '✗ (→ Undefined)'; break; }
+        case 'map': case 'mapBar': { const c = mapText(key === 'mapBar' ? (raw.split(':').pop() || '').trim() : raw) ?? (key === 'mapBar' ? mapText(raw) : null); parsed = c ? (canonMap(c) ? `${canonMap(c)} ✓` : `${c} ✗ not a known map`) : '✗ (→ Cannot determine)'; break; }
         case 'cls': parsed = matchClass(raw) ?? '✗'; break;
         default: parsed = cleanName(raw) ?? '✗';
       }
