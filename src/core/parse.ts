@@ -1,4 +1,4 @@
-import { CLASSES } from './config';
+import { CLASSES, MAX_LEVEL } from './config';
 import { sim } from './util';
 
 /** "1284/1303" → [1284, 1303]. Strips junk leading digits (e.g. "[" read as 1) while cur > max. */
@@ -27,7 +27,7 @@ export function parseExp(t: string): ExpReading | null {
 
 export const parseLevel = (t: string) => {
   const n = parseInt((t || '').replace(/\D/g, ''), 10);
-  return n >= 1 && n <= 250 ? n : null;
+  return n >= 1 && n <= MAX_LEVEL ? n : null;
 };
 
 /** Map names are words; reject OCR noise from minimap art (e.g. "l- - I") when the minimap has no title. */

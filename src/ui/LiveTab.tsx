@@ -1,4 +1,4 @@
-import { CLASS_GROUPS, CLASSES } from '../core/config';
+import { CLASS_GROUPS, CLASSES, MAX_LEVEL } from '../core/config';
 import { useMemo } from 'react';
 import { MAP_MIN_EXP, potCost } from '../core/session';
 import { fmtDur, fmtHM, fmtK, fmtN } from '../core/util';
@@ -39,10 +39,10 @@ export function LiveTab() {
         <select value={id.cls} onChange={e => c.setIdentity({ cls: e.target.value })}>
           {!id.cls && <option value="">Choose…</option>}
           {id.cls && !CLASSES.includes(id.cls) && <option value={id.cls}>{id.cls}</option>}
-          {CLASS_GROUPS.map(([branch, jobs]) => <optgroup key={branch} label={branch}>{jobs.map(j => <option key={j} value={j}>{j}</option>)}</optgroup>)}
+          {CLASS_GROUPS.map(([branch, jobs]) => <optgroup key={branch} label={branch}>{jobs.map(([j, lv]) => <option key={j} value={j}>{lv >= 70 ? '  ↳ ' : ''}{j} (Lv {lv})</option>)}</optgroup>)}
         </select>
         <span className="mut">Lv</span>
-        <input className="lv" type="number" min={1} max={250} value={id.level ?? ''} onChange={e => c.setIdentity({ level: +e.target.value || null })} />
+        <input className="lv" type="number" min={1} max={MAX_LEVEL} value={id.level ?? ''} onChange={e => c.setIdentity({ level: +e.target.value || null })} />
         <span className="mut">Gender</span>
         <select value={id.gender ?? 0} title="Gender of your rolled character (changing it rolls a new look)" onChange={e => c.setIdentity({ gender: +e.target.value as 0 | 1 })}>
           <option value={0}>Male</option>

@@ -61,14 +61,18 @@ export const DEFAULT_SETTINGS: Settings = {
   mpOrder: ['Lemon', 'Blue Potion', 'Mana Elixir'],
 };
 
-/** MapleStory Classic jobs by branch (Classic has no Pirates), for the class picker */
-export const CLASS_GROUPS: [string, string[]][] = [
-  ['Beginner', ['Beginner']],
-  ['Warrior', ['Warrior', 'Fighter', 'Page', 'Spearman', 'Crusader', 'White Knight', 'Dragon Knight', 'Hero', 'Paladin', 'Dark Knight']],
-  ['Magician', ['Magician', 'Wizard (Fire,Poison)', 'Wizard (Ice,Lightning)', 'Cleric', 'Mage (Fire,Poison)', 'Mage (Ice,Lightning)', 'Priest',
-    'Arch Mage (Fire,Poison)', 'Arch Mage (Ice,Lightning)', 'Bishop']],
-  ['Bowman', ['Bowman', 'Hunter', 'Crossbowman', 'Ranger', 'Sniper', 'Bowmaster', 'Marksman']],
-  ['Thief', ['Thief', 'Assassin', 'Bandit', 'Hermit', 'Chief Bandit', 'Night Lord', 'Shadower']],
+/**
+ * MapleStory Classic jobs (max level 100, so up to 3rd job) with the level each advancement is made at, grouped by
+ * branch and listed path by path (Hunter → Ranger, Crossbowman → Sniper, …). Classic has no Pirates.
+ */
+export const CLASS_GROUPS: [string, [string, number][]][] = [
+  ['Beginner', [['Beginner', 1]]],
+  ['Warrior', [['Warrior', 10], ['Fighter', 30], ['Crusader', 70], ['Page', 30], ['White Knight', 70], ['Spearman', 30], ['Dragon Knight', 70]]],
+  ['Magician', [['Magician', 8], ['Wizard (Fire,Poison)', 30], ['Mage (Fire,Poison)', 70], ['Wizard (Ice,Lightning)', 30], ['Mage (Ice,Lightning)', 70],
+    ['Cleric', 30], ['Priest', 70]]],
+  ['Bowman', [['Bowman', 10], ['Hunter', 30], ['Ranger', 70], ['Crossbowman', 30], ['Sniper', 70]]],
+  ['Thief', [['Thief', 10], ['Assassin', 30], ['Hermit', 70], ['Bandit', 30], ['Chief Bandit', 70]]],
 ];
-/** every job name the status bar can show (screen reading snaps to these) */
-export const CLASSES = CLASS_GROUPS.flatMap(([, jobs]) => jobs);
+export const CLASSES = CLASS_GROUPS.flatMap(([, jobs]) => jobs.map(([j]) => j));
+/** current level cap */
+export const MAX_LEVEL = 100;
