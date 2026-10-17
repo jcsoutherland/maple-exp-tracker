@@ -23,7 +23,13 @@ export const saveRegions = (r: Record<RegionKey, Region>) => write(K.regions, r)
 export const loadSessions = () => read<SavedSession[]>(K.sessions, []);
 export const saveSessions = (s: SavedSession[]) => write(K.sessions, s);
 
-export interface CharInfo { cls?: string; level?: number | null; last?: number; snap?: string }
+export interface CharInfo {
+  cls?: string; level?: number | null; last?: number;
+  /** picture shown in History (taken automatically at session start) */
+  snap?: string;
+  /** short animation loops captured during the last session */
+  sprite?: { idle: string[]; attack: string[]; cutout: boolean };
+}
 export const loadChars = () => read<Record<string, CharInfo>>(K.chars, {});
 export const saveChars = (c: Record<string, CharInfo>) => write(K.chars, c);
 

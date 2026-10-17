@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { lineAmount, lineKind, parseExp, parsePair, cleanMap } from './parse';
 import { newSession } from './session';
 import { Tracker } from './tracker';
+import { parseRecovery, potionsUsed } from './potions';
 
 const make = () => {
   const s = newSession('Flynny', 'Hunter', 37, 0);
@@ -70,6 +71,21 @@ describe('HP/MP bars', () => {
     expect(t.hp.max).toBe(1303);
     expect(s.hp.used).toBe(303);
     expect(s.hp.rec).toBe(160);
+    expect(s.hp.jumps).toEqual([160]);
+  });
+});
+
+describe('potions', () => {
+  it('parses recovery amounts from item descriptions', () => {
+    expect(parseRecovery('Tasty-looking meat.\nRestores around 160 HP.')).toEqual({ hp: 160, mp: 0, hpPct: 0, mpPct: 0 });
+    expect(parseRecovery('A very ripe watermelon.\nRestores about 800 HP and 800 MP.')).toEqual({ hp: 800, mp: 800, hpPct: 0, mpPct: 0 });
+    expect(parseRecovery('A legendary potion.\nRestores 35% of your HP and MP, but')).toEqual({ hp: 0, mp: 0, hpPct: 0.35, mpPct: 0.35 });
+    expect(parseRecovery('A wing cut off of a Stirge.')).toBeNull();
+  });
+  it('counts potions consumed from recovery jumps', () => {
+    expect(potionsUsed([160, 150, 320], 160)).toBe(4); // the 320 jump is two meats between reads
+    expect(potionsUsed([90], 160)).toBe(1); // a jump is at least one potion (topped off near max)
+    expect(potionsUsed([45, 60], 160)).toBe(0); // under half a potion: regen burst / read noise
   });
 });
 

@@ -22,11 +22,7 @@ export function App() {
     try { toast((await c.shareScreen()) ? 'Capturing ✓' : 'No frames received from the shared window yet'); }
     catch (e) { const err = e as DOMException; toast(err.name === 'NotAllowedError' ? 'Capture cancelled' : `Capture failed: ${err.name} ${err.message}`); }
   };
-  const stop = () => {
-    const out = c.stop();
-    toast('Session saved to History');
-    if (out && c.settings.askSnap && cap.ready) setSnapFor(out.char);
-  };
+  const stop = () => { c.stop(); toast('Session saved to History'); };
 
   return (
     <>

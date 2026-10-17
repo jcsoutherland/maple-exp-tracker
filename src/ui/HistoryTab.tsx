@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { summaryText, type SavedSession } from '../core/session';
 import * as store from '../core/storage';
 import { fmtHM, fmtK, fmtN } from '../core/util';
@@ -48,7 +48,7 @@ export function HistoryTab({ onSnapshot }: { onSnapshot: (name: string) => void 
       </div>
       <div className="card">
         <div className="charhead">
-          {ch.snap ? <img className="snap" src={ch.snap} alt="" /> : <div className="snap mut" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>no<br />snapshot</div>}
+          <SpriteLoop frames={ch.sprite?.idle?.length ? ch.sprite.idle : ch.snap ? [ch.snap] : []} />
           <div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{cur}</div>
             <div className="mut">{ch.cls || list[0].cls} · Lv {ch.level ?? list[0].level ?? '?'}</div>
@@ -87,7 +87,7 @@ function SessionCard({ x, onDelete }: { x: SavedSession; onDelete: () => void })
             {x.deaths > 0 && <><br /><span style={{ color: 'var(--bad)' }}>EXP lost: -{fmtN(x.expLost)}</span> ({x.deaths} death{x.deaths > 1 ? 's' : ''}) · net {fmtN(x.exp - x.expLost)} EXP</>}
           </div>
         </div>
-        <div><DropTable drops={x.drops} /></div>
+        <div><DropTable drops={x.drops} compact /></div>
       </div>
       <div className="row" style={{ marginTop: 8 }}>
         <button onClick={() => navigator.clipboard.writeText(summaryText(x)).then(() => toast('Copied'))}>Copy summary</button>
@@ -95,4 +95,16 @@ function SessionCard({ x, onDelete }: { x: SavedSession; onDelete: () => void })
       </div>
     </details>
   );
+}
+
+/** The character's saved idle loop (or snapshot), animated. */
+function SpriteLoop({ frames }: { frames: string[] }) {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    if (frames.length < 2) return;
+    const id = window.setInterval(() => setI(n => n + 1), 220);
+    return () => clearInterval(id);
+  }, [frames.length]);
+  if (!frames.length) return <div className="snap mut" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>no picture yet</div>;
+  return <img className="snap" src={frames[i % frames.length]} alt="" />;
 }

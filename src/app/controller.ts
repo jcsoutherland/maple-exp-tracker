@@ -1,6 +1,7 @@
 import { Capture } from '../core/capture';
+import { findTagCandidates, grabBox, spriteBox, SpriteLearner, tagOcrCanvas, TagTracker, toDataUrl, type Box } from '../core/character';
 import { REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
-import { canonItem, canonMap, loadOsms, osmsReady } from '../core/data/osms';
+import { canonItem, canonMap, loadOsms, monsterNames, osmsReady } from '../core/data/osms';
 import { logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
@@ -132,6 +133,7 @@ export class Controller {
     this.sess = newSession(name, cls, level);
     this.tracker = this.makeTracker(this.sess);
     this.tracker.event('info', 'Session started');
+    this.snapSaved = 'none'; this.spriteState = 'searching';
     this.resetWatchers();
     this.startTimers();
     this.notify();
@@ -153,6 +155,8 @@ export class Controller {
     if (!s) return null;
     this.ticker.stop();
     s.char = this.identity.name || s.char; s.cls = this.identity.cls || s.cls;
+    this.saveSpriteFrames(s.char);
+    this.spriteState = 'off';
     const out = finalize(s, this.settings);
     store.saveSessions([...store.loadSessions(), out]);
     const ch = store.loadChars();
@@ -180,6 +184,7 @@ export class Controller {
       bars: [sc.barsMs, () => this.tickBars()],
       exp: [sc.expMs, () => this.tickExp()],
       map: [Math.min(sc.mapMs, 2000), () => this.tickMap(false)],
+      sprite: [200, () => this.tickSprite()],
       ui: [1000, () => { this.persist(); this.notify(); }],
     });
   }
@@ -218,7 +223,7 @@ export class Controller {
         ready.push(res);
       }
       this.counted = this.counted.filter(c => now - c.t < 6000);
-      if (ready.length) { this.tracker?.onLogLines(ready); this.notify(); }
+      if (ready.length) { this.tracker?.onLogLines(ready); this.markActive(); this.notify(); }
     } catch (e) { console.error(e); } finally { this.busy.log = false; this.stats.lastTickMs = performance.now() - t0; }
   }
 
@@ -270,15 +275,18 @@ export class Controller {
       const r = parseExp(await this.read('exp', this.capture.video));
       const s = this.sess, t = this.tracker;
       if (!r || !s || !t) return;
-      if (t.onExp(r)) { // level-up: confirm with the level digits
+      const before = s.exp;
+      const leveled = t.onExp(r);
+      if (s.exp > before) this.markActive();
+      if (leveled) { // level-up: confirm with the level digits
         this.identity.level = s.level;
         this.read('level', this.capture.video).then(x => { const l = parseLevel(x); if (l && s.level && Math.abs(l - s.level) <= 1) s.level = this.identity.level = l; });
       }
       const el = elapsed(s);
       this.recent.push([el, s.exp]);
       while (this.recent.length && el - this.recent[0][0] > 600000) this.recent.shift();
-      if (el - this.lastTimeline >= 60000) {
-        s.timeline.push([Math.round(el / 60000), s.exp]);
+      if (el - this.lastTimeline >= 30000) {
+        s.timeline.push([+(el / 60000).toFixed(2), s.exp, s.mesos]);
         this.lastTimeline = el;
         if (s.timeline.length > 720) s.timeline = s.timeline.filter((_, i) => i % 2 === 0);
       }
@@ -291,14 +299,20 @@ export class Controller {
   private async tickMap(force: boolean) {
     if (!this.canRun || this.busy.map) return;
     if (!force && Date.now() - this.lastMapRead < this.settings.schedule.mapMs) return;
-    const v = this.capture.video, sig = regionSignature(v, this.regions.map, this.scratch.sig);
+    const v = this.capture.video;
+    const sig = regionSignature(v, this.regions.map, this.scratch.sig) ^ regionSignature(v, this.regions.mapBar, this.scratch.sig);
     this.lastMapRead = Date.now();
     if (!force && sig === this.mapSig) return; // title pixels unchanged: same map
     this.busy.map = true;
     try {
       this.mapSig = sig;
       this.mapExpAt = this.sess?.exp ?? 0;
-      this.tracker?.onMap(cleanMap(await this.read('map', v)));
+      // minimap title (two lines: street, map) or, when the minimap is collapsed, its bar ('Street : Map')
+      const [full, bar] = await Promise.all([this.read('map', v), this.read('mapBar', v)]);
+      const fromBar = cleanMap((bar.split(':').pop() || '').trim());
+      const fromFull = cleanMap(full);
+      const pick = [fromFull, fromBar].find(n => n && canonMap(n)) ?? fromFull ?? fromBar;
+      this.tracker?.onMap(pick);
       this.notify();
     } catch (e) { console.error(e); } finally { this.busy.map = false; }
   }
@@ -313,6 +327,117 @@ export class Controller {
       if (b[0] - a[0] >= 60000) r10 = (b[1] - a[1]) / ((b[0] - a[0]) / 3.6e6);
     }
     return { el, hr, r10 };
+  }
+
+  // ---------- character sprite ----------
+  readonly sprite = new SpriteLearner();
+  /** 'searching' until the name tag is found, then 'tracking' (or 'lost' while it's off screen) */
+  spriteState: 'off' | 'searching' | 'tracking' | 'lost' = 'off';
+  private tag: TagTracker | null = null;
+  private tagMisses = 0;
+  /** pending confirmation of a newly found tag (null = confirmed or none) */
+  private tagCheck: { ok: number; tries: number; next: number } | null = null;
+  private lastAcquire = 0;
+  private lastActive = 0;
+  private snapSaved: 'none' | 'raw' | 'cutout' = 'none';
+  private busySprite = false;
+  private spriteScratch = document.createElement('canvas');
+
+  /** Mark "fighting" (EXP or loot just came in) for the sprite's attack animation. */
+  private markActive() { this.lastActive = Date.now(); }
+  get fighting() { return Date.now() - this.lastActive < 4000; }
+
+  private async tickSprite() {
+    const name = this.identity.name || this.sess?.char;
+    if (!this.canRun || this.busySprite || !name || name === 'Unknown') return;
+    this.busySprite = true;
+    try {
+      const v = this.capture.video, now = Date.now();
+      let box = this.tag ? this.tag.locate(v) : null;
+      if (box) this.tagMisses = 0;
+      else if (this.tag) this.tagMisses++;
+      if (!box && now - this.lastAcquire > 3000) {
+        this.lastAcquire = now;
+        box = this.tag ? this.tag.locateAnywhere(v) : await this.acquireTag(v, name);
+        if (box) this.tagMisses = 0;
+      }
+      if (box && this.tagCheck) { await this.confirmTag(v, box, name); if (this.tagCheck || !this.tag) box = null; }
+      this.spriteState = box ? 'tracking' : this.tag && !this.tagCheck ? 'lost' : 'searching';
+      if (!box) return;
+      const sb = spriteBox(v, box.x + box.w / 2, box.y);
+      if (!sb) return;
+      const hadMask = this.sprite.maskReady;
+      this.sprite.add(grabBox(v, sb, this.spriteScratch), { x: box.x, y: box.y }, this.fighting, now);
+      // automatic snapshot: the first crop at session start, replaced by a cut-out once the background is learned
+      if (this.snapSaved === 'none' || (this.snapSaved === 'raw' && !hadMask && this.sprite.maskReady)) this.saveSnapshot(name);
+    } catch (e) { console.error(e); } finally { this.busySprite = false; }
+  }
+
+  /** How well OCR'd tag text matches the player's name, beyond how well it matches any monster's name. */
+  private nameScore(text: string, name: string) {
+    const txt = text.toLowerCase().replace(/[^a-z0-9]/g, ''), want = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const best = (w: string) => {
+      let s = 0, at = 0;
+      for (let i = 0; i <= Math.max(0, txt.length - w.length + 1); i++)
+        for (const L of [w.length - 1, w.length, w.length + 1]) { const v = sim(txt.slice(i, i + L), w); if (v > s) { s = v; at = i; } }
+      return { s, at };
+    };
+    const me = best(want);
+    const mob = Math.max(0, ...monsterNames().filter(m => m.length >= 4).map(m => best(m.toLowerCase().replace(/[^a-z0-9]/g, '')).s));
+    // monster labels ("Black Pig" read as "Black Finny") must not pass for the player's tag
+    return { ok: txt.length >= 3 && me.s >= 0.6 && me.s >= mob + 0.1, at: me.at, len: txt.length, want: want.length };
+  }
+
+  /** Find the player's name tag: OCR tag-like boxes and pick the one containing the character's name. */
+  private async acquireTag(v: FrameSource, name: string): Promise<Box | null> {
+    for (const b of findTagCandidates(v, this.spriteScratch, 8)) {
+      this.stats.ocrCalls++;
+      const m = this.nameScore(await this.engine.read(tagOcrCanvas(v, b), 'line'), name);
+      if (!m.ok) continue;
+      // keep only the name's part of the box (it can merge with a monster's label) so the template follows the player
+      const x0 = b.x + Math.round(b.w * m.at / m.len), w = Math.min(b.w, Math.round(b.w * m.want / m.len) + 4);
+      const tagBox = { x: Math.max(0, x0 - 2), y: b.y, w, h: b.h };
+      this.tag = new TagTracker(tagBox, v);
+      this.tagCheck = { ok: 0, tries: 0, next: Date.now() + 600 };
+      return tagBox;
+    }
+    return null;
+  }
+
+  /** A new tag must read as the player's name once more before frames are trusted (OCR at this size is noisy). */
+  private async confirmTag(v: FrameSource, box: Box, name: string) {
+    const ck = this.tagCheck!;
+    if (Date.now() < ck.next) return;
+    ck.next = Date.now() + 700; ck.tries++;
+    this.stats.ocrCalls++;
+    if (this.nameScore(await this.engine.read(tagOcrCanvas(v, box), 'line'), name).ok) ck.ok++;
+    if (ck.ok >= 1) this.tagCheck = null;
+    else if (ck.tries >= 4) { this.tag = null; this.tagCheck = null; } // wasn't us
+  }
+
+  /** Frames for the UI: rendered with the cut-out (or a vignette), the attack loop while fighting. */
+  spriteFrames(): ImageData[] {
+    const list = this.fighting && this.sprite.attack.length >= 2 ? this.sprite.attack : this.sprite.idle.length ? this.sprite.idle : this.sprite.attack;
+    return list.map(f => this.sprite.render(f));
+  }
+
+  private saveSnapshot(name: string) {
+    const fr = this.sprite.idle[this.sprite.idle.length - 1] || this.sprite.attack[this.sprite.attack.length - 1];
+    if (!fr) return;
+    const ch = store.loadChars();
+    ch[name] = { ...ch[name], snap: toDataUrl(this.sprite.render(fr)) };
+    store.saveChars(ch);
+    this.snapSaved = this.sprite.maskReady ? 'cutout' : 'raw';
+    this.historyVersion++;
+  }
+
+  /** Keep a few animation frames with the character for History. */
+  private saveSpriteFrames(name: string) {
+    const enc = (l: typeof this.sprite.idle) => l.slice(-6).map(f => toDataUrl(this.sprite.render(f)));
+    if (!this.sprite.idle.length && !this.sprite.attack.length) return;
+    const ch = store.loadChars();
+    ch[name] = { ...ch[name], sprite: { idle: enc(this.sprite.idle), attack: enc(this.sprite.attack), cutout: this.sprite.maskReady } };
+    store.saveChars(ch);
   }
 
   // ---------- diagnostics ----------
@@ -337,7 +462,7 @@ export class Controller {
         case 'hp': case 'mp': { const v = parsePair(raw); parsed = v ? v.join(' / ') : '✗'; break; }
         case 'exp': { const v = parseExp(raw); parsed = v ? `${v.exp.toLocaleString()} @ ${v.pct}%` : '✗'; break; }
         case 'level': parsed = String(parseLevel(raw) ?? '✗'); break;
-        case 'map': { const c = cleanMap(raw); parsed = c ? (canonMap(c) ? `${canonMap(c)} ✓` : c) : '✗ (→ Undefined)'; break; }
+        case 'map': case 'mapBar': { const c = cleanMap(key === 'mapBar' ? (raw.split(':').pop() || '').trim() : raw); parsed = c ? (canonMap(c) ? `${canonMap(c)} ✓` : c) : '✗ (→ Undefined)'; break; }
         case 'cls': parsed = matchClass(raw) ?? '✗'; break;
         default: parsed = cleanName(raw) ?? '✗';
       }

@@ -1,7 +1,7 @@
 /** A screen region as fractions of the captured frame, plus its brightness threshold. */
 export interface Region { x: number; y: number; w: number; h: number; thr: number }
 
-export type RegionKey = 'map' | 'level' | 'cls' | 'name' | 'hp' | 'mp' | 'exp' | 'log';
+export type RegionKey = 'map' | 'mapBar' | 'level' | 'cls' | 'name' | 'hp' | 'mp' | 'exp' | 'log';
 
 /**
  * How each region is read.
@@ -13,6 +13,7 @@ export interface RegionDef { label: string; color: string; engine: 'num' | 'text
 
 export const REGION_DEFS: Record<RegionKey, RegionDef> = {
   map: { label: 'Map name', color: '#ff7ab8', engine: 'text', mode: 'luma', px: 45 },
+  mapBar: { label: 'Map (minimap collapsed)', color: '#ff9e5e', engine: 'text', mode: 'luma', px: 45 },
   level: { label: 'Level', color: '#c08cff', engine: 'num', mode: 'white', px: 45 },
   cls: { label: 'Class', color: '#46c46e', engine: 'text', mode: 'luma', px: 45 },
   name: { label: 'Char name', color: '#ffd23f', engine: 'text', mode: 'luma', px: 45 },
@@ -25,6 +26,8 @@ export const REGION_DEFS: Record<RegionKey, RegionDef> = {
 /** Defaults measured on a native 1280x720 game window. Fractions, so they scale with the capture size. */
 export const DEFAULT_REGIONS: Record<RegionKey, Region> = {
   map: { x: 0.0345, y: 0.0529, w: 0.1328, h: 0.0204, thr: 200 },
+  // when the minimap is collapsed its title bar reads 'Street : Map' at the very top-left
+  mapBar: { x: 0.003, y: 0.004, w: 0.16, h: 0.02, thr: 170 },
   level: { x: 0.2391, y: 0.9653, w: 0.0203, h: 0.0208, thr: 150 },
   cls: { x: 0.2672, y: 0.9569, w: 0.0391, h: 0.0167, thr: 140 },
   name: { x: 0.2672, y: 0.975, w: 0.0391, h: 0.0181, thr: 140 },
@@ -41,30 +44,19 @@ export const DEFAULT_REGIONS: Record<RegionKey, Region> = {
 export interface Schedule { logWatchMs: number; logForceMs: number; barsMs: number; expMs: number; mapMs: number; mapExpStep: number }
 export const DEFAULT_SCHEDULE: Schedule = { logWatchMs: 66, logForceMs: 1500, barsMs: 1000, expMs: 5000, mapMs: 10000, mapExpStep: 5000 };
 
-export interface Potion { id: string; name: string; type: 'hp' | 'mp'; amt: number; price: number }
-export const DEFAULT_POTIONS: Potion[] = [
-  { id: 'meat', name: 'Meat', type: 'hp', amt: 160, price: 80 },
-  { id: 'red', name: 'Red Potion', type: 'hp', amt: 50, price: 50 },
-  { id: 'orange', name: 'Orange Potion', type: 'hp', amt: 150, price: 160 },
-  { id: 'white', name: 'White Potion', type: 'hp', amt: 300, price: 320 },
-  { id: 'lemon', name: 'Lemon', type: 'mp', amt: 150, price: 150 },
-  { id: 'blue', name: 'Blue Potion', type: 'mp', amt: 100, price: 200 },
-  { id: 'melix', name: 'Mana Elixir', type: 'mp', amt: 300, price: 620 },
-];
-
 export interface Settings {
   schedule: Schedule;
   /** HP/MP increases smaller than this are treated as natural regen, not potions. */
   hpMin: number;
   mpMin: number;
-  potBasis: 'rec' | 'used';
-  mainHp: string;
-  mainMp: string;
-  pots: Potion[];
-  askSnap: boolean;
+  /** recovery items in the user's order; the first one is the Active potion used for counts and cost */
+  hpOrder: string[];
+  mpOrder: string[];
 }
 export const DEFAULT_SETTINGS: Settings = {
-  schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, potBasis: 'rec', mainHp: 'meat', mainMp: 'lemon', pots: DEFAULT_POTIONS, askSnap: true,
+  schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25,
+  hpOrder: ['Meat', 'Red Potion', 'Orange Potion', 'White Potion'],
+  mpOrder: ['Lemon', 'Blue Potion', 'Mana Elixir'],
 };
 
 export const CLASSES = ['Beginner', 'Warrior', 'Fighter', 'Page', 'Spearman', 'Crusader', 'White Knight', 'Dragon Knight', 'Hero', 'Paladin', 'Dark Knight',

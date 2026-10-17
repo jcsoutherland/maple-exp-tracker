@@ -1,61 +1,92 @@
+import { useState } from 'react';
+import { allPotions, potionByName, potionsUsed, restoreOf, SHOP_PRICE_FACTOR, type Potion } from '../core/potions';
 import { potCost } from '../core/session';
 import { fmtN } from '../core/util';
-import { useCtrl } from './hooks';
+import { useCtrl, useItemIcon } from './hooks';
 
+/** HP and MP recovery items. Drag one to the top to make it Active; counts are potions actually consumed. */
 export function PotionsTab() {
   const c = useCtrl();
-  const set = c.settings, s = c.sess || c.lastFinished;
-  if (!s) return <div className="card mut">Start a session to see HP/MP use.</div>;
-  const pc = potCost(s, set);
-  const amtFor = (type: 'hp' | 'mp') => (set.potBasis === 'used' ? s[type].used : s[type].rec);
-  const edit = (i: number, f: 'amt' | 'price', v: number) => c.updateSettings({ pots: set.pots.map((p, j) => (j === i ? { ...p, [f]: Math.max(0, v || 0) } : p)) });
-
+  const s = c.sess || c.lastFinished;
+  const pc = s ? potCost(s, c.settings) : null;
   return (
     <section>
-      <div className="card">
-        <h3>HP / MP this session</h3>
-        <div className="tiles">
-          <div className="tile"><div className="k">HP lost</div><div className="v" style={{ color: 'var(--hp)' }}>{fmtN(s.hp.used)}</div></div>
-          <div className="tile"><div className="k">HP recovered (pots)</div><div className="v" style={{ color: 'var(--hp)' }}>{fmtN(s.hp.rec)}</div>
-            <div className="s">{c.tracker ? `+${fmtN(c.tracker.hp.regen)} small regen ignored` : ''}</div></div>
-          <div className="tile"><div className="k">MP spent</div><div className="v" style={{ color: 'var(--mp)' }}>{fmtN(s.mp.used)}</div></div>
-          <div className="tile"><div className="k">MP recovered (pots)</div><div className="v" style={{ color: 'var(--mp)' }}>{fmtN(s.mp.rec)}</div>
-            <div className="s">{c.tracker ? `+${fmtN(c.tracker.mp.regen)} small regen ignored` : ''}</div></div>
-        </div>
-        <div className="row" style={{ marginTop: 12 }}>
-          <span className="mut">Count potions from:</span>
-          <select value={set.potBasis} onChange={e => c.updateSettings({ potBasis: e.target.value as 'rec' | 'used' })}>
-            <option value="rec">Recovered (jumps of pot size)</option>
-            <option value="used">Consumed (all HP/MP lost)</option>
-          </select>
-        </div>
+      <div className="tiles" style={{ marginBottom: 14 }}>
+        <div className="tile"><div className="k">HP potions used</div><div className="v" style={{ color: 'var(--hp)' }}>{fmtN(pc?.detail.hp?.count ?? 0)}</div><div className="s">{pc?.detail.hp?.name ?? ''}</div></div>
+        <div className="tile"><div className="k">MP potions used</div><div className="v" style={{ color: 'var(--mp)' }}>{fmtN(pc?.detail.mp?.count ?? 0)}</div><div className="s">{pc?.detail.mp?.name ?? ''}</div></div>
+        <div className="tile"><div className="k">Potion cost</div><div className="v">{fmtN(pc?.total ?? 0)}</div><div className="s">mesos at shop price</div></div>
+        <div className="tile"><div className="k">Net mesos</div><div className="v" style={{ color: s && pc && s.mesos - pc.total < 0 ? 'var(--bad)' : 'var(--ok)' }}>{s && pc ? fmtN(s.mesos - pc.total) : '0'}</div><div className="s">picked up − potions</div></div>
       </div>
-      <div className="card">
-        <h3>Potion conversion</h3>
-        <table>
-          <thead><tr><th>Main</th><th>Item</th><th className="n">Restores</th><th className="n">Price</th><th className="n">Count</th><th className="n">Cost</th></tr></thead>
-          <tbody>
-            {set.pots.map((p, i) => {
-              const n = p.amt > 0 ? Math.ceil(amtFor(p.type) / p.amt) : 0, main = (p.type === 'hp' ? set.mainHp : set.mainMp) === p.id;
-              return (
-                <tr key={p.id}>
-                  <td><input type="radio" name={'main' + p.type} checked={main} onChange={() => c.updateSettings(p.type === 'hp' ? { mainHp: p.id } : { mainMp: p.id })} /></td>
-                  <td style={{ color: `var(--${p.type})` }}>{p.name}</td>
-                  <td className="n"><input type="number" value={p.amt} style={{ width: 70 }} onChange={e => edit(i, 'amt', +e.target.value)} /> {p.type.toUpperCase()}</td>
-                  <td className="n"><input type="number" value={p.price} style={{ width: 80 }} onChange={e => edit(i, 'price', +e.target.value)} /></td>
-                  <td className="n">{fmtN(n)}</td><td className="n">{fmtN(n * p.price)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <div className="mut small" style={{ marginTop: 8 }}>Amounts and prices are editable. The <b>Main</b> HP and MP pots are used for “Pot cost” and net mesos.</div>
-        <div className="tiles" style={{ marginTop: 12 }}>
-          <div className="tile"><div className="k">Total pot cost</div><div className="v">{fmtN(pc.total)}</div></div>
-          <div className="tile"><div className="k">Mesos picked up</div><div className="v">{fmtN(s.mesos)}</div></div>
-          <div className="tile"><div className="k">Net mesos</div><div className="v" style={{ color: s.mesos - pc.total >= 0 ? 'var(--ok)' : 'var(--bad)' }}>{fmtN(s.mesos - pc.total)}</div></div>
-        </div>
+      <div className="grid2">
+        <PotionSection kind="hp" />
+        <PotionSection kind="mp" />
+      </div>
+      <div className="mut small" style={{ marginTop: 4 }}>
+        A potion is counted each time HP/MP jumps up by at least the regen cutoff (Setup); a jump worth two potions counts as two.
+        Restore amounts come from the item data; shop price is {SHOP_PRICE_FACTOR}× the item's NPC sell value.
       </div>
     </section>
   );
+}
+
+function PotionSection({ kind }: { kind: 'hp' | 'mp' }) {
+  const c = useCtrl();
+  const s = c.sess || c.lastFinished;
+  const key = kind === 'hp' ? 'hpOrder' : 'mpOrder';
+  const order = c.settings[key];
+  const [drag, setDrag] = useState<number | null>(null);
+  const [over, setOver] = useState<number | null>(null);
+  const setOrder = (o: string[]) => c.updateSettings({ [key]: o });
+  const move = (from: number, to: number) => { const o = [...order]; const [x] = o.splice(from, 1); o.splice(to, 0, x); setOrder(o); };
+  const others = allPotions(kind).filter(p => !order.includes(p.name));
+  const flow = s?.[kind];
+
+  return (
+    <div className="card">
+      <h3 style={{ color: `var(--${kind})` }}>{kind === 'hp' ? '❤ HP recovery' : '💧 MP recovery'}</h3>
+      <div className="potlist">
+        {order.map((name, i) => {
+          const p = potionByName(name);
+          if (!p) return null;
+          const r = restoreOf(p, kind, flow?.max ?? null), used = i === 0 && flow ? potionsUsed(flow.jumps ?? [], r) : null;
+          return (
+            <div key={name} draggable
+              className={'potrow' + (i === 0 ? ' active' : '') + (over === i && drag !== i ? ' over' : '')}
+              onDragStart={e => { setDrag(i); e.dataTransfer.effectAllowed = 'move'; }}
+              onDragOver={e => { e.preventDefault(); setOver(i); }}
+              onDragLeave={() => setOver(o => (o === i ? null : o))}
+              onDrop={e => { e.preventDefault(); if (drag != null && drag !== i) move(drag, i); setDrag(null); setOver(null); }}
+              onDragEnd={() => { setDrag(null); setOver(null); }}>
+              <span className="grip" aria-hidden>⋮⋮</span>
+              <PotIcon p={p} />
+              <div className="potname">
+                <b>{p.name}</b>
+                <span className="mut small">{restoreText(p, kind)} · {fmtN(p.shopPrice)} mesos</span>
+              </div>
+              {i === 0 ? <span className="badge">Active</span> : <button className="sm" title="Make active" onClick={() => move(i, 0)}>▲ Use</button>}
+              {used != null && <div className="potused"><b>×{fmtN(used)}</b><span className="mut small">{fmtN(used * p.shopPrice)} mesos</span></div>}
+              {order.length > 1 && <button className="sm x" title="Remove from list" onClick={() => setOrder(order.filter(n => n !== name))}>×</button>}
+            </div>
+          );
+        })}
+      </div>
+      {others.length > 0 && (
+        <select className="addpot" value="" onChange={e => e.target.value && setOrder([...order, e.target.value])}>
+          <option value="">+ Add a {kind.toUpperCase()} item…</option>
+          {others.map(p => <option key={p.name} value={p.name}>{p.name} — {restoreText(p, kind)}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
+const restoreText = (p: Potion, kind: 'hp' | 'mp') => {
+  const flat = kind === 'hp' ? p.hp : p.mp, pct = kind === 'hp' ? p.hpPct : p.mpPct;
+  const both = p.hp && p.mp ? ` (+${kind === 'hp' ? p.mp + ' MP' : p.hp + ' HP'})` : '';
+  return (flat ? `${flat} ${kind.toUpperCase()}` : `${Math.round(pct * 100)}% ${kind.toUpperCase()}`) + both;
+};
+
+function PotIcon({ p }: { p: Potion }) {
+  const url = useItemIcon(p.id);
+  return <span className="ic-wrap">{url && <img className="ic" src={url} alt="" />}</span>;
 }

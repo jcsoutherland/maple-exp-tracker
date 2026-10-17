@@ -1,9 +1,13 @@
 import type { Settings } from './config';
+import { potionByName, potionsUsed, restoreOf } from './potions';
 import { fmtHM, fmtN } from './util';
 
 export type EventType = 'meso' | 'drop' | 'level' | 'death' | 'map' | 'info';
 export interface SessionEvent { t: number; type: EventType; text: string }
 export interface Drop { qty: number; cat: string; id?: number }
+
+/** HP or MP flow: total lost, total recovered by pot-sized jumps, and each jump's size (to count potions). */
+export interface Flow { used: number; rec: number; jumps: number[]; max: number | null }
 
 export interface Session {
   id: number;
@@ -25,40 +29,45 @@ export interface Session {
   mesos: number;
   maps: Record<string, number>;
   drops: Record<string, Drop>;
-  hp: { used: number; rec: number };
-  mp: { used: number; rec: number };
-  /** [minute, cumulative exp] */
-  timeline: [number, number][];
+  hp: Flow;
+  mp: Flow;
+  /** [minute, cumulative exp, cumulative mesos] sampled every ~30 s */
+  timeline: [number, number, number][];
   events: SessionEvent[];
 }
+
+export interface PotUse { name: string; id?: number; count: number; cost: number }
 
 /** A finished session as stored in history. */
 export interface SavedSession extends Omit<Session, 'resumeAt' | 'paused' | 'events'> {
   end: number;
   potCost: number;
-  potDetail: Partial<Record<'hp' | 'mp', { name: string; count: number; cost: number }>>;
+  potDetail: Partial<Record<'hp' | 'mp', PotUse>>;
 }
+
+const flow = (): Flow => ({ used: 0, rec: 0, jumps: [], max: null });
 
 export function newSession(char: string, cls: string, level: number | null, now = Date.now()): Session {
   return {
     id: now, char: char || 'Unknown', cls, levelStart: level, level, levelUps: 0, start: now, end: null, activeMs: 0, resumeAt: now, paused: false,
-    exp: 0, expLost: 0, deaths: 0, mesos: 0, maps: {}, drops: {}, hp: { used: 0, rec: 0 }, mp: { used: 0, rec: 0 }, timeline: [[0, 0]], events: [],
+    exp: 0, expLost: 0, deaths: 0, mesos: 0, maps: {}, drops: {}, hp: flow(), mp: flow(), timeline: [[0, 0, 0]], events: [],
   };
 }
 
 export const elapsed = (s: Session | null, now = Date.now()) => (s ? s.activeMs + (s.paused ? 0 : now - s.resumeAt) : 0);
 
+/** Potions consumed with the Active HP / MP potion (first in each order) and what they cost at the shop. */
 export function potCost(s: Pick<Session, 'hp' | 'mp'>, set: Settings) {
   const detail: SavedSession['potDetail'] = {};
   let total = 0;
   for (const k of ['hp', 'mp'] as const) {
-    const amt = set.potBasis === 'used' ? s[k].used : s[k].rec;
-    const main = set.pots.find(p => p.id === (k === 'hp' ? set.mainHp : set.mainMp));
-    if (main && main.amt > 0) {
-      const count = Math.ceil(amt / main.amt);
-      detail[k] = { name: main.name, count, cost: count * main.price };
-      total += count * main.price;
-    }
+    const p = potionByName((k === 'hp' ? set.hpOrder : set.mpOrder)[0] ?? '');
+    if (!p) continue;
+    const f = s[k], r = restoreOf(p, k, f.max);
+    // sessions saved before jump tracking only have the recovered total
+    const count = f.jumps ? potionsUsed(f.jumps, r) : r ? Math.ceil(f.rec / r) : 0;
+    detail[k] = { name: p.name, id: p.id, count, cost: count * p.shopPrice };
+    total += count * p.shopPrice;
   }
   return { total, detail };
 }

@@ -123,7 +123,6 @@ export function SetupTab({ onSnapshot }: { onSnapshot: () => void }) {
         <div className="row" style={{ marginTop: 8 }}>
           <label>Min HP jump counted as pot <input type="number" min={1} value={c.settings.hpMin} style={{ width: 60 }} onChange={e => c.updateSettings({ hpMin: +e.target.value || 1 })} /></label>
           <label>Min MP jump counted as pot <input type="number" min={1} value={c.settings.mpMin} style={{ width: 60 }} onChange={e => c.updateSettings({ mpMin: +e.target.value || 1 })} /></label>
-          <label><input type="checkbox" checked={c.settings.askSnap} onChange={e => c.updateSettings({ askSnap: e.target.checked })} /> Ask for character snapshot on stop</label>
         </div>
         <div className="mut small" style={{ marginTop: 8 }}>
           The pickup log is checked for a new line at the watch rate with a cheap pixel comparison; OCR only runs when a line appears.

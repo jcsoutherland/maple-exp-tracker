@@ -144,7 +144,10 @@ export class Tracker {
     const cur = median(b.buf); // filters up to two consecutive misreads
     if (b.cur == null) { b.cur = cur; return; }
     const d = cur - b.cur, min = kind === 'hp' ? this.deps.hpMin() : this.deps.mpMin();
-    if (d < 0) s.used += -d; else if (d >= min) s.rec += d; else if (d > 0) b.regen += d;
+    s.max = b.max;
+    if (d < 0) s.used += -d;
+    else if (d >= min) { s.rec += d; (s.jumps ??= []).push(d); } // a potion (or two between reads)
+    else if (d > 0) b.regen += d;
     b.cur = cur;
   }
 
