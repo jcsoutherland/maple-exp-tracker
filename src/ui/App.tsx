@@ -30,9 +30,11 @@ export function App() {
         <span className={'pill' + (c.ocrState === 'ready' ? ' on' : c.ocrState === 'loading' ? ' warn' : '')}>
           {{ idle: 'OCR not loaded', loading: 'Loading OCR…', ready: 'OCR ready', error: 'OCR failed' }[c.ocrState]}
         </span>
-        <span className={'pill' + (s ? (s.paused ? ' warn' : ' on') : '')}>{!s ? 'Idle' : s.paused ? 'Paused' : 'Tracking'}</span>
+        <span className={'pill' + (s ? (s.paused ? ' warn' : ' on') : '')}>{!s ? 'Idle' : s.paused ? (c.autoPaused ? 'Paused (idle)' : 'Paused') : 'Tracking'}</span>
         <span className="sp" />
-        <button onClick={share}>Share game window</button>
+        {cap.ready && cap.kind === 'screen'
+          ? <button onClick={() => { c.stopCapture(); toast('Stopped capturing'); }} title="Stop sharing the game window (pauses a running session)">⏹ Stop capture</button>
+          : <button onClick={share}>Share game window</button>}
         <button className="pri" disabled={!!s || !cap.ready || c.ocrState !== 'ready'} onClick={() => c.start()}>▶ Start session</button>
         <button disabled={!s} onClick={() => c.togglePause()}>{s?.paused ? '▶ Resume' : '⏸ Pause'}</button>
         <button className="danger" disabled={!s} onClick={stop}>■ Stop</button>

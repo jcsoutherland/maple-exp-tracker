@@ -48,13 +48,15 @@ export interface Settings {
   schedule: Schedule;
   /** HP/MP increases smaller than this are treated as natural regen, not potions. */
   hpMin: number;
+  /** pause the session after this many seconds without EXP or loot (0 = never); it resumes when EXP moves again */
+  idlePauseSec: number;
   mpMin: number;
   /** recovery items in the user's order; the first one is the Active potion used for counts and cost */
   hpOrder: string[];
   mpOrder: string[];
 }
 export const DEFAULT_SETTINGS: Settings = {
-  schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25,
+  schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, idlePauseSec: 20,
   hpOrder: ['Meat', 'Red Potion', 'Orange Potion', 'White Potion'],
   mpOrder: ['Lemon', 'Blue Potion', 'Mana Elixir'],
 };

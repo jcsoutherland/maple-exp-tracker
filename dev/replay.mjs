@@ -48,8 +48,9 @@ const out = await page.evaluate(async () => {
   c.setIdentity({ name: 'Flynny', cls: 'Hunter', level: 37 });
   await c.start();
   c.ticker.stop(); // we drive the ticks ourselves at video time
+  c.ticker.set = () => undefined; // (auto-pause / resume would otherwise restart the real-time ticker)
   const sc = c.settings.schedule, log = [], tickMs = [];
-  let vt = 0, lastExp = 0, next = { bars: 0, exp: 0, map: 0 };
+  let vt = 0, lastExp = 0, next = { bars: 0, exp: 0, map: 0, ui: 0 };
   const orig = c.tracker.event.bind(c.tracker);
   c.tracker.event = (type, text) => { log.push(`${vt.toFixed(2).padStart(7)}s ${type.padEnd(6)} ${text}`); orig(type, text); };
   // log watcher at 4 Hz of video time (the live app runs ~15 Hz; 4 Hz keeps the replay quick and is still far above the line lifetime)
@@ -62,7 +63,8 @@ const out = await page.evaluate(async () => {
     await new Promise(r => requestAnimationFrame(() => setTimeout(r, 20)));
     const a = performance.now(); await c.tickLog(); tickMs.push(performance.now() - a);
     if (t >= next.bars) { next.bars = t + sc.barsMs / 1000; await c.tickBars(); }
-    if (t >= next.exp) { next.exp = t + sc.expMs / 1000; await c.tickExp(); }
+    if (t >= next.ui) { next.ui = t + 1; c.checkIdle(); } // the app's 1 s UI tick: auto-pause after idlePauseSec
+    if (t >= next.exp) { next.exp = t + sc.expMs / 1000; if (c.autoPaused) await c.watchIdle(); else await c.tickExp(); }
     if (t >= next.map) { next.map = t + 2; await c.tickMap(false); }
     const s = c.sess;
     if (s.exp !== lastExp) { log.push(`${t.toFixed(2).padStart(7)}s exp    +${s.exp - lastExp} (bar ${c.tracker.exp} @ ${c.tracker.pct}%) map=${c.tracker.mapName}`); lastExp = s.exp; }

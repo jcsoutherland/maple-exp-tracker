@@ -43,9 +43,11 @@ export function prepRegion(src: FrameSource, r: Region, def: RegionDef, out = do
 /**
  * "Zoom and enhance" for small UI text (the status-bar name): a smooth `scale`× upscale, then an Otsu threshold so
  * the gaps between thin letters survive ("nn" no longer merges into "rii"). Dark text on white, padded, plus the ink
- * mask for glyph checks.
+ * mask for glyph checks. `channel: 'min'` separates by the weakest colour channel instead of brightness, for light
+ * text on a bright coloured background (the level's cream digits on orange tiles: same brightness, but orange has
+ * almost no blue).
  */
-export function enhanceText(src: FrameSource, r: Region, scale = 6, out = document.createElement('canvas')) {
+export function enhanceText(src: FrameSource, r: Region, scale = 6, channel: 'luma' | 'min' = 'luma', minThr = 0, out = document.createElement('canvas')) {
   const { W, H } = frameSize(src), pad = 12;
   const sw = Math.max(1, Math.round(r.w * W)), sh = Math.max(1, Math.round(r.h * H));
   const w = sw * scale + pad * 2, h = sh * scale + pad * 2;
@@ -55,7 +57,10 @@ export function enhanceText(src: FrameSource, r: Region, scale = 6, out = docume
   g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
   g.drawImage(src, r.x * W, r.y * H, sw, sh, pad, pad, sw * scale, sh * scale);
   const im = g.getImageData(0, 0, w, h), d = im.data, L = new Uint8Array(w * h), hist = new Array(256).fill(0);
-  for (let i = 0; i < L.length; i++) { L[i] = Math.round(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]); hist[L[i]]++; }
+  for (let i = 0; i < L.length; i++) {
+    L[i] = channel === 'min' ? Math.min(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) : Math.round(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]);
+    hist[L[i]]++;
+  }
   // Otsu: the threshold that best splits text from background
   let sum = 0, sB = 0, wB = 0, best = -1, thr = r.thr;
   for (let i = 0; i < 256; i++) sum += i * hist[i];
@@ -66,6 +71,7 @@ export function enhanceText(src: FrameSource, r: Region, scale = 6, out = docume
     const v = wB * wF * (sB / wB - (sum - sB) / wF) ** 2;
     if (v > best) { best = v; thr = i; }
   }
+  thr = Math.max(thr, minThr); // a floor: on some frames Otsu splits at the background's own shading instead
   const mask = new Uint8Array(w * h);
   for (let i = 0; i < L.length; i++) { const on = L[i] > thr; mask[i] = on ? 1 : 0; d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = on ? 0 : 255; }
   g.putImageData(im, 0, 0);

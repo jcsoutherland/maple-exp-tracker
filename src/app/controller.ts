@@ -97,6 +97,13 @@ export class Controller {
     try { await this.engine.init(); this.ocrState = 'ready'; } catch (e) { console.error(e); this.ocrState = 'error'; }
     this.notify();
   }
+  /** Stop sharing the game window (pauses a running session). */
+  stopCapture() {
+    if (this.sess && !this.sess.paused) this.togglePause();
+    this.capture.stop();
+    this.capture.video.srcObject = null;
+    this.notify();
+  }
   async shareScreen() { const ok = await this.capture.startScreen(); this.initOcr(); this.notify(); return ok; }
   async useVideo(file: File, rate: number) { const ok = await this.capture.useFile(file, rate); this.initOcr(); this.notify(); return ok; }
   setRegion(k: RegionKey, r: Partial<Region>) { this.regions = { ...this.regions, [k]: { ...this.regions[k], ...r } }; store.saveRegions(this.regions); this.notify(); }
@@ -136,13 +143,15 @@ export class Controller {
   async identify() {
     if (!this.capture.ready || this.ocrState !== 'ready') return null;
     const v = this.capture.video;
-    const [name0, c, l] = await Promise.all([this.readName(), this.read('cls', v), this.read('level', v)]);
+    const [name0, c, lv] = await Promise.all([this.readName(), this.read('cls', v), this.readLevel()]);
     const ch = store.loadChars();
     // a near-exact match to a character seen before is that character (old misreads must not pull it back)
     let name = name0;
     if (name) { const known = Object.keys(ch).map(k => ({ k, s: sim(k, name!) })).sort((a, b) => b.s - a.s)[0]; if (known && known.s >= 0.85) name = known.k; }
-    const got = { name, cls: matchClass(c), level: parseLevel(l) };
     const id = this.identity;
+    // levels never go down: a lower read needs all three frames to agree (e.g. to correct a level typed too high)
+    const level = lv && (lv.level >= (id.level ?? 0) || lv.votes === 3) ? lv.level : null;
+    const got = { name, cls: matchClass(c), level };
     this.setIdentity({
       // a confident read replaces a name the app guessed before, never one the user typed
       ...(got.name && (!id.name || (!id.nameTyped && got.name !== id.name)) ? { name: got.name } : {}),
@@ -170,6 +179,22 @@ export class Controller {
     return best && best[1] >= 2 ? best[0] : null;
   }
 
+  /**
+   * The level: the digits are cream on orange tiles of about the same brightness, so they're separated by colour
+   * (weakest channel: orange has almost no blue), zoomed and enhanced, and read on three frames; two must agree.
+   */
+  private async readLevel(): Promise<{ level: number; votes: number } | null> {
+    const votes = new Map<number, number>();
+    for (let k = 0; k < 3; k++) {
+      if (k) await new Promise(r => setTimeout(r, 200));
+      const lv = parseLevel(await this.engine.read(enhanceText(this.capture.video, this.regions.level, 6, 'min', 130).canvas, 'num'));
+      this.stats.ocrCalls++;
+      if (lv) votes.set(lv, (votes.get(lv) || 0) + 1);
+    }
+    const best = [...votes].sort((a, b) => b[1] - a[1])[0];
+    return best && best[1] >= 2 ? { level: best[0], votes: best[1] } : null;
+  }
+
   // ---------- session ----------
   async start() {
     await this.identify(); // name / class / level once per session
@@ -190,7 +215,7 @@ export class Controller {
     const s = this.sess;
     if (!s) return;
     if (s.paused) { s.paused = false; s.resumeAt = Date.now(); this.tracker?.rebaseline(); this.resetWatchers(); this.tracker?.event('info', 'Resumed'); this.startTimers(); }
-    else { s.activeMs += Date.now() - s.resumeAt; s.paused = true; this.tracker?.event('info', 'Paused'); this.ticker.set({ ui: [1000, () => this.notify()] }); }
+    else { s.activeMs += Date.now() - s.resumeAt; s.paused = true; this.autoPaused = false; this.tracker?.event('info', 'Paused'); this.ticker.set({ ui: [1000, () => this.notify()] }); }
     this.persist(true);
     this.notify();
   }
@@ -226,7 +251,7 @@ export class Controller {
       bars: [sc.barsMs, () => this.tickBars()],
       exp: [sc.expMs, () => this.tickExp()],
       map: [Math.min(sc.mapMs, 2000), () => this.tickMap(false)],
-      ui: [1000, () => { this.persist(); this.notify(); }],
+      ui: [1000, () => { this.checkIdle(); this.persist(); this.notify(); }],
     });
   }
 
@@ -321,7 +346,7 @@ export class Controller {
       if (s.exp > before) this.markActive();
       if (leveled) { // level-up: confirm with the level digits
         this.identity.level = s.level;
-        this.read('level', this.capture.video).then(x => { const l = parseLevel(x); if (l && s.level && Math.abs(l - s.level) <= 1) s.level = this.identity.level = l; });
+        this.readLevel().then(r => { if (r && s.level && Math.abs(r.level - s.level) <= 1) s.level = this.identity.level = r.level; });
       }
       const el = elapsed(s);
       this.recent.push([el, s.exp]);
@@ -376,6 +401,43 @@ export class Controller {
   private lastActive = 0;
   /** Mark "fighting" (EXP or loot just came in) for the avatar's attack animation. */
   private markActive() { this.lastActive = Date.now(); }
+  /** paused by the idle timer (resumes by itself when EXP moves) rather than by the user */
+  autoPaused = false;
+
+  /** Idle for `idlePauseSec` (no EXP or loot): pause, without counting the idle stretch as session time. */
+  private checkIdle() {
+    const s = this.sess, sec = this.settings.idlePauseSec;
+    if (!s || s.paused || !sec) return;
+    const quietSince = Math.max(this.lastActive, s.resumeAt);
+    if (Date.now() - quietSince < sec * 1000) return;
+    s.activeMs += quietSince - s.resumeAt;
+    s.paused = true; this.autoPaused = true;
+    this.tracker?.event('info', `Auto-paused (idle ${sec}s)`);
+    // keep an eye on the EXP bar only, to resume as soon as it moves
+    this.ticker.set({ ui: [1000, () => this.notify()], idle: [this.settings.schedule.expMs, () => this.watchIdle()] });
+    this.persist(true);
+    this.notify();
+  }
+  private busyIdle = false;
+  private async watchIdle() {
+    const s = this.sess, t = this.tracker;
+    if (!s || !t || !s.paused || !this.autoPaused || this.busyIdle || !this.capture.ready || this.ocrState !== 'ready') return;
+    this.busyIdle = true;
+    try {
+      const r = parseExp(await this.read('exp', this.capture.video));
+      // only a real gain resumes: higher than before, and the % it implies matches the % shown (a misread digit doesn't)
+      const tot = t.total;
+      if (!r || t.exp == null || r.exp <= t.exp || (tot && Math.abs(r.exp * 100 / tot - r.pct) > 0.03)) return;
+      // EXP moved: back to work. The EXP baseline is kept, so this gain still counts.
+      s.paused = false; s.resumeAt = Date.now(); this.autoPaused = false;
+      this.resetWatchers();
+      t.event('info', 'Resumed (EXP moving again)');
+      this.markActive();
+      this.startTimers();
+      this.tickExp();
+      this.notify();
+    } catch (e) { console.error(e); } finally { this.busyIdle = false; }
+  }
   get fighting() { return Date.now() - this.lastActive < 4000; }
   /** The pixel-art explorer for the current job (idle / attack loops). */
   /** Real Maple sprite frames for the character's saved look (pixel art shows until they're in). */
@@ -431,6 +493,11 @@ export class Controller {
           parsed: lines.slice().reverse().map(l => `${lineKind(l) ?? '?'}${lineAmount(l) ? ' +' + lineAmount(l) : ''}`).join(' ⏎ ') || '(no lines)' });
         continue;
       }
+      if (key === 'level') { // the colour-aware reader used for the level
+        const e = enhanceText(src, this.regions.level, 6, 'min', 130), raw = await this.engine.read(e.canvas, 'num');
+        rows.push({ key, label: def.label, color: def.color, img: e.canvas.toDataURL(), raw, parsed: String(parseLevel(raw) ?? '✗') });
+        continue;
+      }
       if (key === 'name') { // the enhanced reader used for the name
         const e = enhanceText(src, this.regions.name), r = await this.engine.readChars(e.canvas, 'line');
         rows.push({ key, label: def.label, color: def.color, img: e.canvas.toDataURL(), raw: r.text, parsed: cleanName(fixIL(r.chars, e)) ?? '✗' });
@@ -442,7 +509,6 @@ export class Controller {
       switch (key) {
         case 'hp': case 'mp': { const v = parsePair(raw); parsed = v ? v.join(' / ') : '✗'; break; }
         case 'exp': { const v = parseExp(raw); parsed = v ? `${v.exp.toLocaleString()} @ ${v.pct}%` : '✗'; break; }
-        case 'level': parsed = String(parseLevel(raw) ?? '✗'); break;
         case 'map': case 'mapBar': { const c = mapText(key === 'mapBar' ? (raw.split(':').pop() || '').trim() : raw) ?? (key === 'mapBar' ? mapText(raw) : null); parsed = c ? (canonMap(c) ? `${canonMap(c)} ✓` : `${c} ✗ not a known map`) : '✗ (→ Cannot determine)'; break; }
         case 'cls': parsed = matchClass(raw) ?? '✗'; break;
         default: parsed = cleanName(raw) ?? '✗';

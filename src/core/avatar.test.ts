@@ -22,7 +22,7 @@ describe('name reading: i / l check', () => {
 });
 
 describe('character looks', () => {
-  it('rolls instantly with the chosen gender and the job weapon', () => {
+  it('makes a look instantly: chosen gender, best gear and the job weapon for the level', () => {
     for (const gender of [0, 1] as const) {
       const l = rollLook('Hunter', 37, gender);
       expect(l.gender).toBe(gender);
@@ -32,6 +32,9 @@ describe('character looks', () => {
       expect(l.weapon).not.toBeNull();
     }
     expect(classLook('Assassin')).toBe('thief');
+    // gear is the job's best for the level, every time; only skin / hair / face are random
+    expect(rollLook('Hunter', 37, 0).items).toEqual(rollLook('Hunter', 37, 0).items);
+    expect(rollLook('Hunter', 50, 0).items).not.toEqual(rollLook('Hunter', 37, 0).items);
     expect(rollLook('Fighter', 30, 0).stand).toBe('stand2'); // two-handed sword stance
   });
 });

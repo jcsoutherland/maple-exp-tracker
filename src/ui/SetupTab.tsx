@@ -120,6 +120,7 @@ export function SetupTab() {
           <label>Map check <input type="number" min={2000} step={1000} value={sched.mapMs} style={{ width: 70 }} onChange={e => setSched('mapMs', Math.max(2000, +e.target.value))} /> ms, and every <input type="number" min={500} step={500} value={sched.mapExpStep} style={{ width: 70 }} onChange={e => setSched('mapExpStep', Math.max(500, +e.target.value))} /> EXP</label>
         </div>
         <div className="row" style={{ marginTop: 8 }}>
+          <label title="0 = never. The session resumes by itself when EXP moves again.">Auto-pause after idle (s) <input type="number" min={0} value={c.settings.idlePauseSec} style={{ width: 60 }} onChange={e => c.updateSettings({ idlePauseSec: Math.max(0, +e.target.value || 0) })} /></label>
           <label>Min HP jump counted as pot <input type="number" min={1} value={c.settings.hpMin} style={{ width: 60 }} onChange={e => c.updateSettings({ hpMin: +e.target.value || 1 })} /></label>
           <label>Min MP jump counted as pot <input type="number" min={1} value={c.settings.mpMin} style={{ width: 60 }} onChange={e => c.updateSettings({ mpMin: +e.target.value || 1 })} /></label>
         </div>

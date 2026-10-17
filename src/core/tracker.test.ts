@@ -71,6 +71,13 @@ describe('EXP bar', () => {
     t.onExp(R(124632)); t.onExp(R(124700)); t.onExp(R(124800));
     expect(s.exp).toBe(124800 - 124632);
   });
+  it('does not count a slightly misread first value as the first gain (395 instead of 35)', () => {
+    const { s, t } = make();
+    t.onExp({ exp: 124156, pct: R(124516).pct }); // a digit misread on the very first read, % read right
+    t.onExp(R(124516));
+    t.onExp(R(124551)); // the first real gain: +35
+    expect(s.exp).toBe(35);
+  });
   it('starts cleanly below 0.2% and needs a huge jump read twice', () => {
     const { s, t } = make();
     t.onExp(R(100)); t.onExp(R(150)); t.onExp({ exp: 1000150, pct: 0.06 }); t.onExp(R(250));

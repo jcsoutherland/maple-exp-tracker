@@ -1,6 +1,10 @@
-// Builds src/core/avatar/catalog.ts: a small, pre-checked set of item ids for the character randomizer, so rolling a
-// look needs no network requests. Only ids/names/requirements are stored (no images). Every item is non-cash, exists
-// in MapleStory Classic (per OSMS) and has sprite data on maplestory.io (the renderer leaves out items without it).
+// Builds src/core/avatar/catalog.ts: the lookup table for the character generator, so a look is made instantly and
+// consistently for a job and level. Stored: ids, names, required levels and scores only (no images).
+//  - gear: per job branch, gender and slot, an upgrade ladder: items (by required level) that beat everything below
+//    them on the job's stat score (bowman DEX, thief LUK + DEX/2, warrior STR, magician INT; defence breaks ties)
+//  - weapons: per weapon type, a ladder by attack (magic attack for wands/staves)
+//  - hair / faces: a pool per gender for the random part of a look
+// Stats and job/gender limits come from OSMS (MapleStory Classic); every item kept has sprite data on maplestory.io.
 //   node dev/build-catalog.mjs
 import fs from 'node:fs';
 
@@ -17,9 +21,6 @@ async function json(url, tries = 5) {
 }
 const shuffle = a => { const b = a.slice(); for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
 
-const classic = new Set((await json('https://osmsdataexplorer.com/data/current/items.json')).items.map(i => i.id));
-console.log('classic items', classic.size);
-
 const actCache = new Map();
 /** action → frame count for an item, or null when maplestory.io has no sprites for it */
 async function actions(id) {
@@ -31,74 +32,99 @@ async function actions(id) {
   return actCache.get(id);
 }
 
-const rows = async q => (await json(`${API}/item?${q}`)).map(x => ({
-  id: x.id, name: x.name, sub: x.typeInfo?.subCategory || '', jobs: x.requiredJobs || [], lv: x.requiredLevel || 0, g: x.requiredGender ?? 2, cash: !!x.isCash,
-}));
-const [armor, acc, one, two, hair, face] = await Promise.all([
-  rows('categoryFilter=Armor'), rows('categoryFilter=Accessory'), rows('categoryFilter=One-Handed%20Weapon'),
-  rows('categoryFilter=Two-Handed%20Weapon'), rows('subCategoryFilter=Hair'), rows('subCategoryFilter=Face'),
-]);
-const ok = r => !r.cash && classic.has(r.id);
+/** GM / developer items carry impossible stats (999 everything); real gear never comes close */
+const plausible = it => { const t = it.stats, v = k => Number(t[k]) || 0; return ['incSTR', 'incDEX', 'incINT', 'incLUK'].every(k => v(k) <= 40) && v('incPDD') <= 250 && v('incPAD') <= 150 && v('incMAD') <= 200; };
+const osms = (await json('https://osmsdataexplorer.com/data/current/items.json')).items.filter(i => i.category === 'Equipment' && i.stats && plausible(i));
+console.log('classic equips', osms.length);
 
-/** up to `n` drawable items: a few for every job branch and gender, spread over levels */
-async function gear(list, sub, n = 20) {
-  const pool = list.filter(r => r.sub === sub && ok(r));
-  const groups = ['Beginner', 'Warrior', 'Magician', 'Bowman', 'Thief'].flatMap(j => [0, 1].map(g => ({ j, g })));
-  const out = new Map();
-  for (let round = 0; out.size < n && round < 6; round++) {
-    for (const { j, g } of groups) {
-      if (out.size >= n) break;
-      const cands = shuffle(pool.filter(r => r.jobs.includes(j) && (r.g === 2 || r.g === g) && !out.has(r.id)));
-      for (const r of cands.slice(0, 4)) if (await actions(r.id)) { out.set(r.id, r); break; }
-    }
-  }
-  return [...out.values()].sort((a, b) => a.lv - b.lv).map(r => [r.id, r.name, r.lv, r.g, r.jobs.join('|')]);
+const JOB_BIT = { warrior: 1, magician: 2, bowman: 4, thief: 8 };
+const BRANCHES = ['warrior', 'magician', 'bowman', 'thief', 'beginner'];
+const n = v => Number(v) || 0;
+/** can this job branch wear it? (reqJob is a bitmask; 0 = everyone; beginners only wear everyone-gear) */
+const wears = (it, b) => { const j = n(it.stats.reqJob); return j === 0 || (b !== 'beginner' && (j & JOB_BIT[b]) !== 0); };
+const fitsGender = (it, g) => !it.gender || it.gender === (g ? 'female' : 'male');
+/** how good an item is for a job: its main stat(s), then defence as a tie-breaker */
+function score(it, b) {
+  const s = it.stats, STR = n(s.incSTR), DEX = n(s.incDEX), INT = n(s.incINT), LUK = n(s.incLUK);
+  const main = b === 'bowman' ? DEX + STR * 0.25 : b === 'thief' ? LUK + DEX * 0.5 : b === 'warrior' ? STR + DEX * 0.25 : b === 'magician' ? INT + LUK * 0.25 : (STR + DEX + INT + LUK) * 0.25;
+  return main * 10 + n(s.incPDD) * 0.05 + n(s.incMDD) * 0.02 + n(s.incMHP) * 0.01;
 }
 
-/** every drawable weapon of a type, one per required level, with its animations */
-async function ladder(sub) {
-  const byLv = new Map();
-  for (const r of [...one, ...two].filter(r => r.sub === sub && ok(r)).sort((a, b) => a.lv - b.lv || a.id - b.id)) {
-    if (byLv.has(r.lv)) continue;
-    const a = await actions(r.id);
-    if (a) byLv.set(r.lv, [r.id, r.name, r.lv, a]);
-  }
-  return [...byLv.values()];
-}
-
-async function looks(list, lo, n) {
+/** upgrade ladder: walking up by required level, keep each (drawable) item that beats the best so far */
+async function ladder(items, value) {
   const out = [];
-  for (const r of shuffle(list.filter(r => Math.floor(r.id / 1000) === lo))) {
-    if (out.length >= n) break;
-    if (await actions(r.id)) out.push([r.id, r.name]);
+  let best = -Infinity;
+  for (const it of items.slice().sort((a, c) => n(a.stats.reqLevel) - n(c.stats.reqLevel) || value(c) - value(a))) {
+    const v = value(it);
+    if (v <= best && out.length) continue;
+    if (!(await actions(it.id))) continue;
+    out.push([it.id, it.name, n(it.stats.reqLevel), Math.round(v * 10) / 10]);
+    best = v;
   }
-  return out.sort((a, b) => a[0] - b[0]);
+  return out;
 }
 
-const catalog = { gear: {}, weapons: {}, hair: {}, face: {} };
-for (const s of ['Hat', 'Top', 'Bottom', 'Overall', 'Shoes', 'Glove']) { catalog.gear[s] = await gear(armor, s); console.log(s, catalog.gear[s].length); }
-catalog.gear.Earrings = await gear(acc, 'Earrings'); console.log('Earrings', catalog.gear.Earrings.length);
-for (const t of ['Bow', 'Crossbow', 'Claw', 'Dagger', 'Wand', 'Staff', 'One-Handed Sword', 'Two-Handed Sword', 'One-Handed Axe', 'Two-Handed Axe',
-  'One-Handed Blunt Weapon', 'Two-Handed Blunt', 'Spear', 'Pole Arm']) { catalog.weapons[t] = await ladder(t); console.log(t, catalog.weapons[t].map(w => w[2]).join(',')); }
-catalog.hair = { m: await looks(hair, 30, 20), f: await looks(hair, 31, 20) };
-catalog.face = { m: await looks(face, 20, 20), f: await looks(face, 21, 20) };
-console.log('hair', catalog.hair.m.length, catalog.hair.f.length, 'face', catalog.face.m.length, catalog.face.f.length);
+const SLOTS = { Hat: 'Hat', Top: 'Top', Bottom: 'Bottom', Overall: 'Overall', Shoes: 'Shoes', Glove: 'Glove', Cape: 'Cape', Earrings: 'Earring' };
+const gear = {};
+for (const b of BRANCHES) {
+  gear[b] = {};
+  for (const g of [0, 1]) {
+    const key = g ? 'f' : 'm';
+    gear[b][key] = {};
+    for (const [slot, sub] of Object.entries(SLOTS)) {
+      const pool = osms.filter(it => it.sub_category === sub && wears(it, b) && fitsGender(it, g));
+      gear[b][key][slot] = await ladder(pool, it => score(it, b));
+    }
+    console.log(b, key, Object.entries(gear[b][key]).map(([s, l]) => `${s}:${l.length}`).join(' '));
+  }
+}
 
+// weapon type from the id range (as in the game data)
+const TYPE = { 130: 'One-Handed Sword', 131: 'One-Handed Axe', 132: 'One-Handed Blunt Weapon', 133: 'Dagger', 137: 'Wand', 138: 'Staff',
+  140: 'Two-Handed Sword', 141: 'Two-Handed Axe', 142: 'Two-Handed Blunt', 143: 'Spear', 144: 'Pole Arm', 145: 'Bow', 146: 'Crossbow', 147: 'Claw' };
+const weapons = {};
+for (const [pre, type] of Object.entries(TYPE)) {
+  const magic = type === 'Wand' || type === 'Staff';
+  const pool = osms.filter(it => Math.floor(it.id / 10000) === +pre);
+  const lad = await ladder(pool, it => (magic ? n(it.stats.incMAD) : n(it.stats.incPAD)) + n(it.stats.incINT) * 0.5 + n(it.stats.incSTR) * 0.2 + n(it.stats.incDEX) * 0.2 + n(it.stats.incLUK) * 0.2);
+  weapons[type] = [];
+  for (const [id, name, lv] of lad) weapons[type].push([id, name, lv, await actions(id)]);
+  console.log(type, weapons[type].map(w => w[2]).join(','));
+}
+
+// hair and faces: random part of a look (maplestory.io lists; ids encode gender)
+const list = async q => (await json(`${API}/item?${q}`)).map(x => x.id);
+async function pool(ids, lo, count) {
+  const out = [];
+  for (const id of shuffle(ids.filter(id => Math.floor(id / 1000) === lo))) {
+    if (out.length >= count) break;
+    if (await actions(id)) out.push(id);
+  }
+  return out.sort((a, b) => a - b);
+}
+const [hairIds, faceIds] = await Promise.all([list('subCategoryFilter=Hair'), list('subCategoryFilter=Face')]);
+const hair = { m: await pool(hairIds, 30, 24), f: await pool(hairIds, 31, 24) };
+const face = { m: await pool(faceIds, 20, 20), f: await pool(faceIds, 21, 20) };
+console.log('hair', hair.m.length, hair.f.length, 'face', face.m.length, face.f.length);
+
+const fmt = v => JSON.stringify(v).replace(/\]\],"/g, ']],\n      "').replace(/\}\},"/g, '}},\n  "').replace(/\},"([mf])"/g, '},\n    "$1"');
 const ts = `// Generated by dev/build-catalog.mjs — do not edit by hand.
-// Item ids for the character randomizer (no images): non-cash MapleStory Classic items that maplestory.io can draw.
+// Lookup table for the character generator (ids/names/levels/scores only, no images). Stats and job/gender limits
+// from OSMS (MapleStory Classic); every item has sprite data on maplestory.io.
 
-/** [id, name, required level, gender (0 m, 1 f, 2 any), jobs ('Beginner' = everyone)] */
-export type GearRow = [number, string, number, number, string];
-/** [id, name, required level, animations (action → frame count)] */
+/** [id, name, required level, score for the job] — an upgrade ladder: each beats everything below its level */
+export type LadderRow = [number, string, number, number];
+/** [id, name, required level, animations (action → frame count)] — ladder by attack */
 export type WeaponRow = [number, string, number, Record<string, number>];
 
-export const GEAR: Record<string, GearRow[]> = ${JSON.stringify(catalog.gear, null, 0).replace(/\],\[/g, '],\n    [').replace(/":\[\[/g, '": [\n    [').replace(/\]\],"/g, ']],\n  "')};
+/** branch → gender → slot → ladder */
+export const GEAR: Record<string, Record<'m' | 'f', Record<string, LadderRow[]>>> = ${fmt(gear)};
 
-export const WEAPONS: Record<string, WeaponRow[]> = ${JSON.stringify(catalog.weapons).replace(/\],\[/g, '],\n    [').replace(/":\[\[/g, '": [\n    [').replace(/\]\],"/g, ']],\n  "')};
+export const WEAPONS: Record<string, WeaponRow[]> = ${JSON.stringify(weapons).replace(/\]\],"/g, ']],\n  "')};
 
-export const HAIR: Record<'m' | 'f', [number, string][]> = ${JSON.stringify(catalog.hair)};
+export const HAIR: Record<'m' | 'f', number[]> = ${JSON.stringify(hair)};
 
-export const FACE: Record<'m' | 'f', [number, string][]> = ${JSON.stringify(catalog.face)};
+export const FACE: Record<'m' | 'f', number[]> = ${JSON.stringify(face)};
 `;
 fs.writeFileSync('src/core/avatar/catalog.ts', ts);
 console.log('wrote src/core/avatar/catalog.ts', ts.length, 'bytes');

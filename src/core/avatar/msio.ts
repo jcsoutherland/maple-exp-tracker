@@ -1,15 +1,15 @@
 import { getBlob, setBlob } from '../data/cache';
-import { FACE, GEAR, HAIR, WEAPONS, type GearRow } from './catalog';
+import { FACE, GEAR, HAIR, WEAPONS, type LadderRow, type WeaponRow } from './catalog';
 
 /**
  * Real MapleStory character sprites from maplestory.io (the same renderer meowdb's character builder uses).
- * A look is rolled instantly from a small built-in catalog of item ids (catalog.ts); its idle and weapon-attack
+ * A look is made instantly from a built-in lookup table (catalog.ts: best gear per job/level); its idle and weapon-attack
  * frames are then requested one at a time, gently, and kept in IndexedDB on this device forever, so each is fetched
  * only once. Sprites are game assets: they are fetched at runtime and never copied into this repository.
  */
 const API = 'https://maplestory.io/api';
 /** bump when the look format or rules change, so older saved looks are re-rolled */
-export const LOOK_V = 2;
+export const LOOK_V = 3;
 
 export interface CharLook {
   v: number;
@@ -45,22 +45,33 @@ export function classLook(cls: string): Branch {
   return BRANCHES.find(([, keys]) => keys.some(k => c.includes(k)))?.[0] ?? 'beginner';
 }
 
-const JOB_NAME: Record<Branch, string> = { warrior: 'Warrior', magician: 'Magician', bowman: 'Bowman', thief: 'Thief', beginner: 'Beginner' };
 
-/** The weapon type a job fights with (by 2nd/3rd/4th job name where it matters). */
-function weaponType(cls: string, branch: Branch): string {
+/** Weapon types a job fights with, preferred first (by 2nd/3rd/4th job name where it matters). */
+function weaponTypes(cls: string, branch: Branch): string[] {
   const c = cls.toLowerCase();
   switch (branch) {
-    case 'bowman': return /crossbow|sniper|marksman/.test(c) ? 'Crossbow' : 'Bow';
-    case 'thief': return /bandit|shadower/.test(c) ? 'Dagger' : 'Claw';
-    case 'magician': return 'Wand';
+    case 'bowman': return /crossbow|sniper|marksman/.test(c) ? ['Crossbow'] : ['Bow'];
+    case 'thief': return /bandit|shadower/.test(c) ? ['Dagger'] : ['Claw'];
+    case 'magician': return ['Wand', 'Staff'];
     case 'warrior':
-      if (/spear|dragon knight|dark knight/.test(c)) return 'Spear';
-      if (/page|white knight|paladin/.test(c)) return 'One-Handed Blunt Weapon';
-      if (/fighter|crusader|hero/.test(c)) return 'Two-Handed Sword';
-      return 'One-Handed Sword';
-    default: return 'One-Handed Sword';
+      if (/spear|dragon knight|dark knight/.test(c)) return ['Spear', 'Pole Arm'];
+      if (/page|white knight|paladin/.test(c)) return ['One-Handed Blunt Weapon', 'Two-Handed Blunt', 'One-Handed Sword'];
+      if (/fighter|crusader|hero/.test(c)) return ['Two-Handed Sword', 'Two-Handed Axe', 'One-Handed Sword', 'One-Handed Axe'];
+      return ['One-Handed Sword', 'One-Handed Axe', 'One-Handed Blunt Weapon'];
+    default: return ['One-Handed Sword'];
   }
+}
+
+/** The job's weapon for a level: the strongest allowed weapon of its preferred type, unless another of its types has a
+ *  higher-tier one (some weapons have no sprites on maplestory.io, which leaves gaps in a type's ladder). */
+function pickWeapon(types: string[], lv: number): { type: string; row: WeaponRow | null } {
+  let best: { type: string; row: WeaponRow | null } = { type: types[0], row: null };
+  for (const type of types) {
+    const ladder = WEAPONS[type] || [], row = [...ladder].reverse().find(r => r[2] <= lv) ?? null;
+    if (row && (!best.row || row[2] > best.row[2])) best = { type, row };
+  }
+  if (!best.row) { const l = WEAPONS[types[0]] || []; best = { type: types[0], row: l[0] ?? null }; } // too low for any: the first one
+  return best;
 }
 
 /** Preferred attack animations per weapon type; the first one the weapon actually has is used. */
@@ -76,34 +87,29 @@ const SHOT: Record<string, CharLook['shot']> = { Bow: 'arrow', Crossbow: 'arrow'
 const rand = <T,>(a: T[]): T | undefined => a[Math.floor(Math.random() * a.length)];
 
 /**
- * Roll a random look for a job, level and gender, instantly (no network): skin, hair, face and gear from the catalog
- * that the job and gender can wear (preferring gear at or below the level), and the job's weapon for that level.
+ * Make a look for a job, level and gender, instantly (no network) and consistently: every equipped item is the best
+ * one for the job at that level (the catalog's upgrade ladders, scored on the job's main stat), the weapon is the
+ * job's strongest weapon type allowed at that level; only skin, hair and face are random.
  */
 export function rollLook(cls: string, level: number | null, gender: 0 | 1 = 0): CharLook {
-  const branch = classLook(cls), lv = level || 1;
-  const wears = (r: GearRow) => (r[3] === 2 || r[3] === gender) && (r[4].split('|').includes(JOB_NAME[branch]) || r[4].includes('Beginner'));
-  const pick = (slot: string) => {
-    const ok = (GEAR[slot] || []).filter(wears), fit = ok.filter(r => r[2] <= lv);
-    return rand(fit.length ? fit : ok)?.[0] ?? null;
-  };
+  const branch = classLook(cls), lv = level || 1, g = gender ? 'f' : 'm', table = GEAR[branch]?.[g] ?? {};
+  /** the best item of a slot the level allows */
+  const best = (slot: string): LadderRow | null => [...(table[slot] || [])].reverse().find(r => r[2] <= lv) ?? null;
   const items: number[] = [];
-  const add = (id: number | null) => { if (id) items.push(id); };
-  if (Math.random() < 0.85) add(pick('Hat'));
-  const overall = Math.random() < 0.5 ? pick('Overall') : null;
-  if (overall) add(overall); else { add(pick('Top')); add(pick('Bottom')); }
-  add(pick('Shoes')); add(pick('Glove'));
-  if (Math.random() < 0.5) add(pick('Earrings'));
+  const add = (r: LadderRow | null) => { if (r) items.push(r[0]); };
+  add(best('Hat'));
+  // an overall when it beats the best top + bottom together
+  const o = best('Overall'), t = best('Top'), bt = best('Bottom');
+  if (o && o[3] >= (t?.[3] ?? 0) + (bt?.[3] ?? 0)) add(o); else { add(t); add(bt); }
+  add(best('Shoes')); add(best('Glove')); add(best('Cape')); add(best('Earrings'));
 
-  // the job's weapon: the best one of its type the character's level allows
-  const type = weaponType(cls, branch), ladder = WEAPONS[type] || [];
-  const w = [...ladder].reverse().find(r => r[2] <= lv) ?? ladder[0] ?? null;
+  const { type, row: w } = pickWeapon(weaponTypes(cls, branch), lv);
   if (w) items.push(w[0]);
   const acts = w?.[3] ?? {};
   const attack = (ATTACKS[type] || ['swingO1']).find(a => acts[a]) ?? Object.keys(acts).find(a => /^(swing|stab|shoot)/.test(a)) ?? 'swingO1';
   const stand = acts.stand2 ? 'stand2' : 'stand1';
-  const g = gender ? 'f' : 'm';
   return {
-    v: LOOK_V, branch, gender, skin: rand([0, 1, 2, 3, 4])!, hair: rand(HAIR[g])?.[0] ?? 30030, face: rand(FACE[g])?.[0] ?? 20000,
+    v: LOOK_V, branch, gender, skin: rand([0, 1, 2, 3, 4])!, hair: rand(HAIR[g]) ?? 30030, face: rand(FACE[g]) ?? 20000,
     items, weapon: w?.[0] ?? null, stand, standFrames: acts[stand] || 3, attack, attackFrames: acts[attack] || 3, shot: SHOT[type] ?? null,
   };
 }

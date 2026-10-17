@@ -21,13 +21,13 @@ interface Bar { buf: number[]; cur: number | null; max: number | null; votes: Re
 /** below this bar % the level total (exp / %) is too imprecise to estimate (0.20% read to 2 decimals: ±2.5%) */
 const MIN_TOTAL_PCT = 0.2;
 /**
- * Do two reads imply the same level total (exp·100/%)? Allows for the % being rounded to 2 decimals, so a read with
- * an extra digit (×10) is caught even at a fraction of a percent. A 0.00% read can't be checked: only tiny exp passes.
+ * Do two reads imply the same level total (exp·100/%)? Allows for the % being cut to 2 decimals (±0.01), so a read
+ * with an extra digit (×10) is caught even at a fraction of a percent, and a wrong digit at higher %. A 0.00% read can't be checked: only tiny exp passes.
  */
 function sameTotal(a: ExpReading, b: ExpReading, slack: number): boolean {
   if (a.pct <= 0 || b.pct <= 0) return Math.max(a.exp, b.exp) - Math.min(a.exp, b.exp) <= 500 && b.pct < 0.05;
   const ta = a.exp * 100 / a.pct, tb = b.exp * 100 / b.pct;
-  return Math.abs(tb / ta - 1) <= 0.005 / a.pct + 0.005 / b.pct + slack;
+  return Math.abs(tb / ta - 1) <= 0.01 / a.pct + 0.01 / b.pct + slack;
 }
 
 /** EXP earned where the map name couldn't be read or isn't a real map */
@@ -91,8 +91,10 @@ export class Tracker {
   /** Feed one EXP bar reading. Returns true when a level-up was detected. */
   onExp(r: ExpReading): boolean {
     if (this.exp == null) {
-      // the baseline needs two reads that agree (out of the last few), so one misread can't become the starting point
-      const f = this.firsts.slice().reverse().find(f => r.exp >= f.exp && r.exp - f.exp <= Math.max(2000, f.exp * 0.05) && sameTotal(f, r, 0.03));
+      // the baseline needs two reads that agree (out of the last few), so one misread can't become the starting point;
+      // they must imply the same level total as closely as the % display allows (a digit misread by a few hundred
+      // EXP, e.g. 124,156 for 124,516, would otherwise be counted as a gain)
+      const f = this.firsts.slice().reverse().find(f => r.exp >= f.exp && r.exp - f.exp <= Math.max(2000, f.exp * 0.05) && sameTotal(f, r, 0.0005));
       if (!f) { this.firsts = [...this.firsts.slice(-2), r]; return false; }
       this.firsts = []; this.exp = f.exp; this.pct = f.pct; this.setTotal(f);
     }

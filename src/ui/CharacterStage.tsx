@@ -64,7 +64,7 @@ export function CharacterStage() {
       <div className="showroom" style={{ width: W * SHOW, maxWidth: '100%', aspectRatio: `${W} / ${H}` }}>
         <canvas ref={ref} width={W * Z} height={H * Z} />
         {placeholder && <div className="stage-ph">{placeholder}</div>}
-        {sp.look && <button className="reroll" title="Roll a different random look" onClick={() => c.rerollLook()}>🎲</button>}
+        {sp.look && <button className="reroll" title="New random hair, face and skin (gear is always the best for your job and level)" onClick={() => c.rerollLook()}>🎲</button>}
       </div>
       <div className="stage-cap">{shown ? (fighting ? '⚔ Fighting' : 'Idle') : ' '}</div>
     </div>
