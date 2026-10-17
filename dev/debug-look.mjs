@@ -10,6 +10,7 @@ p.on('pageerror', e => console.log('PAGEERROR', e.message));
 p.on('console', m => { if (/character|look|frames/i.test(m.text())) console.log('console:', m.text()); });
 await p.goto('http://localhost:5183/');
 await p.waitForFunction(() => window.met);
+await p.screenshot({ path: `${out}_top.png`, clip: { x: 0, y: 90, width: 1200, height: 420 } });
 const look = await p.evaluate(async (cls, level, map, process_keep) => {
   const c = window.met;
   c.setIdentity({ name: 'TestChar', cls, level: +level });

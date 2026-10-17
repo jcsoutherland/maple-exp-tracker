@@ -1,5 +1,4 @@
 import { getBlob, setBlob } from '../data/cache';
-import { classLook, type Look as Branch } from '../pixelart';
 import { FACE, GEAR, HAIR, WEAPONS, type GearRow } from './catalog';
 
 /**
@@ -33,6 +32,19 @@ export interface CharLook {
 
 // ---------- rolling a look ----------
 
+export type Branch = 'warrior' | 'magician' | 'bowman' | 'thief' | 'beginner';
+const BRANCHES: [Branch, string[]][] = [
+  ['bowman', ['bowman', 'archer', 'hunter', 'ranger', 'bowmaster', 'crossbow', 'sniper', 'marksman']],
+  ['magician', ['magician', 'wizard', 'mage', 'cleric', 'priest', 'bishop']],
+  ['thief', ['thief', 'rogue', 'assassin', 'hermit', 'night lord', 'bandit', 'shadower']],
+  ['warrior', ['warrior', 'swordman', 'swordsman', 'fighter', 'page', 'spearman', 'crusader', 'knight', 'hero', 'paladin']],
+];
+/** Job branch for a job name (Beginner / unknown → beginner). */
+export function classLook(cls: string): Branch {
+  const c = (cls || '').toLowerCase();
+  return BRANCHES.find(([, keys]) => keys.some(k => c.includes(k)))?.[0] ?? 'beginner';
+}
+
 const JOB_NAME: Record<Branch, string> = { warrior: 'Warrior', magician: 'Magician', bowman: 'Bowman', thief: 'Thief', beginner: 'Beginner' };
 
 /** The weapon type a job fights with (by 2nd/3rd/4th job name where it matters). */
@@ -64,11 +76,11 @@ const SHOT: Record<string, CharLook['shot']> = { Bow: 'arrow', Crossbow: 'arrow'
 const rand = <T,>(a: T[]): T | undefined => a[Math.floor(Math.random() * a.length)];
 
 /**
- * Roll a random look for a job and level, instantly (no network): skin, hair, face and gear from the catalog that the
- * job and gender can wear (preferring gear at or below the level), and the job's weapon for that level.
+ * Roll a random look for a job, level and gender, instantly (no network): skin, hair, face and gear from the catalog
+ * that the job and gender can wear (preferring gear at or below the level), and the job's weapon for that level.
  */
-export function rollLook(cls: string, level: number | null): CharLook {
-  const branch = classLook(cls), lv = level || 1, gender: 0 | 1 = Math.random() < 0.5 ? 0 : 1;
+export function rollLook(cls: string, level: number | null, gender: 0 | 1 = 0): CharLook {
+  const branch = classLook(cls), lv = level || 1;
   const wears = (r: GearRow) => (r[3] === 2 || r[3] === gender) && (r[4].split('|').includes(JOB_NAME[branch]) || r[4].includes('Beginner'));
   const pick = (slot: string) => {
     const ok = (GEAR[slot] || []).filter(wears), fit = ok.filter(r => r[2] <= lv);

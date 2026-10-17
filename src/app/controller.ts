@@ -1,10 +1,8 @@
 import { Capture } from '../core/capture';
-import { LOOK_V, rollLook, SpriteLoader } from '../core/avatar/msio';
-import { classAvatar, classLook, type Animations } from '../core/pixelart';
-import { themeFor, type Theme } from '../core/scene';
+import { classLook, LOOK_V, rollLook, SpriteLoader, type CharLook } from '../core/avatar/msio';
 import { REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
-import { canonItem, canonMap, loadOsms, mapRecord, mapsReady, osmsReady } from '../core/data/osms';
-import { logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
+import { canonItem, canonMap, loadOsms, mapsReady, osmsReady } from '../core/data/osms';
+import { enhanceText, fixIL, logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
 import { cleanMap, cleanName, lineAmount, lineKind, lineQuality, matchClass, parseExp, parseLevel, parsePair } from '../core/parse';
@@ -14,7 +12,13 @@ import { Ticker } from '../core/ticker';
 import { Tracker } from '../core/tracker';
 import { normLine, sim } from '../core/util';
 
-export interface Identity { name: string; cls: string; level: number | null }
+export interface Identity {
+  name: string; cls: string; level: number | null;
+  /** the user typed the name: screen reading never replaces it */
+  nameTyped?: boolean;
+  /** for the rolled character look (0 male, 1 female) */
+  gender?: 0 | 1;
+}
 export interface OcrTestRow { key: RegionKey | 'log'; label: string; color: string; img: string; raw: string; parsed: string }
 
 /**
@@ -109,7 +113,7 @@ export class Controller {
     store.saveIdentity(this.identity);
     if (this.identity.name !== before.name || classLook(this.identity.cls) !== classLook(before.cls)) {
       if (this.sess) this.ensureLook(); else this.loadLook();
-    }
+    } else if ((this.identity.gender ?? 0) !== (before.gender ?? 0) && (this.sess || this.sprites.look)) this.ensureLook(); // new look in that gender
     if (this.sess) { if (p.name) this.sess.char = p.name; if (p.cls !== undefined) this.sess.cls = p.cls; if (p.level) { this.sess.level = p.level; this.sess.levelStart ??= p.level; } }
     this.notify();
   }
@@ -132,24 +136,43 @@ export class Controller {
   async identify() {
     if (!this.capture.ready || this.ocrState !== 'ready') return null;
     const v = this.capture.video;
-    const [n, c, l] = await Promise.all([this.read('name', v), this.read('cls', v), this.read('level', v)]);
+    const [name0, c, l] = await Promise.all([this.readName(), this.read('cls', v), this.read('level', v)]);
     const ch = store.loadChars();
-    // the status-bar name is ~9px tall and OCR confuses letters ('Flynny' → 'Flyriny'): snap to a known character
-    let name = cleanName(n);
-    if (name) { const known = Object.keys(ch).map(k => ({ k, s: sim(k, name!) })).sort((a, b) => b.s - a.s)[0]; if (known && known.s >= 0.6) name = known.k; }
+    // a near-exact match to a character seen before is that character (old misreads must not pull it back)
+    let name = name0;
+    if (name) { const known = Object.keys(ch).map(k => ({ k, s: sim(k, name!) })).sort((a, b) => b.s - a.s)[0]; if (known && known.s >= 0.85) name = known.k; }
     const got = { name, cls: matchClass(c), level: parseLevel(l) };
+    const id = this.identity;
     this.setIdentity({
-      ...(got.name && !this.identity.name ? { name: got.name } : {}),
+      // a confident read replaces a name the app guessed before, never one the user typed
+      ...(got.name && (!id.name || (!id.nameTyped && got.name !== id.name)) ? { name: got.name } : {}),
       ...(got.cls ? { cls: got.cls } : !this.identity.cls && got.name && ch[got.name]?.cls ? { cls: ch[got.name].cls } : {}),
       ...(got.level ? { level: got.level } : {}),
     });
     return got;
   }
 
+  /**
+   * The character name (~9px tall): "zoom and enhance" (6× smooth upscale + Otsu threshold), OCR, then each i/l
+   * checked against its pixels. Read on three frames a moment apart; a name needs two matching reads.
+   */
+  private async readName(): Promise<string | null> {
+    const votes = new Map<string, number>();
+    for (let k = 0; k < 3; k++) {
+      if (k) await new Promise(r => setTimeout(r, 250));
+      const e = enhanceText(this.capture.video, this.regions.name);
+      const r = await this.engine.readChars(e.canvas, 'line');
+      this.stats.ocrCalls++;
+      const n = cleanName(fixIL(r.chars, e));
+      if (n) votes.set(n, (votes.get(n) || 0) + 1);
+    }
+    const best = [...votes].sort((a, b) => b[1] - a[1])[0];
+    return best && best[1] >= 2 ? best[0] : null;
+  }
+
   // ---------- session ----------
   async start() {
-    if (!this.identity.name) await this.identify();
-    else if (!this.identity.level) { const l = parseLevel(await this.read('level', this.capture.video)); if (l) this.setIdentity({ level: l }); }
+    await this.identify(); // name / class / level once per session
     const { name, cls, level } = this.identity;
     this.sess = newSession(name, cls, level);
     this.tracker = this.makeTracker(this.sess);
@@ -355,26 +378,24 @@ export class Controller {
   private markActive() { this.lastActive = Date.now(); }
   get fighting() { return Date.now() - this.lastActive < 4000; }
   /** The pixel-art explorer for the current job (idle / attack loops). */
-  get avatar(): Animations { return classAvatar(this.identity.cls); }
-
   /** Real Maple sprite frames for the character's saved look (pixel art shows until they're in). */
   readonly sprites = new SpriteLoader();
-  /** backdrop for the current map */
-  get theme(): Theme { return themeFor(this.tracker?.mapCur ? mapRecord(this.tracker.mapCur) : null); }
 
   /** Load the character's saved look (if it suits the current job) and its frames. */
   private loadLook() {
     const look = store.loadChars()[this.identity.name]?.look;
-    this.sprites.load(look && look.v === LOOK_V && look.branch === classLook(this.identity.cls) ? look : null, () => this.onSpriteFrame());
+    this.sprites.load(look && this.lookFits(look) ? look : null, () => this.onSpriteFrame());
   }
-  /** A session starts with a look: roll a random one for the job if the character has none (or changed branch). */
+  /** Does a saved look still suit the character (current format, job branch and gender)? */
+  private lookFits(l: CharLook) { return l.v === LOOK_V && l.branch === classLook(this.identity.cls) && l.gender === (this.identity.gender ?? 0); }
+  /** A session starts with a look: roll a random one if the character has none that fits (job branch, gender). */
   private ensureLook() {
     const { name, cls, level } = this.identity;
     if (!name || name === 'Unknown') return;
     const cur = store.loadChars()[name]?.look;
-    if (cur && cur.v === LOOK_V && cur.branch === classLook(cls)) { if (JSON.stringify(this.sprites.look) !== JSON.stringify(cur)) this.loadLook(); return; }
+    if (cur && this.lookFits(cur)) { if (JSON.stringify(this.sprites.look) !== JSON.stringify(cur)) this.loadLook(); return; }
     const ch = store.loadChars();
-    ch[name] = { ...ch[name], look: rollLook(cls, level), thumb: undefined };
+    ch[name] = { ...ch[name], look: rollLook(cls, level, this.identity.gender ?? 0), thumb: undefined };
     store.saveChars(ch);
     this.tracker?.event('info', 'New character look rolled');
     this.loadLook();
@@ -406,6 +427,11 @@ export class Controller {
         this.slotCache = saved;
         rows.push({ key, label: def.label, color: def.color, img: logPreviewCanvas(lo).toDataURL(), raw: lines.join(' ⏎ '),
           parsed: lines.slice().reverse().map(l => `${lineKind(l) ?? '?'}${lineAmount(l) ? ' +' + lineAmount(l) : ''}`).join(' ⏎ ') || '(no lines)' });
+        continue;
+      }
+      if (key === 'name') { // the enhanced reader used for the name
+        const e = enhanceText(src, this.regions.name), r = await this.engine.readChars(e.canvas, 'line');
+        rows.push({ key, label: def.label, color: def.color, img: e.canvas.toDataURL(), raw: r.text, parsed: cleanName(fixIL(r.chars, e)) ?? '✗' });
         continue;
       }
       const p = prepRegion(src, this.regions[key], def);

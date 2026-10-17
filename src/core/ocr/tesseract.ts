@@ -1,5 +1,5 @@
 import { createWorker, PSM, type Worker } from 'tesseract.js';
-import type { OcrEngine, OcrKind } from './engine';
+import type { OcrChar, OcrEngine, OcrKind } from './engine';
 
 const PARAMS: Record<OcrKind, Partial<Record<string, string>>> = {
   num: { tessedit_char_whitelist: '0123456789,.[]/%', tessedit_pageseg_mode: PSM.SINGLE_LINE },
@@ -30,7 +30,12 @@ export class TesseractEngine implements OcrEngine {
   }
 
   read(canvas: HTMLCanvasElement, kind: OcrKind): Promise<string> {
-    if (!this.workers[kind] || canvas.width < 4 || canvas.height < 4) return Promise.resolve('');
+    return this.readChars(canvas, kind).then(r => r.text);
+  }
+
+  readChars(canvas: HTMLCanvasElement, kind: OcrKind): Promise<{ text: string; chars: OcrChar[] }> {
+    const none = { text: '', chars: [] as OcrChar[] };
+    if (!this.workers[kind] || canvas.width < 4 || canvas.height < 4) return Promise.resolve(none);
     const job = (this.queue[kind] || Promise.resolve()).then(async () => {
       const wp = this.workers[kind]!;
       let timer = 0;
@@ -41,12 +46,13 @@ export class TesseractEngine implements OcrEngine {
         console.warn(`OCR ${kind} worker stuck; restarting it`);
         wp.then(w => w.terminate()).catch(() => undefined);
         this.spawn(kind);
-        return '';
+        return none;
       }
-      return r.data.text.trim();
+      const chars = (r.data.symbols || []).map(s => ({ c: s.text, x0: s.bbox.x0, y0: s.bbox.y0, x1: s.bbox.x1, y1: s.bbox.y1 }));
+      return { text: r.data.text.trim(), chars };
     });
     this.queue[kind] = job.catch(() => undefined);
-    return job.catch(() => '');
+    return job.catch(() => none);
   }
 
   async dispose() {

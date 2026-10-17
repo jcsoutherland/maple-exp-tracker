@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { summaryText, type SavedSession } from '../core/session';
 import * as store from '../core/storage';
 import { fmtHM, fmtK, fmtN } from '../core/util';
-import { AvatarCanvas } from './CharacterStage';
 import { DropTable } from './DropsTab';
 import { toast, useCtrl } from './hooks';
 
@@ -49,7 +48,7 @@ export function HistoryTab() {
       </div>
       <div className="card">
         <div className="charhead">
-          <div className="snap">{ch.thumb ? <img className="thumb" src={ch.thumb} alt="" /> : <AvatarCanvas cls={ch.cls || list[0].cls || ''} zoom={2} />}</div>
+          <div className="snap">{ch.thumb ? <img className="thumb" src={ch.thumb} alt="" /> : <span className="mut small" style={{ margin: 'auto' }}>no look yet</span>}</div>
           <div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{cur}</div>
             <div className="mut">{ch.cls || list[0].cls} · Lv {ch.level ?? list[0].level ?? '?'}</div>

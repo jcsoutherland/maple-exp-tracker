@@ -8,18 +8,16 @@ import { sim } from '../util';
  */
 export const OSMS_BASE = 'https://osmsdataexplorer.com/data/current/';
 export interface ItemRec { id: number; name: string; cat: string; price: number | null; desc: string }
-/** a map; `mark` is its region emblem (e.g. 'Henesys', 'KerningCity'), used to theme the character scene */
-export interface MapRec { id: number; name: string; street: string; region: string; mark: string }
+export interface MapRec { id: number; name: string; street: string }
 
 let items: ItemRec[] | null = null;
 let maps: MapRec[] | null = null;
 let byName = new Map<string, ItemRec>();
-let itemIds = new Set<number>();
 let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
 interface RawItem { id: number; name: string; category?: string; stats?: { price?: number }; description?: string }
-interface RawMap { id: number; name: string; street_name?: string; region?: string; map_mark?: string }
+interface RawMap { id: number; name: string; street_name?: string }
 
 export function loadOsms(): Promise<void> {
   return (loading ??= (async () => {
@@ -30,12 +28,11 @@ export function loadOsms(): Promise<void> {
       }),
       cached('maps-v3', async () => {
         const d = await (await fetch(OSMS_BASE + 'maps.json')).json() as { regions: { maps: RawMap[] }[] };
-        return d.regions.flatMap(r => r.maps).map(m => ({ id: m.id, name: m.name.trim(), street: (m.street_name || '').trim(), region: m.region || '', mark: m.map_mark || '' }));
+        return d.regions.flatMap(r => r.maps).map(m => ({ id: m.id, name: m.name.trim(), street: (m.street_name || '').trim() }));
       }),
     ]);
     items = it; maps = mp;
     // first record wins for duplicated names (e.g. two "Red Potion" ids)
-    itemIds = new Set(it.map(i => i.id));
     byName = new Map();
     for (const i of it) if (!byName.has(i.name.toLowerCase())) byName.set(i.name.toLowerCase(), i);
     listeners.forEach(l => l());
@@ -43,10 +40,7 @@ export function loadOsms(): Promise<void> {
 }
 
 export const osmsReady = () => items !== null;
-/** The map record for an exact map name (as canonMap returns it). */
-export const mapRecord = (name: string) => maps?.find(m => m.name === name) ?? null;
-/** Is this item id in MapleStory Classic (per OSMS)? Unknown (list not loaded) counts as yes. */
-export const inClassic = (id: number) => !items || itemIds.has(id);
+
 export const mapsReady = () => maps !== null && maps.length > 0;
 export const onOsmsLoaded = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 export const itemByName = (name: string) => byName.get(name.toLowerCase()) || null;

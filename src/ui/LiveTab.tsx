@@ -33,11 +33,16 @@ export function LiveTab() {
     <section>
       <div className="row charin card slim">
         <span className="mut">Character</span>
-        <input value={id.name} placeholder="Name" onChange={e => c.setIdentity({ name: e.target.value })} />
+        <input value={id.name} placeholder="Name" onChange={e => c.setIdentity({ name: e.target.value, nameTyped: !!e.target.value.trim() })} />
         <span className="mut">Class</span>
         <input value={id.cls} placeholder="Class" onChange={e => c.setIdentity({ cls: e.target.value })} />
         <span className="mut">Lv</span>
         <input className="lv" type="number" min={1} max={250} value={id.level ?? ''} onChange={e => c.setIdentity({ level: +e.target.value || null })} />
+        <span className="mut">Gender</span>
+        <select value={id.gender ?? 0} title="Gender of your rolled character (changing it rolls a new look)" onChange={e => c.setIdentity({ gender: +e.target.value as 0 | 1 })}>
+          <option value={0}>Male</option>
+          <option value={1}>Female</option>
+        </select>
         <button disabled={!c.capture.ready || c.ocrState !== 'ready'} onClick={() => c.identify()}>Read from screen</button>
       </div>
 

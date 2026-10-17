@@ -8,7 +8,7 @@ A lightweight, browser-based overlay for **MapleStory Classic World**. It watche
 - **EXP per map.** Maps under 1,000 EXP are dropped when a session is saved, and map names that can't be read or aren't real maps (checked against the OSMS map list) count as "Cannot determine".
 - **HP/MP used**, converted to potion counts and cost (Meat, Lemon, Red/Orange/White/Blue Potion, Mana Elixir), plus net mesos.
 - **History per character**, with copyable summaries and JSON export/import.
-- **Character sheet**: when a session starts, a random look is rolled instantly for your job from a built-in catalog (`src/core/avatar/catalog.ts`, item ids only, regenerated with `node dev/build-catalog.mjs`): skin, hair, face, class-legal Classic gear, and your job's weapon for your level. It's saved per character and faces right toward the stats. It's drawn with real MapleStory sprites from the [maplestory.io](https://maplestory.io) renderer: idle, plus the weapon's own attack (bow shot, swing, stab…) while EXP or loot comes in, on a pixel-art backdrop that follows the current map's region. Frames are fetched once and cached on your device (never committed to this repo); an original pixel-art explorer stands in until they arrive.
+- **Character sheet**: when a session starts, a random look is rolled instantly for your job from a built-in catalog (`src/core/avatar/catalog.ts`, item ids only, regenerated with `node dev/build-catalog.mjs`): skin, hair, face, class-legal Classic gear, and your job's weapon for your level, in the gender picked next to your name (male by default; changing it rolls a new look). It's drawn with real MapleStory sprites from the [maplestory.io](https://maplestory.io) renderer in a light showroom, facing the stats: idle, plus the weapon's own attack (bow shot, swing, stab…) while EXP or loot comes in. Frames are fetched once and cached on your device (never committed to this repo).
 - **Pop-out overlay** using Document Picture-in-Picture, which stays on top of the game.
 
 ## Use it
@@ -28,7 +28,7 @@ Default regions are measured for a 1280×720 game window and stored as fractions
 | HP / MP | Every 1 s | Digits OCR, max value by decaying vote, 5-read median |
 | EXP bar | Every 5 s | Digits OCR, validated against the shown %. A stray digit is repaired, and a death needs two matching reads |
 | Map name | Every 10 s if the title pixels changed (every 2 s while unknown), and every 5k EXP | Must match the real map list, else "Cannot determine" |
-| Name / class | Once per session | |
+| Name / class | Once per session | The name is "zoomed and enhanced" (6× smooth upscale + Otsu threshold), each i/l is checked against its pixels, and it needs 2 of 3 reads to agree; a name you type is never replaced |
 | Level | Session start and each detected level-up | |
 
 All of these are adjustable in **Setup → Read schedule**. Timers run in a Web Worker, so a background tab isn't throttled.

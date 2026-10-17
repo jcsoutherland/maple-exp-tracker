@@ -1,4 +1,5 @@
 import type { Region, RegionDef } from './config';
+import type { OcrChar } from './ocr/engine';
 
 /** Anything we can crop from: the live <video>, a canvas, or an ImageBitmap. */
 export type FrameSource = HTMLVideoElement | HTMLCanvasElement | ImageBitmap;
@@ -37,6 +38,69 @@ export function prepRegion(src: FrameSource, r: Region, def: RegionDef, out = do
   }
   g.putImageData(im, 0, 0);
   return { canvas: out, hash: hash >>> 0, ink };
+}
+
+/**
+ * "Zoom and enhance" for small UI text (the status-bar name): a smooth `scale`× upscale, then an Otsu threshold so
+ * the gaps between thin letters survive ("nn" no longer merges into "rii"). Dark text on white, padded, plus the ink
+ * mask for glyph checks.
+ */
+export function enhanceText(src: FrameSource, r: Region, scale = 6, out = document.createElement('canvas')) {
+  const { W, H } = frameSize(src), pad = 12;
+  const sw = Math.max(1, Math.round(r.w * W)), sh = Math.max(1, Math.round(r.h * H));
+  const w = sw * scale + pad * 2, h = sh * scale + pad * 2;
+  out.width = w; out.height = h;
+  const g = ctx2d(out);
+  g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+  g.drawImage(src, r.x * W, r.y * H, sw, sh, pad, pad, sw * scale, sh * scale);
+  const im = g.getImageData(0, 0, w, h), d = im.data, L = new Uint8Array(w * h), hist = new Array(256).fill(0);
+  for (let i = 0; i < L.length; i++) { L[i] = Math.round(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]); hist[L[i]]++; }
+  // Otsu: the threshold that best splits text from background
+  let sum = 0, sB = 0, wB = 0, best = -1, thr = r.thr;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i]; if (!wB) continue;
+    const wF = L.length - wB; if (!wF) break;
+    sB += i * hist[i];
+    const v = wB * wF * (sB / wB - (sum - sB) / wF) ** 2;
+    if (v > best) { best = v; thr = i; }
+  }
+  const mask = new Uint8Array(w * h);
+  for (let i = 0; i < L.length; i++) { const on = L[i] > thr; mask[i] = on ? 1 : 0; d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = on ? 0 : 255; }
+  g.putImageData(im, 0, 0);
+  return { canvas: out, mask, w, h };
+}
+
+/**
+ * OCR often swaps i and l in this pixel font ("Flynny" → "Fiynny"). Each i/l/| the OCR reports is checked against
+ * the ink inside its box: one unbroken stroke reaching the height of the tallest letters is "l"; a shorter or dotted
+ * (vertically split) stroke is "i". Returns the corrected text.
+ */
+export function fixIL(chars: OcrChar[], e: { mask: Uint8Array; w: number; h: number }): string {
+  const { mask, w, h } = e;
+  const inkRows = (c: OcrChar) => {
+    const rows: boolean[] = [];
+    for (let y = 0; y < h; y++) {
+      let on = false;
+      for (let x = Math.max(0, c.x0); x <= Math.min(w - 1, c.x1) && !on; x++) on = !!mask[y * w + x];
+      rows.push(on);
+    }
+    return rows;
+  };
+  const letters = chars.filter(c => /[A-Za-z0-9]/.test(c.c));
+  if (letters.length < 2) return chars.map(c => c.c).join('');
+  const tops = letters.map(c => inkRows(c).indexOf(true)).filter(t => t >= 0);
+  const ascender = Math.min(...tops), xTop = tops.slice().sort((p, q) => p - q)[tops.length >> 1];
+  return chars.map((c, i) => {
+    if (!'il|'.includes(c.c)) return c.c;
+    // OCR boxes can overlap the next letter: only look between the neighbours' boxes
+    const x0 = Math.max(c.x0, (chars[i - 1]?.x1 ?? -1) + 1), x1 = Math.min(c.x1, (chars[i + 1]?.x0 ?? w) - 1);
+    const rows = inkRows(x1 >= x0 ? { ...c, x0, x1 } : c), top = rows.indexOf(true), bottom = rows.lastIndexOf(true);
+    if (top < 0) return c.c;
+    for (let y = top; y <= bottom; y++) if (!rows[y]) return 'i'; // dotted
+    return top <= ascender + (xTop - ascender) * 0.35 ? 'l' : 'i';
+  }).join('');
 }
 
 /** Cheap pixel signature of a region (16-level luma on a coarse grid): detects "did this change" without OCR. */

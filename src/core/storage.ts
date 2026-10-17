@@ -47,5 +47,6 @@ export const loadActive = () => read<Session | null>(K.active, null);
 export const saveActive = (s: Session | null) => (s ? write(K.active, s) : localStorage.removeItem(K.active));
 
 /** The character name/class/level the user last typed or confirmed (never overwritten by OCR). */
-export const loadIdentity = () => read<{ name: string; cls: string; level: number | null } | null>('met.identity', null);
-export const saveIdentity = (i: { name: string; cls: string; level: number | null }) => write('met.identity', i);
+export interface SavedIdentity { name: string; cls: string; level: number | null; nameTyped?: boolean; gender?: 0 | 1 }
+export const loadIdentity = () => read<SavedIdentity | null>('met.identity', null);
+export const saveIdentity = (i: SavedIdentity) => write('met.identity', i);
