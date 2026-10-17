@@ -2,6 +2,7 @@ import { Capture } from '../core/capture';
 import { classLook, LOOK_V, rollLook, SpriteLoader, type CharLook } from '../core/avatar/msio';
 import { REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
 import { canonItem, canonMap, loadOsms, mapsReady, osmsReady } from '../core/data/osms';
+import { ExpLineFilter, snapCanvas, snapInk, snapLine, type LineSnap } from '../core/logqueue';
 import { enhanceText, fixIL, logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
@@ -11,6 +12,11 @@ import * as store from '../core/storage';
 import { Ticker } from '../core/ticker';
 import { Tracker } from '../core/tracker';
 import { normLine, sim } from '../core/util';
+
+/** a pickup-log line waiting to be (or being) read */
+interface LogItem { snap: LineSnap; status: 'queued' | 'reading' | 'done' | 'failed'; tries: number; guess: boolean }
+/** snapshots older than this are dropped unread, and the queue never holds more than LOG_QUEUE_MAX */
+const LOG_MAX_AGE_MS = 30_000, LOG_QUEUE_MAX = 60, LOG_READERS = 2, LOG_WATCH_SLOTS = 8; // ≤60 × ~22 KB
 
 export interface Identity {
   name: string; cls: string; level: number | null;
@@ -48,7 +54,7 @@ export class Controller {
   lastFinished: SavedSession | null = null;
   historyVersion = 0;
   /** reads/sec of the pickup-log watcher and OCR calls, for the performance readout */
-  stats = { logChecks: 0, ocrCalls: 0, lastTickMs: 0 };
+  stats = { logChecks: 0, ocrCalls: 0, lastTickMs: 0, expSkipped: 0, logDropped: 0, logBacklog: 0 };
 
   private ticker = new Ticker();
   private listeners = new Set<() => void>();
@@ -59,7 +65,12 @@ export class Controller {
   /** recently counted log lines (normalised text), for the fallback text check */
   private counted: { n: string; t: number }[] = [];
   /** per visible log line (bottom-up, aligned with lastLog.slots): counted yet, OCR attempts */
-  private logLines: { done: boolean; tries: number; lastTry: number; guess: boolean }[] = [];
+  /** the log lines on screen, newest first, followed as they scroll; `pre` = already there before watching started */
+  private logLines: { pre: boolean; guess: boolean; item: LogItem | null }[] = [];
+  /** snapshots waiting to be read (oldest first) */
+  private logQueue: LogItem[] = [];
+  private reading = 0;
+  private readonly expFilter = new ExpLineFilter();
   private mapSig = 0;
   private mapExpAt = 0;
   private recent: [number, number][] = [];
@@ -255,7 +266,12 @@ export class Controller {
     });
   }
 
-  private async tickLog() {
+  /**
+   * Watch the pickup log. This never waits on OCR: new lines are spotted with a cheap pixel comparison and copied out
+   * of the frame at once (snapshots), then read from a queue by two OCR workers. EXP lines are recognised by shape
+   * and skipped (the EXP bar counts EXP exactly), so a fast party log doesn't drown the meso / item lines.
+   */
+  private tickLog() {
     if (!this.canRun || this.busy.log) return;
     this.busy.log = true;
     const t0 = performance.now();
@@ -268,29 +284,69 @@ export class Controller {
       this.lastLog = lo;
       const now = Date.now();
       // Follow each line as it scrolls up: new lines enter at slot 0 and push the rest up by `count`.
-      // Lines already on screen when watching starts belong to before the session (done = true).
-      const fresh = Array.from({ length: count }, () => ({ done: first, tries: 0, lastTry: 0, guess: !aligned && !first }));
-      this.logLines = (aligned ? [...fresh, ...this.logLines] : fresh.concat(lo.slots.slice(count).map(() => ({ done: true, tries: 0, lastTry: 0, guess: false }))))
+      // Lines already on screen when watching starts belong to before the session.
+      const fresh = Array.from({ length: count }, () => ({ pre: first, guess: !aligned && !first, item: null as LogItem | null }));
+      this.logLines = (aligned ? [...fresh, ...this.logLines] : fresh.concat(lo.slots.slice(count).map(() => ({ pre: true, guess: false, item: null }))))
         .slice(0, lo.slots.length);
-      // Read pending lines among the newest four; a line that doesn't parse is retried on later ticks (≤4 tries,
-      // ≥250 ms apart) and counted the first time it does, so each line is counted once but gets several chances.
-      const ready: string[] = [];
+      // snapshot new lines; a line whose read failed gets a fresh snapshot (≤4 tries, ≥250 ms apart) while still visible
       let hi: LogScan | null = null;
-      for (let i = Math.min(3, this.logLines.length - 1); i >= 0; i--) { // oldest first
+      const high = () => (hi ??= logScan(v, r, r.thr, document.createElement('canvas')));
+      for (let i = Math.min(LOG_WATCH_SLOTS, this.logLines.length) - 1; i >= 0; i--) { // oldest first
         const ln = this.logLines[i];
-        if (ln.done || ln.tries >= 4 || now - ln.lastTry < 250) continue;
-        ln.tries++; ln.lastTry = now;
-        const res = await this.readSlot(lo, i, () => (hi ??= logScan(v, r, r.thr, document.createElement('canvas'))));
-        if (lineQuality(res) < 2) continue;
-        ln.done = true;
-        // a guessed alignment can re-present an old line as new: skip text that was counted moments ago
-        if (ln.guess && this.counted.some(c => now - c.t < 6000 && sim(c.n, normLine(res)) >= 0.8)) continue;
-        this.counted.push({ n: normLine(res), t: now });
-        ready.push(res);
+        if (ln.pre) continue;
+        if (!ln.item) { ln.item = { snap: snapLine(lo, high(), lo.slots[i], now), status: 'queued', tries: 1, guess: ln.guess }; this.logQueue.push(ln.item); }
+        else if (ln.item.status === 'failed' && ln.item.tries < 4 && now - ln.item.snap.t >= 250) {
+          ln.item.snap = snapLine(lo, high(), lo.slots[i], now); ln.item.tries++; ln.item.status = 'queued'; this.logQueue.push(ln.item);
+        }
       }
-      this.counted = this.counted.filter(c => now - c.t < 6000);
-      if (ready.length) { this.tracker?.onLogLines(ready); this.markActive(); this.notify(); }
+      this.pumpLog();
     } catch (e) { console.error(e); } finally { this.busy.log = false; this.stats.lastTickMs = performance.now() - t0; }
+  }
+
+  /** Feed queued snapshots to the OCR workers (oldest first), skipping EXP lines and dropping stale ones. */
+  private pumpLog() {
+    const now = Date.now();
+    while (this.logQueue.length > LOG_QUEUE_MAX || (this.logQueue.length && now - this.logQueue[0].snap.t > LOG_MAX_AGE_MS)) {
+      this.logQueue.shift()!.status = 'done'; this.stats.logDropped++;
+    }
+    while (this.reading < LOG_READERS && this.logQueue.length) {
+      const q = this.logQueue.shift()!;
+      if (this.expFilter.isExp(q.snap)) { q.status = 'done'; this.stats.expSkipped++; this.markActive(); continue; }
+      this.reading++;
+      this.readSnap(q).catch(e => console.error(e)).finally(() => { this.reading--; this.pumpLog(); });
+    }
+    this.stats.logBacklog = this.logQueue.length;
+  }
+
+  private async readSnap(q: LogItem) {
+    q.status = 'reading';
+    const { ink, hash } = snapInk(q.snap);
+    if (ink < 25 * q.snap.f * q.snap.f) { q.status = 'failed'; return; } // (almost) no text in the slot yet
+    let t = this.slotCache.get(hash); // an identical line image reads the same: never OCR it twice
+    if (t === undefined) {
+      this.stats.ocrCalls++;
+      t = await this.engine.read(snapCanvas(q.snap), 'line');
+      // text over dark scenery reads best with the normal cut-off, over bright walls with the high-contrast one
+      if (lineQuality(t) < 2 && q.snap.hi) {
+        this.stats.ocrCalls++;
+        const t2 = await this.engine.read(snapCanvas(q.snap, true), 'line');
+        if (lineQuality(t2) > lineQuality(t)) t = t2;
+      }
+      this.slotCache.set(hash, t);
+      if (this.slotCache.size > 80) this.slotCache.delete(this.slotCache.keys().next().value!);
+    }
+    if (lineQuality(t) < 2) { q.status = 'failed'; return; } // retried from a new snapshot while the line is on screen
+    q.status = 'done';
+    this.expFilter.learn(q.snap, lineKind(t) === 'exp');
+    q.snap = { ...q.snap, lo: new Float32Array(0), hi: null }; // read: free the pixels
+    const now = Date.now();
+    // a guessed alignment can re-present an old line as new: skip text that was counted moments ago
+    if (q.guess && this.counted.some(c => now - c.t < 6000 && sim(c.n, normLine(t)) >= 0.8)) return;
+    this.counted = this.counted.filter(c => now - c.t < 6000);
+    this.counted.push({ n: normLine(t), t: now });
+    this.tracker?.onLogLines([t]);
+    this.markActive();
+    this.notify();
   }
 
   /**
@@ -446,7 +502,9 @@ export class Controller {
   /** Load the character's saved look (if it suits the current job) and its frames. */
   private loadLook() {
     const look = store.loadChars()[this.identity.name]?.look;
-    this.sprites.load(look && this.lookFits(look) ? look : null, () => this.onSpriteFrame());
+    // a look made by an older version (or for another job / gender) is replaced right away, not at the next session
+    if (look && !this.lookFits(look)) { this.ensureLook(); return; }
+    this.sprites.load(look ?? null, () => this.onSpriteFrame());
   }
   /** Does a saved look still suit the character (current format, job branch and gender)? */
   private lookFits(l: CharLook) { return l.v === LOOK_V && l.branch === classLook(this.identity.cls) && l.gender === (this.identity.gender ?? 0); }

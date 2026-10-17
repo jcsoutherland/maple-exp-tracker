@@ -36,7 +36,7 @@ page.on('pageerror', e => console.log('PAGEERROR', e.message));
 await page.goto('http://localhost:5174/');
 await page.waitForFunction(() => window.met);
 
-const out = await page.evaluate(async () => {
+const out = await page.evaluate(async speed => {
   const c = window.met;
   localStorage.clear();
   const v = c.capture.video;
@@ -57,7 +57,11 @@ const out = await page.evaluate(async () => {
   const STEP = 0.25;
   // Date.now() drives the forced-read and map timers; advance a fake clock with video time
   const t0 = Date.now(); const realNow = Date.now; Date.now = () => t0 + vt * 1000;
+  const wall0 = performance.now(), SPEED = speed; // SPEED > 1 plays the video faster, simulating a busier (party) log
   for (let t = 0; t < v.duration - 0.5; t += STEP) {
+    // play back in real time at most: the OCR workers read in the background at their real speed, as live
+    const ahead = t * 1000 / SPEED - (performance.now() - wall0);
+    if (ahead > 0) await new Promise(r => setTimeout(r, ahead));
     vt = t; v.currentTime = t;
     await new Promise(r => (v.onseeked = r));
     await new Promise(r => requestAnimationFrame(() => setTimeout(r, 20)));
@@ -69,6 +73,8 @@ const out = await page.evaluate(async () => {
     const s = c.sess;
     if (s.exp !== lastExp) { log.push(`${t.toFixed(2).padStart(7)}s exp    +${s.exp - lastExp} (bar ${c.tracker.exp} @ ${c.tracker.pct}%) map=${c.tracker.mapName}`); lastExp = s.exp; }
   }
+  // log lines are read in the background from a queue: let it drain
+  for (let k = 0; k < 600 && (c.reading || c.logQueue?.length); k++) await new Promise(r => setTimeout(r, 50));
   Date.now = realNow;
   const s = c.sess, tr = c.tracker;
   tickMs.sort((a, b) => a - b);
@@ -76,9 +82,9 @@ const out = await page.evaluate(async () => {
     log,
     summary: { exp: s.exp, expLost: s.expLost, mesos: s.mesos, maps: s.maps, drops: Object.fromEntries(Object.entries(s.drops).map(([k, d]) => [k, d.qty])),
       hp: s.hp, mp: s.mp, hpMax: tr.hp.max, mpMax: tr.mp.max },
-    perf: { logChecks: c.stats.logChecks, ocrCalls: c.stats.ocrCalls, logTickMedianMs: Math.round(tickMs[tickMs.length >> 1]), logTickP95Ms: Math.round(tickMs[Math.floor(tickMs.length * 0.95)]) },
+    perf: { logChecks: c.stats.logChecks, ocrCalls: c.stats.ocrCalls, expSkipped: c.stats.expSkipped, logDropped: c.stats.logDropped, logTickMedianMs: Math.round(tickMs[tickMs.length >> 1]), logTickP95Ms: Math.round(tickMs[Math.floor(tickMs.length * 0.95)]) },
   };
-});
+}, +(process.env.SPEED || 1));
 console.log(out.log.join('\n'));
 console.log('\n' + JSON.stringify(out.summary, null, 1));
 console.log('perf', JSON.stringify(out.perf));

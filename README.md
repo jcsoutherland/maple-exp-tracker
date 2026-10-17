@@ -25,7 +25,7 @@ Default regions are measured for a 1280×720 game window and stored as fractions
 
 | What | When | How |
 |---|---|---|
-| Pickup log | Change check every 66 ms; OCR only when a line appears | Each pixel is scored as "bright, greyish, brighter than its surroundings". Lines are cut on the log's fixed 13px grid, and new lines are found by correlating line slots with the previous frame, which survives fading. Each line is OCR'd when it appears, retried if it doesn't parse, and counted once |
+| Pickup log | Change check every 66 ms (never waits on OCR) | Each pixel is scored as "bright, greyish, brighter than its surroundings" and lines are cut on the log's fixed 13px grid; new lines are found by correlating line slots with the previous frame. A new line is copied out at once (~22 KB snapshot) into a short queue (≤60 lines, ≤30 s) that two OCR workers read in the background, so a fast party log isn't missed while OCR is busy. EXP lines are recognised by their shape and skipped (the EXP bar counts EXP exactly). A line that doesn't parse is re-snapshotted while still on screen (≤4 tries) and counted once |
 | HP / MP | Every 1 s | Digits OCR, max value by decaying vote, 5-read median |
 | EXP bar | Every 5 s | Digits OCR, validated against the shown %. A stray digit is repaired, and a death needs two matching reads |
 | Map name | Every 10 s if the title pixels changed (every 2 s while unknown), and every 5k EXP | Must match the real map list, else "Cannot determine" |
