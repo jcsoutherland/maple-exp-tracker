@@ -55,6 +55,31 @@ describe('EXP bar', () => {
     expect(s.level).toBe(37);
     expect(s.exp).toBe(125130 - 124923);
   });
+  it('never counts an extra-digit misread at a fraction of a percent (fresh level)', () => {
+    const { s, t } = make();
+    t.onExp(R(216000)); t.onExp(R(216500));
+    t.onExp(R(300, 240000)); t.onExp(R(400, 240000)); // level-up → bar at 0.16%
+    const before = s.exp;
+    t.onExp({ exp: 1000500, pct: R(500, 240000).pct }); // "500" read with a stray 1 in front, % read right
+    t.onExp({ exp: 1000500, pct: R(500, 240000).pct });
+    t.onExp(R(600, 240000));
+    expect(s.exp - before).toBe(200);
+  });
+  it('does not take a misread first reading as the baseline', () => {
+    const { s, t } = make();
+    t.onExp({ exp: 1124632, pct: R(124632).pct }); // first read garbled
+    t.onExp(R(124632)); t.onExp(R(124700)); t.onExp(R(124800));
+    expect(s.exp).toBe(124800 - 124632);
+  });
+  it('starts cleanly below 0.2% and needs a huge jump read twice', () => {
+    const { s, t } = make();
+    t.onExp(R(100)); t.onExp(R(150)); t.onExp({ exp: 1000150, pct: 0.06 }); t.onExp(R(250));
+    expect(s.exp).toBe(150);
+    t.onExp(R(30000)); // +13% of a level in one read: wait for a second read
+    expect(s.exp).toBe(150);
+    t.onExp(R(30010));
+    expect(s.exp).toBe(30010 - 100);
+  });
   it('attributes EXP to the current map', () => {
     const { s, t } = make();
     t.onExp(R(1000)); t.onExp(R(1500));

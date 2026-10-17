@@ -23,19 +23,16 @@ export const saveRegions = (r: Record<RegionKey, Region>) => write(K.regions, r)
 export const loadSessions = () => read<SavedSession[]>(K.sessions, []);
 export const saveSessions = (s: SavedSession[]) => write(K.sessions, s);
 
-export interface CharInfo {
-  cls?: string; level?: number | null; last?: number;
-  /** picture shown in History (taken automatically at session start) */
-  snap?: string;
-  /** short animation loops captured during the last session */
-  sprite?: { idle: string[]; attack: string[]; cutout: boolean };
-  /** pixel-art avatar (PNG data URL) made from one idle frame, and which way it faces */
-  pixel?: string;
-  facing?: 'left' | 'right';
-  /** avatar format version */
-  pixelV?: number;
-}
-export const loadChars = () => read<Record<string, CharInfo>>(K.chars, {});
+export interface CharInfo { cls?: string; level?: number | null; last?: number }
+/** pictures earlier versions captured from the screen; no longer used, and they take up storage */
+const LEGACY_CHAR_KEYS = ['snap', 'sprite', 'pixel', 'facing', 'pixelV'];
+export const loadChars = () => {
+  const c = read<Record<string, CharInfo>>(K.chars, {});
+  let dirty = false;
+  for (const v of Object.values(c)) for (const k of LEGACY_CHAR_KEYS) if (k in v) { delete (v as Record<string, unknown>)[k]; dirty = true; }
+  if (dirty) write(K.chars, c);
+  return c;
+};
 export const saveChars = (c: Record<string, CharInfo>) => write(K.chars, c);
 
 /** In-progress session, saved periodically so a closed tab or crash doesn't lose it. */

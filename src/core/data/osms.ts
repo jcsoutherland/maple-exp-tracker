@@ -17,7 +17,6 @@ export interface MapRec { id: number; name: string; street: string }
 
 let items: ItemRec[] | null = null;
 let maps: MapRec[] | null = null;
-let monsters: string[] = [];
 let byName = new Map<string, ItemRec>();
 let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
@@ -40,7 +39,7 @@ interface RawMap { id: number; name: string; street_name?: string }
 
 export function loadOsms(): Promise<void> {
   return (loading ??= (async () => {
-    const [it, mp, mo] = await Promise.all([
+    const [it, mp] = await Promise.all([
       cached('items-v2', async () => {
         const d = await (await fetch(OSMS_BASE + 'items.json')).json() as { items: RawItem[] };
         return d.items.filter(i => i.name).map(i => ({ id: i.id, name: i.name, cat: i.category || '', price: i.stats?.price ?? null, desc: i.description || '' }));
@@ -49,12 +48,8 @@ export function loadOsms(): Promise<void> {
         const d = await (await fetch(OSMS_BASE + 'maps.json')).json() as { regions: { maps: RawMap[] }[] };
         return d.regions.flatMap(r => r.maps).map(m => ({ id: m.id, name: m.name.trim(), street: (m.street_name || '').trim() }));
       }),
-      cached('monsters', async () => {
-        const d = await (await fetch(OSMS_BASE + 'monsters.json')).json() as { monsters: { name: string }[] };
-        return [...new Set(d.monsters.map(m => m.name).filter(Boolean))];
-      }).catch(() => [] as string[]),
     ]);
-    items = it; maps = mp; monsters = mo;
+    items = it; maps = mp;
     // first record wins for duplicated names (e.g. two "Red Potion" ids)
     byName = new Map();
     for (const i of it) if (!byName.has(i.name.toLowerCase())) byName.set(i.name.toLowerCase(), i);
@@ -67,8 +62,6 @@ export const mapsReady = () => maps !== null && maps.length > 0;
 export const onOsmsLoaded = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 export const itemByName = (name: string) => byName.get(name.toLowerCase()) || null;
 export const allItems = () => items ?? [];
-/** Monster names (to tell a monster's label apart from the player's name tag). */
-export const monsterNames = () => monsters;
 
 /**
  * Snap an OCR'd item name to a real item. Handles names the game truncates ("Bubbling's Hug..."). Short names and

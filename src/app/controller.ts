@@ -1,8 +1,7 @@
 import { Capture } from '../core/capture';
-import { buildAnimations, classFamily, imageDataToUrl, pixelize, urlToImageData, type Animations, type Facing } from '../core/pixelart';
-import { findTagCandidates, grabBox, spriteBox, SpriteLearner, tagOcrCanvas, TagTracker, toDataUrl, type Box } from '../core/character';
+import { classAvatar, type Animations } from '../core/pixelart';
 import { REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
-import { canonItem, canonMap, loadOsms, mapsReady, monsterNames, osmsReady } from '../core/data/osms';
+import { canonItem, canonMap, loadOsms, mapsReady, osmsReady } from '../core/data/osms';
 import { logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
@@ -24,8 +23,6 @@ export interface OcrTestRow { key: RegionKey | 'log'; label: string; color: stri
  *  - name/class once per session; level at session start and after each detected level-up
  * The UI subscribes for change notifications; nothing here touches React.
  */
-/** bump when the avatar format changes so saved avatars are remade */
-const PIXEL_V = 2;
 
 /** Map title text: cleaned, or — when cleaning rejects it (a stray symbol like "{ine 2") — raw if it still matches a real map. */
 const mapText = (raw: string) => {
@@ -79,7 +76,6 @@ export class Controller {
     }
     this.capture.onEnded = () => { if (this.sess && !this.sess.paused) this.togglePause(); this.notify(); };
     loadOsms().then(() => this.notify());
-    if (this.identity.name) this.loadAvatar(this.identity.name);
   }
 
   // ---------- subscription ----------
@@ -107,8 +103,6 @@ export class Controller {
   setIdentity(p: Partial<Identity>) {
     this.identity = { ...this.identity, ...p };
     store.saveIdentity(this.identity);
-    if (p.cls !== undefined && this.avatar) this.avatar = { ...this.avatar, anim: buildAnimations(this.avatar.base, classFamily(this.identity.cls), this.avatar.facing) };
-    if (p.name !== undefined && p.name !== this.avatar?.name) this.loadAvatar(p.name);
     if (this.sess) { if (p.name) this.sess.char = p.name; if (p.cls !== undefined) this.sess.cls = p.cls; if (p.level) { this.sess.level = p.level; this.sess.levelStart ??= p.level; } }
     this.notify();
   }
@@ -153,7 +147,6 @@ export class Controller {
     this.sess = newSession(name, cls, level);
     this.tracker = this.makeTracker(this.sess);
     this.tracker.event('info', 'Session started');
-    this.snapSaved = 'none'; this.spriteState = 'searching';
     this.resetWatchers();
     this.startTimers();
     this.notify();
@@ -175,8 +168,6 @@ export class Controller {
     if (!s) return null;
     this.ticker.stop();
     s.char = this.identity.name || s.char; s.cls = this.identity.cls || s.cls;
-    this.saveSpriteFrames(s.char);
-    this.spriteState = 'off';
     const out = finalize(s, this.settings);
     store.saveSessions([...store.loadSessions(), out]);
     const ch = store.loadChars();
@@ -204,7 +195,6 @@ export class Controller {
       bars: [sc.barsMs, () => this.tickBars()],
       exp: [sc.expMs, () => this.tickExp()],
       map: [Math.min(sc.mapMs, 2000), () => this.tickMap(false)],
-      sprite: [200, () => this.tickSprite()],
       ui: [1000, () => { this.persist(); this.notify(); }],
     });
   }
@@ -351,165 +341,13 @@ export class Controller {
     return { el, hr, r10 };
   }
 
-  // ---------- character sprite ----------
-  readonly sprite = new SpriteLearner();
-  /** 'searching' until the name tag is found, then 'tracking' (or 'lost' while it's off screen) */
-  spriteState: 'off' | 'searching' | 'tracking' | 'lost' = 'off';
-  private tag: TagTracker | null = null;
-  private tagMisses = 0;
-  /** pending confirmation of a newly found tag (null = confirmed or none) */
-  private tagCheck: { ok: number; tries: number; next: number } | null = null;
-  private lastAcquire = 0;
+  // ---------- character ----------
   private lastActive = 0;
-  private snapSaved: 'none' | 'raw' | 'cutout' = 'none';
-  private busySprite = false;
-  private spriteScratch = document.createElement('canvas');
-
-  /** Mark "fighting" (EXP or loot just came in) for the sprite's attack animation. */
+  /** Mark "fighting" (EXP or loot just came in) for the avatar's attack animation. */
   private markActive() { this.lastActive = Date.now(); }
   get fighting() { return Date.now() - this.lastActive < 4000; }
-
-  private async tickSprite() {
-    const name = this.identity.name || this.sess?.char;
-    if (!this.canRun || this.busySprite || !name || name === 'Unknown') return;
-    if (this.avatar?.name === name) { this.spriteState = 'tracking'; return; } // avatar made: no need to keep tracking the character
-    this.busySprite = true;
-    try {
-      const v = this.capture.video, now = Date.now();
-      let box = this.tag ? this.tag.locate(v) : null;
-      if (box) this.tagMisses = 0;
-      else if (this.tag) this.tagMisses++;
-      if (!box && now - this.lastAcquire > 3000) {
-        this.lastAcquire = now;
-        box = this.tag ? this.tag.locateAnywhere(v) : await this.acquireTag(v, name);
-        if (box) this.tagMisses = 0;
-      }
-      if (box && this.tagCheck) { await this.confirmTag(v, box, name); if (this.tagCheck || !this.tag) box = null; }
-      this.spriteState = box ? 'tracking' : this.tag && !this.tagCheck ? 'lost' : 'searching';
-      if (!box) return;
-      const sb = spriteBox(v, box.x + box.w / 2, box.y);
-      if (!sb) return;
-      this.sprite.add(grabBox(v, sb, this.spriteScratch), { x: box.x, y: box.y }, this.fighting, now);
-      // automatic snapshot: the first crop at session start, replaced by a cut-out once the background is learned
-      if (!this.avatar?.base && this.snapSaved === 'none') this.saveSnapshot(name);
-      // one good idle frame → pixel-art avatar (kept across sessions until 'Retake')
-      if (this.sprite.maskReady && (!this.avatar || this.avatar.name !== name) && !this.avatarBusy) {
-        this.avatarBusy = true;
-        try { if (store.loadChars()[name]?.pixelV === PIXEL_V) await this.loadAvatar(name); else this.captureAvatar(name); } finally { this.avatarBusy = false; }
-      }
-    } catch (e) { console.error(e); } finally { this.busySprite = false; }
-  }
-
-  /** How well OCR'd tag text matches the player's name, beyond how well it matches any monster's name. */
-  private nameScore(text: string, name: string) {
-    const txt = text.toLowerCase().replace(/[^a-z0-9]/g, ''), want = name.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const best = (w: string) => {
-      let s = 0, at = 0;
-      for (let i = 0; i <= Math.max(0, txt.length - w.length + 1); i++)
-        for (const L of [w.length - 1, w.length, w.length + 1]) { const v = sim(txt.slice(i, i + L), w); if (v > s) { s = v; at = i; } }
-      return { s, at };
-    };
-    const me = best(want);
-    const mob = Math.max(0, ...monsterNames().filter(m => m.length >= 4).map(m => best(m.toLowerCase().replace(/[^a-z0-9]/g, '')).s));
-    // monster labels ("Black Pig" read as "Black Finny") must not pass for the player's tag
-    return { ok: txt.length >= 3 && me.s >= 0.6 && me.s >= mob + 0.1, at: me.at, len: txt.length, want: want.length };
-  }
-
-  /** Find the player's name tag: OCR tag-like boxes and pick the one containing the character's name. */
-  private async acquireTag(v: FrameSource, name: string): Promise<Box | null> {
-    for (const b of findTagCandidates(v, this.spriteScratch, 8)) {
-      this.stats.ocrCalls++;
-      const m = this.nameScore(await this.engine.read(tagOcrCanvas(v, b), 'line'), name);
-      if (!m.ok) continue;
-      // keep only the name's part of the box (it can merge with a monster's label) so the template follows the player
-      const x0 = b.x + Math.round(b.w * m.at / m.len), w = Math.min(b.w, Math.round(b.w * m.want / m.len) + 4);
-      const tagBox = { x: Math.max(0, x0 - 2), y: b.y, w, h: b.h };
-      this.tag = new TagTracker(tagBox, v);
-      this.tagCheck = { ok: 0, tries: 0, next: Date.now() + 600 };
-      return tagBox;
-    }
-    return null;
-  }
-
-  /** A new tag must read as the player's name once more before frames are trusted (OCR at this size is noisy). */
-  private async confirmTag(v: FrameSource, box: Box, name: string) {
-    const ck = this.tagCheck!;
-    if (Date.now() < ck.next) return;
-    ck.next = Date.now() + 700; ck.tries++;
-    this.stats.ocrCalls++;
-    if (this.nameScore(await this.engine.read(tagOcrCanvas(v, box), 'line'), name).ok) ck.ok++;
-    if (ck.ok >= 1) this.tagCheck = null;
-    else if (ck.tries >= 4) { this.tag = null; this.tagCheck = null; } // wasn't us
-  }
-
-  // ---------- pixel-art avatar ----------
-  /** pixel-art version of the character with pre-rendered idle / class-attack loops */
-  avatar: { name: string; base: ImageData; anim: Animations; facing: Facing } | null = null;
-  private avatarBusy = false;
-
-  /** Load the saved avatar for a character (if any) and build its animations for the current class. */
-  async loadAvatar(name = this.identity.name) {
-    const ch = store.loadChars()[name];
-    // avatars from older versions (48px, no rig) are remade from the capture
-    if (!name || !ch?.pixel || ch.pixelV !== PIXEL_V) { this.avatar = null; this.notify(); return; }
-    const base = await urlToImageData(ch.pixel), facing = ch.facing ?? 'left';
-    this.avatar = { name, base, facing, anim: buildAnimations(base, classFamily(this.identity.cls || ch.cls || ''), facing) };
-    this.notify();
-  }
-
-  /** Make the avatar from the steadiest cut-out idle frame (once the background has been learned). */
-  private captureAvatar(name: string) {
-    const frames = this.sprite.idle.length >= 3 ? this.sprite.idle : [...this.sprite.idle, ...this.sprite.attack];
-    const cuts = frames.map(f => this.sprite.cutout(f, true)).filter((c): c is ImageData => !!c);
-    if (cuts.length < 2) return;
-    // pick the frame whose silhouette size is the median: avoids frames where a stray patch of scenery got in
-    const area = (c: ImageData) => { let n = 0; for (let i = 3; i < c.data.length; i += 4) if (c.data[i] > 128) n++; return n; };
-    const sorted = cuts.map(c => ({ c, a: area(c) })).sort((x, y) => x.a - y.a);
-    const base = pixelize(sorted[sorted.length >> 1].c);
-    const ch = store.loadChars();
-    const facing = ch[name]?.facing ?? 'left';
-    ch[name] = { ...ch[name], pixel: imageDataToUrl(base), pixelV: PIXEL_V, snap: imageDataToUrl(base) };
-    store.saveChars(ch);
-    this.avatar = { name, base, facing, anim: buildAnimations(base, classFamily(this.identity.cls), facing) };
-    this.historyVersion++;
-    this.notify();
-  }
-
-  /** Throw away the avatar; a new one is made from the next good frames. */
-  retakeAvatar() {
-    const name = this.identity.name, ch = store.loadChars();
-    if (ch[name]) { delete ch[name].pixel; store.saveChars(ch); }
-    this.avatar = null;
-    this.notify();
-  }
-
-  /** Current loop to play: the class attack while EXP/loot is coming in, else idle. */
-  avatarFrames(): ImageData[] { return this.avatar ? (this.fighting ? this.avatar.anim.attack : this.avatar.anim.idle) : []; }
-
-  /** Frames for the UI: rendered with the cut-out (or a vignette), the attack loop while fighting. */
-  spriteFrames(): ImageData[] {
-    const list = this.fighting && this.sprite.attack.length >= 2 ? this.sprite.attack : this.sprite.idle.length ? this.sprite.idle : this.sprite.attack;
-    return list.map(f => this.sprite.render(f));
-  }
-
-  private saveSnapshot(name: string) {
-    const fr = this.sprite.idle[this.sprite.idle.length - 1] || this.sprite.attack[this.sprite.attack.length - 1];
-    if (!fr) return;
-    const ch = store.loadChars();
-    ch[name] = { ...ch[name], snap: toDataUrl(this.sprite.render(fr)) };
-    store.saveChars(ch);
-    this.snapSaved = this.sprite.maskReady ? 'cutout' : 'raw';
-    this.historyVersion++;
-  }
-
-  /** Keep a few animation frames with the character for History. */
-  private saveSpriteFrames(name: string) {
-    const enc = (l: typeof this.sprite.idle) => l.slice(-6).map(f => toDataUrl(this.sprite.render(f)));
-    if (!this.sprite.idle.length && !this.sprite.attack.length) return;
-    const ch = store.loadChars();
-    ch[name] = { ...ch[name], sprite: { idle: enc(this.sprite.idle), attack: enc(this.sprite.attack), cutout: this.sprite.maskReady } };
-    store.saveChars(ch);
-  }
+  /** The pixel-art explorer for the current job (idle / attack loops). */
+  get avatar(): Animations { return classAvatar(this.identity.cls); }
 
   // ---------- diagnostics ----------
   /** Run every region once on a frame and return the prepared images and readings (Setup → Test OCR). */

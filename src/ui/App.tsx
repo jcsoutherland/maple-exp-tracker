@@ -5,7 +5,6 @@ import { LiveTab } from './LiveTab';
 import { MiniOverlay, usePip } from './MiniOverlay';
 import { PotionsTab } from './PotionsTab';
 import { SetupTab } from './SetupTab';
-import { SnapshotModal } from './SnapshotModal';
 import { toast, useCtrl } from './hooks';
 
 const TABS = { live: 'Live', pots: 'Potions', drops: 'Drops', hist: 'History', setup: 'Setup' } as const;
@@ -14,7 +13,6 @@ type Tab = keyof typeof TABS;
 export function App() {
   const c = useCtrl();
   const [tab, setTab] = useState<Tab>('live');
-  const [snapFor, setSnapFor] = useState<string | null>(null);
   const pip = usePip();
   const s = c.sess, cap = c.capture;
 
@@ -27,7 +25,7 @@ export function App() {
   return (
     <>
       <header>
-        <h1>🍁 Maple EXP Tracker</h1>
+        <h1><img className="logo" src={import.meta.env.BASE_URL + 'favicon.svg'} alt="" /> Maple EXP Tracker</h1>
         <span className={'pill' + (cap.ready ? ' on' : '')}>{cap.ready ? (cap.kind === 'file' ? 'Video: ' + cap.label : 'Capturing') : 'No capture'}</span>
         <span className={'pill' + (c.ocrState === 'ready' ? ' on' : c.ocrState === 'loading' ? ' warn' : '')}>
           {{ idle: 'OCR not loaded', loading: 'Loading OCR…', ready: 'OCR ready', error: 'OCR failed' }[c.ocrState]}
@@ -47,13 +45,12 @@ export function App() {
         {tab === 'live' && <LiveTab />}
         {tab === 'pots' && <PotionsTab />}
         {tab === 'drops' && <DropsTab />}
-        {tab === 'hist' && <HistoryTab onSnapshot={n => (cap.ready ? setSnapFor(n) : toast('Share the game window first'))} />}
-        {tab === 'setup' && <SetupTab onSnapshot={() => (cap.ready ? setSnapFor(c.identity.name || 'Unknown') : toast('Share the game window first'))} />}
+        {tab === 'hist' && <HistoryTab />}
+        {tab === 'setup' && <SetupTab />}
         <div className="credit-line">
           Item and map data from <a href="https://osmsdataexplorer.com" target="_blank" rel="noopener">OSMS Data Explorer</a> by @ohmi, cached on this device.
         </div>
       </main>
-      {snapFor && <SnapshotModal name={snapFor} onClose={() => setSnapFor(null)} />}
       {pip.win && <MiniOverlay win={pip.win} />}
       <div id="toast" />
     </>

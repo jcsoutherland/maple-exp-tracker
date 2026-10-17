@@ -18,6 +18,18 @@ export interface TrackerDeps {
 }
 
 interface Bar { buf: number[]; cur: number | null; max: number | null; votes: Record<number, number>; regen: number }
+/** below this bar % the level total (exp / %) is too imprecise to estimate (0.20% read to 2 decimals: ±2.5%) */
+const MIN_TOTAL_PCT = 0.2;
+/**
+ * Do two reads imply the same level total (exp·100/%)? Allows for the % being rounded to 2 decimals, so a read with
+ * an extra digit (×10) is caught even at a fraction of a percent. A 0.00% read can't be checked: only tiny exp passes.
+ */
+function sameTotal(a: ExpReading, b: ExpReading, slack: number): boolean {
+  if (a.pct <= 0 || b.pct <= 0) return Math.max(a.exp, b.exp) - Math.min(a.exp, b.exp) <= 500 && b.pct < 0.05;
+  const ta = a.exp * 100 / a.pct, tb = b.exp * 100 / b.pct;
+  return Math.abs(tb / ta - 1) <= 0.005 / a.pct + 0.005 / b.pct + slack;
+}
+
 /** EXP earned where the map name couldn't be read or isn't a real map */
 export const UNKNOWN_MAP = 'Cannot determine';
 const LEGACY_UNKNOWN = 'Undefined';
@@ -39,6 +51,10 @@ export class Tracker {
   private pend: ExpReading | null = null;
   private drop: ExpReading | null = null;
   private reb: ExpReading | null = null;
+  private firsts: ExpReading[] = [];
+  private big: ExpReading | null = null;
+  /** the previous level's EXP total (to sanity-check reads right after a level-up) */
+  private lastTotal: number | null = null;
   private strikes = 0;
   // map
   mapCur: string | null = null;
@@ -63,21 +79,36 @@ export class Tracker {
 
   /** Forget bar/log baselines (after a pause) so changes while paused aren't counted. */
   rebaseline() {
-    this.exp = null; this.pend = null; this.drop = null; this.strikes = 0;
+    this.exp = null; this.firsts = []; this.big = null; this.pend = null; this.drop = null; this.strikes = 0;
     this.hp.cur = this.mp.cur = null; this.hp.buf = []; this.mp.buf = []; this.logPrev = [];
   }
 
   private gain(d: number) { const s = this.sess; s.exp += d; const m = this.mapName; s.maps[m] = (s.maps[m] || 0) + d; }
   private setTotal(r: ExpReading) {
-    if (r.pct >= 1 && (!this.totalPct || r.pct > this.totalPct || this.totalStale)) { this.total = r.exp * 100 / r.pct; this.totalPct = r.pct; this.totalStale = false; }
+    if (r.pct >= MIN_TOTAL_PCT && (!this.totalPct || r.pct > this.totalPct || this.totalStale)) { this.total = r.exp * 100 / r.pct; this.totalPct = r.pct; this.totalStale = false; }
   }
 
   /** Feed one EXP bar reading. Returns true when a level-up was detected. */
   onExp(r: ExpReading): boolean {
-    if (this.exp == null) { this.exp = r.exp; this.pct = r.pct; this.setTotal(r); return false; }
-    if (this.total == null && r.pct >= 1) {
-      if (r.exp >= this.exp && r.exp - this.exp < 1e7) this.gain(r.exp - this.exp);
-      this.exp = r.exp; this.pct = r.pct; this.setTotal(r); return false;
+    if (this.exp == null) {
+      // the baseline needs two reads that agree (out of the last few), so one misread can't become the starting point
+      const f = this.firsts.slice().reverse().find(f => r.exp >= f.exp && r.exp - f.exp <= Math.max(2000, f.exp * 0.05) && sameTotal(f, r, 0.03));
+      if (!f) { this.firsts = [...this.firsts.slice(-2), r]; return false; }
+      this.firsts = []; this.exp = f.exp; this.pct = f.pct; this.setTotal(f);
+    }
+    if (this.total == null) {
+      // bar below 0.2% (fresh level / session start): the level total isn't known precisely yet, so check the
+      // read against the previous read's implied total (and the previous level's total), never take it on trust
+      const d = r.exp - this.exp, est = this.lastTotal ? this.lastTotal * 1.2 : null;
+      const ok = d >= 0 && r.pct >= (this.pct ?? 0) - 0.01 && sameTotal({ exp: this.exp, pct: this.pct ?? 0 }, r, 0.02)
+        && (!est || Math.abs(r.exp * 100 / est - r.pct) <= r.pct * 0.3 + 0.05);
+      if (!ok) return false;
+      const tot = r.pct > 0 ? r.exp * 100 / r.pct : Infinity;
+      if (d > tot * 0.1 && !(this.big && Math.abs(this.big.exp - r.exp) <= tot * 0.002)) { this.big = r; return false; }
+      this.big = null;
+      if (d > 0) this.gain(d);
+      this.exp = r.exp; this.pct = r.pct; this.setTotal(r);
+      return false;
     }
     // a misread digit shifts exp but not %, so compare the % predicted from exp with the % read
     const total = this.total;
@@ -92,6 +123,9 @@ export class Tracker {
     if (consistent && !bigDrop) {
       this.strikes = 0; this.pend = null;
       const d = r.exp - this.exp;
+      // a huge jump between two reads (>10% of a level) must be read twice before it counts
+      if (d > total * 0.1 && !(this.big && Math.abs(this.big.exp - r.exp) <= total * 0.002)) { this.big = r; return false; }
+      this.big = null;
       if (d > 0) { this.gain(d); this.exp = r.exp; this.pct = r.pct; this.drop = null; this.setTotal(r); }
       else if (d < 0) {
         // EXP went backwards (death without a safety charm): require a second matching read before logging it
@@ -113,7 +147,7 @@ export class Tracker {
         const s = this.sess;
         s.level = (s.level || 0) + 1; s.levelUps++;
         this.event('level', `Level up! → ${s.level}`);
-        this.exp = r.exp; this.pct = r.pct; this.total = null; this.totalPct = 0; this.setTotal(r); this.pend = null; this.strikes = 0;
+        this.lastTotal = total; this.exp = r.exp; this.pct = r.pct; this.total = null; this.totalPct = 0; this.setTotal(r); this.pend = null; this.strikes = 0;
         return true;
       }
       this.pend = r;

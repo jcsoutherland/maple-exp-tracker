@@ -4,7 +4,7 @@ import { REGION_DEFS, type RegionKey, type Schedule } from '../core/config';
 import { attachSelect, type FracRect } from './selectable';
 import { toast, useCtrl } from './hooks';
 
-export function SetupTab({ onSnapshot }: { onSnapshot: () => void }) {
+export function SetupTab() {
   const c = useCtrl();
   const cv = useRef<HTMLCanvasElement>(null);
   const [frame, setFrame] = useState<HTMLCanvasElement | null>(null);
@@ -69,7 +69,6 @@ export function SetupTab({ onSnapshot }: { onSnapshot: () => void }) {
           <div className="row" style={{ marginBottom: 8 }}>
             <button onClick={grab}>Grab frame</button>
             <button onClick={test} disabled={testing}>{testing ? 'Reading…' : 'Test OCR'}</button>
-            <button onClick={onSnapshot}>📸 Character snapshot</button>
             <button onClick={saveFrame} title="Save the current frame as a PNG (useful for bug reports / tuning)">Save frame</button>
             <span className="sp" />
             <button className="danger" onClick={() => c.resetRegions()}>Reset regions</button>
