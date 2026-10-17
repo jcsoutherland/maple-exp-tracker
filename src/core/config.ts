@@ -61,7 +61,14 @@ export const DEFAULT_SETTINGS: Settings = {
   mpOrder: ['Lemon', 'Blue Potion', 'Mana Elixir'],
 };
 
-export const CLASSES = ['Beginner', 'Warrior', 'Fighter', 'Page', 'Spearman', 'Crusader', 'White Knight', 'Dragon Knight', 'Hero', 'Paladin', 'Dark Knight',
-  'Magician', 'Wizard (Fire,Poison)', 'Wizard (Ice,Lightning)', 'Cleric', 'Mage (Fire,Poison)', 'Mage (Ice,Lightning)', 'Priest', 'Arch Mage (Fire,Poison)',
-  'Arch Mage (Ice,Lightning)', 'Bishop', 'Bowman', 'Hunter', 'Crossbowman', 'Ranger', 'Sniper', 'Bowmaster', 'Marksman', 'Thief', 'Assassin', 'Bandit',
-  'Hermit', 'Chief Bandit', 'Night Lord', 'Shadower', 'Pirate', 'Brawler', 'Gunslinger', 'Marauder', 'Outlaw', 'Buccaneer', 'Corsair'];
+/** MapleStory Classic jobs by branch (Classic has no Pirates), for the class picker */
+export const CLASS_GROUPS: [string, string[]][] = [
+  ['Beginner', ['Beginner']],
+  ['Warrior', ['Warrior', 'Fighter', 'Page', 'Spearman', 'Crusader', 'White Knight', 'Dragon Knight', 'Hero', 'Paladin', 'Dark Knight']],
+  ['Magician', ['Magician', 'Wizard (Fire,Poison)', 'Wizard (Ice,Lightning)', 'Cleric', 'Mage (Fire,Poison)', 'Mage (Ice,Lightning)', 'Priest',
+    'Arch Mage (Fire,Poison)', 'Arch Mage (Ice,Lightning)', 'Bishop']],
+  ['Bowman', ['Bowman', 'Hunter', 'Crossbowman', 'Ranger', 'Sniper', 'Bowmaster', 'Marksman']],
+  ['Thief', ['Thief', 'Assassin', 'Bandit', 'Hermit', 'Chief Bandit', 'Night Lord', 'Shadower']],
+];
+/** every job name the status bar can show (screen reading snaps to these) */
+export const CLASSES = CLASS_GROUPS.flatMap(([, jobs]) => jobs);

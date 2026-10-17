@@ -1,3 +1,4 @@
+import { CLASS_GROUPS, CLASSES } from '../core/config';
 import { useMemo } from 'react';
 import { MAP_MIN_EXP, potCost } from '../core/session';
 import { fmtDur, fmtHM, fmtK, fmtN } from '../core/util';
@@ -35,7 +36,11 @@ export function LiveTab() {
         <span className="mut">Character</span>
         <input value={id.name} placeholder="Name" onChange={e => c.setIdentity({ name: e.target.value, nameTyped: !!e.target.value.trim() })} />
         <span className="mut">Class</span>
-        <input value={id.cls} placeholder="Class" onChange={e => c.setIdentity({ cls: e.target.value })} />
+        <select value={id.cls} onChange={e => c.setIdentity({ cls: e.target.value })}>
+          {!id.cls && <option value="">Choose…</option>}
+          {id.cls && !CLASSES.includes(id.cls) && <option value={id.cls}>{id.cls}</option>}
+          {CLASS_GROUPS.map(([branch, jobs]) => <optgroup key={branch} label={branch}>{jobs.map(j => <option key={j} value={j}>{j}</option>)}</optgroup>)}
+        </select>
         <span className="mut">Lv</span>
         <input className="lv" type="number" min={1} max={250} value={id.level ?? ''} onChange={e => c.setIdentity({ level: +e.target.value || null })} />
         <span className="mut">Gender</span>
