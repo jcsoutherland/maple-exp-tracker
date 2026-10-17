@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tsbuildinfo
+*.mp4
+*.webm
+*.mkv
+dev/out/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maple EXP Tracker</title>
+<style id="mainStyle">
+:root{--bg:#14161c;--panel:#1d2029;--panel2:#252936;--line:#323748;--tx:#e7e9ee;--mut:#9097a8;--acc:#f5a623;--hp:#e5484d;--mp:#3e8ef7;--exp:#9bd34a;--ok:#46c46e;--bad:#e5484d}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:13px/1.4 system-ui,Segoe UI,sans-serif}
+button{background:var(--panel2);color:var(--tx);border:1px solid var(--line);border-radius:6px;padding:6px 11px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--acc)}button:disabled{opacity:.4;cursor:default}
+button.pri{background:var(--acc);color:#1a1a1a;border-color:var(--acc);font-weight:600}
+button.danger{border-color:#7a2a2d}
+input,select{background:var(--bg);color:var(--tx);border:1px solid var(--line);border-radius:5px;padding:4px 6px;font:inherit}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{font-size:15px;margin:0 10px 0 0}
+.pill{padding:3px 9px;border-radius:99px;background:var(--panel2);color:var(--mut);font-size:12px}
+.pill.on{background:#1d3a26;color:var(--ok)}.pill.warn{background:#3a2f1d;color:var(--acc)}
+.sp{flex:1}
+nav{display:flex;gap:2px;padding:0 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+nav button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:9px 14px;color:var(--mut)}
+nav button.act{color:var(--tx);border-bottom-color:var(--acc)}
+main{padding:16px;max-width:1150px;margin:0 auto}
+.tab[hidden]{display:none}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:13px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.tile{background:var(--panel2);border-radius:8px;padding:10px 12px}
+.tile .k{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.tile .v{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;margin-top:2px}
+.tile .s{font-size:11px;color:var(--mut)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:500;font-size:12px}
+td.n,th.n{text-align:right}
+tr.dim td{color:var(--mut);opacity:.6}
+.mut{color:var(--mut)}.small{font-size:12px}
+.feed{max-height:240px;overflow:auto;font-size:12px}
+.feed div{padding:3px 0;border-bottom:1px dashed var(--line)}
+.feed .t{color:var(--mut);margin-right:6px;font-variant-numeric:tabular-nums}
+.ic{width:28px;height:28px;object-fit:contain;vertical-align:middle;image-rendering:pixelated}
+.charin input{width:110px}.charin input.lv{width:56px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:800px){.grid2{grid-template-columns:1fr}}
+#setupCanvas,#snapCanvas{width:100%;border:1px solid var(--line);border-radius:6px;cursor:crosshair;touch-action:none;background:#000}
+.reg{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)}
+.reg .sw{width:12px;height:12px;border-radius:3px}
+.reg.sel{background:var(--panel2)}
+.reg .nm{width:110px}
+.reg input[type=range]{width:110px}
+.ocrres{display:grid;grid-template-columns:110px 1fr;gap:6px 10px;align-items:center;font-size:12px}
+.ocrres img{max-width:100%;max-height:60px;background:#fff;border:1px solid var(--line)}
+.ctabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.ctabs button.act{border-color:var(--acc);color:var(--acc)}
+.charhead{display:flex;gap:14px;align-items:center}
+.snap{width:96px;height:120px;object-fit:contain;background:var(--panel2);border-radius:8px;image-rendering:pixelated}
+.sess{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:10px}
+.sess summary{cursor:pointer;display:flex;gap:12px;flex-wrap:wrap;align-items:baseline}
+.sess summary b{font-size:14px}
+.modal{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:9;padding:16px}
+.modal[hidden]{display:none}
+.modal .card{max-width:1000px;width:100%;max-height:95vh;overflow:auto}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:10}
+#toast.show{opacity:1}
+canvas.spark{width:100%;height:70px;display:block}
+.bar{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:var(--exp)}
+/* mini overlay (PiP) */
+.mini{padding:8px 10px;font-size:12px;background:#111318ee;color:var(--tx);height:100vh}
+.mini .big{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
+.mini .r{display:flex;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
+.mini .r span:first-child{color:var(--mut)}
+.mini button{padding:3px 8px;font-size:11px}
+code{background:var(--panel2);padding:1px 5px;border-radius:4px}
+ol.help li{margin-bottom:4px}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>🍁 Maple EXP Tracker</h1>
+  <span id="pCap" class="pill">No capture</span>
+  <span id="pOcr" class="pill">OCR not loaded</span>
+  <span id="pSess" class="pill">Idle</span>
+  <span class="sp"></span>
+  <button id="bShare">Share game window</button>
+  <button id="bStart" class="pri" disabled>▶ Start session</button>
+  <button id="bPause" disabled>⏸ Pause</button>
+  <button id="bStop" class="danger" disabled>■ Stop</button>
+  <button id="bPip" title="Always-on-top mini overlay">⧉ Pop-out overlay</button>
+</header>
+<nav id="nav">
+  <button data-tab="live" class="act">Live</button>
+  <button data-tab="pots">Potions</button>
+  <button data-tab="drops">Drops</button>
+  <button data-tab="hist">History</button>
+  <button data-tab="setup">Setup</button>
+</nav>
+<main>
+<!-- LIVE -->
+<section class="tab" id="t-live">
+  <div class="card">
+    <div class="row charin">
+      <span class="mut">Character</span><input id="inName" placeholder="Name">
+      <span class="mut">Class</span><input id="inClass" placeholder="Class">
+      <span class="mut">Lv</span><input id="inLevel" class="lv" type="number" min="1" max="250">
+      <button id="bIdent" title="Read name / class / level from screen">Read from screen</button>
+      <span class="sp"></span>
+      <span class="mut small">Map:</span> <b id="lMap">—</b>
+    </div>
+  </div>
+  <div class="card">
+    <div class="tiles">
+      <div class="tile"><div class="k">Session time</div><div class="v" id="vTime">0:00:00</div><div class="s" id="sTime">&nbsp;</div></div>
+      <div class="tile"><div class="k">EXP gained</div><div class="v" id="vExp">0</div><div class="s" id="sExp">&nbsp;</div></div>
+      <div class="tile"><div class="k">EXP / hr</div><div class="v" id="vRate">—</div><div class="s" id="sRate">last 10 min: —</div></div>
+      <div class="tile"><div class="k">Level progress</div><div class="v" id="vPct">—</div><div class="s" id="sPct">ETA —</div><div class="bar"><i id="barPct" style="width:0"></i></div></div>
+      <div class="tile"><div class="k">Mesos (raw)</div><div class="v" id="vMeso">0</div><div class="s" id="sMeso">— / hr</div></div>
+      <div class="tile"><div class="k">Pot cost</div><div class="v" id="vPot">0</div><div class="s" id="sPot">net mesos —</div></div>
+      <div class="tile"><div class="k">HP / MP</div><div class="v small" id="vHpMp" style="font-size:15px">—</div><div class="s" id="sHpMp">&nbsp;</div></div>
+      <div class="tile"><div class="k">EXP lost</div><div class="v" id="vDeaths" style="color:var(--bad)">0</div><div class="s" id="sDeaths">no deaths</div></div>
+    </div>
+    <canvas id="spark" class="spark" style="margin-top:12px"></canvas>
+  </div>
+  <div class="grid2">
+    <div class="card"><h3>EXP by map</h3><table><thead><tr><th>Map</th><th class="n">EXP</th><th class="n">%</th></tr></thead><tbody id="mapBody"></tbody></table>
+      <div class="mut small" style="margin-top:6px">Maps under 1,000 EXP are dimmed and left out when the session is saved.</div></div>
+    <div class="card"><h3>Activity</h3><div class="feed" id="feed"></div></div>
+  </div>
+</section>
+
+<!-- POTS -->
+<section class="tab" id="t-pots" hidden>
+  <div class="card">
+    <h3>HP / MP this session</h3>
+    <div class="tiles">
+      <div class="tile"><div class="k">HP lost</div><div class="v" id="pHpUsed" style="color:var(--hp)">0</div></div>
+      <div class="tile"><div class="k">HP recovered (pots)</div><div class="v" id="pHpRec" style="color:var(--hp)">0</div><div class="s" id="pHpRegen"></div></div>
+      <div class="tile"><div class="k">MP spent</div><div class="v" id="pMpUsed" style="color:var(--mp)">0</div></div>
+      <div class="tile"><div class="k">MP recovered (pots)</div><div class="v" id="pMpRec" style="color:var(--mp)">0</div><div class="s" id="pMpRegen"></div></div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <span class="mut">Count potions from:</span>
+      <select id="potBasis"><option value="rec">Recovered (jumps of pot size)</option><option value="used">Consumed (all HP/MP lost)</option></select>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Potion conversion</h3>
+    <table><thead><tr><th>Main</th><th>Item</th><th class="n">Restores</th><th class="n">Price</th><th class="n">Count</th><th class="n">Cost</th></tr></thead><tbody id="potBody"></tbody></table>
+    <div class="mut small" style="margin-top:8px">You can edit the amounts and prices to match your server. The <b>Main</b> pot for HP and MP is the one used for "Pot cost" and net mesos. Defaults: Meat and Lemon use your numbers; Red, Orange, White, Blue and Mana Elixir use standard NPC shop values.</div>
+    <div class="tiles" style="margin-top:12px">
+      <div class="tile"><div class="k">Total pot cost</div><div class="v" id="pCost">0</div></div>
+      <div class="tile"><div class="k">Mesos picked up</div><div class="v" id="pMeso">0</div></div>
+      <div class="tile"><div class="k">Net mesos</div><div class="v" id="pNet">0</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- DROPS -->
+<section class="tab" id="t-drops" hidden>
+  <div class="card">
+    <h3>Drops this session</h3>
+    <table><thead><tr><th></th><th>Item</th><th class="n">Qty</th><th class="n">NPC price</th><th class="n">Total</th><th></th></tr></thead><tbody id="dropBody"></tbody></table>
+    <div class="mut small" style="margin-top:8px">Icons and NPC sell prices come from maplestory.io (GMS v83 data) and are cached after the first lookup. "Price check" opens a meowdb search for the item.</div>
+    <div class="row" style="margin-top:8px"><span class="mut">Estimated NPC value:</span><b id="dropTotal">0</b></div>
+  </div>
+</section>
+
+<!-- HISTORY -->
+<section class="tab" id="t-hist" hidden>
+  <div class="row" style="margin-bottom:12px">
+    <div class="ctabs" id="charTabs"></div><span class="sp"></span>
+    <button id="bExport">Export JSON</button>
+    <label><button id="bImportBtn" type="button">Import JSON</button><input id="fImport" type="file" accept=".json" hidden></label>
+  </div>
+  <div id="histBody"></div>
+</section>
+
+<!-- SETUP -->
+<section class="tab" id="t-setup" hidden>
+  <div class="card">
+    <h3>Quick start</h3>
+    <ol class="help">
+      <li>Click <b>Share game window</b> and pick the MapleStory window. Picking the window rather than the whole screen keeps the regions accurate if the window moves.</li>
+      <li>Click <b>Grab frame</b> below. Check that each coloured box covers its text. To fix one, select it in the list and drag a new box on the image.</li>
+      <li>Click <b>Test OCR</b>. Each region should read correctly. If the black-on-white preview is messy, adjust that region's threshold slider.</li>
+      <li>Go to <b>Live</b>, check name/class/level, then click <b>▶ Start session</b>. Use <b>⧉ Pop-out overlay</b> for a small always-on-top window over the game. Run the game windowed or borderless, not exclusive fullscreen.</li>
+    </ol>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <div class="row" style="margin-bottom:8px"><button id="bGrab">Grab frame</button><button id="bTest">Test OCR</button><button id="bSnap">📸 Character snapshot</button><span class="sp"></span><button id="bResetReg" class="danger">Reset regions</button></div>
+      <canvas id="setupCanvas" width="960" height="540"></canvas>
+      <div class="mut small" style="margin-top:6px">Selected: <b id="selReg">—</b>. Drag on the image to set this region.</div>
+    </div>
+    <div class="card">
+      <h3>Regions</h3>
+      <div id="regList"></div>
+      <h3 style="margin-top:16px">OCR test</h3>
+      <div id="ocrRes" class="ocrres"><span class="mut">Run "Test OCR".</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Test with a recording</h3>
+    <div class="row">
+      <label><button type="button" id="bVidBtn">Load video file…</button><input id="fVid" type="file" accept="video/*" hidden></label>
+      <label>Speed <select id="vRateSel"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
+      <span class="mut small">Plays a gameplay recording through the tracker as if it were live. Calibrate and test regions with it, then start a session. At higher speeds the tracker samples less often relative to the gameplay.</span>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Performance &amp; detection</h3>
+    <div class="row">
+      <label>Fast tick (HP/MP/log) <input id="sFast" type="number" min="500" step="100" style="width:80px"> ms</label>
+      <label>Slow tick (EXP/map) <input id="sSlow" type="number" min="2000" step="500" style="width:80px"> ms</label>
+      <label>Min HP jump counted as pot <input id="sHpMin" type="number" min="1" style="width:70px"></label>
+      <label>Min MP jump counted as pot <input id="sMpMin" type="number" min="1" style="width:70px"></label>
+      <label><input id="sAskSnap" type="checkbox"> Ask for character snapshot on stop</label>
+    </div>
+    <div class="mut small" style="margin-top:8px">The capture runs at about 4 fps. Only the small regions are OCR'd, and a region is skipped when its pixels haven't changed since the last read. Raise the tick values to save even more CPU.</div>
+  </div>
+</section>
+</main>
+
+<div class="modal" id="snapModal" hidden>
+  <div class="card">
+    <h3>Character snapshot: drag a box around your character</h3>
+    <canvas id="snapCanvas" width="960" height="540"></canvas>
+    <div class="row" style="margin-top:10px"><span class="mut small" id="snapFor"></span><span class="sp"></span><button id="bSnapSkip">Skip</button><button id="bSnapSave" class="pri" disabled>Save snapshot</button></div>
+  </div>
+</div>
+<div id="toast"></div>
+<video id="vid" muted playsinline style="position:fixed;left:-10px;top:-10px;width:2px;height:2px;opacity:0"></video>
+
+<script>
+'use strict';
+// ================= storage / helpers =================
+const LS={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},
+          set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){toast('Storage error: '+e.message)}}};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtN=n=>Math.round(n||0).toLocaleString();
+const fmtK=n=>{n=Math.round(n||0);return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?(n/1e3).toFixed(1)+'k':n.toLocaleString()};
+const fmtDur=ms=>{const s=Math.max(0,Math.floor(ms/1000));return `${Math.floor(s/3600)}:${String(Math.floor(s/60)%60).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`};
+const fmtHM=ms=>{const m=Math.round(ms/60000);return m>=60?`${Math.floor(m/60)}h ${m%60}m`:`${m}m`};
+let toastT;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),3000)}
+function lev(a,b){if(a===b)return 0;const m=a.length,n=b.length;if(!m)return n;if(!n)return m;let p=Array.from({length:n+1},(_,i)=>i);for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[n]}
+const sim=(a,b)=>{a=a.toLowerCase();b=b.toLowerCase();const L=Math.max(a.length,b.length);return L?1-lev(a,b)/L:1};
+const median=a=>{const s=[...a].sort((x,y)=>x-y);return s[Math.floor(s.length/2)]};
+
+// ================= config =================
+// mode: luma = any bright pixel is text; white = only near-white pixels (drops coloured brackets/boxes);
+// outline = near-white pixels that sit next to a dark outline (Maple's floating log text over busy backgrounds)
+// px: height (in px) the region is upscaled to before OCR
+const RDEF={ // w: which OCR worker, psm: tesseract page-seg mode, color for setup overlay
+  map:  {label:'Map name',  color:'#ff7ab8',w:'txt',psm:7,mode:'luma',px:45},
+  level:{label:'Level',     color:'#c08cff',w:'num',psm:7,mode:'white',px:45},
+  cls:  {label:'Class',     color:'#46c46e',w:'txt',psm:7,mode:'luma',px:45},
+  name: {label:'Char name', color:'#ffd23f',w:'txt',psm:7,mode:'luma',px:45},
+  hp:   {label:'HP numbers',color:'#e5484d',w:'num',psm:7,mode:'luma',px:30},
+  mp:   {label:'MP numbers',color:'#3e8ef7',w:'num',psm:7,mode:'luma',px:30},
+  exp:  {label:'EXP numbers',color:'#e8e84a',w:'num',psm:7,mode:'luma',px:30},
+  log:  {label:'Gain log',  color:'#b06fd8',w:'txt',psm:6,mode:'outline',px:370},
+};
+// Defaults measured on a native 1280x720 game window (fractions of frame, so they scale with the capture)
+const DEF_REG={
+  map:{x:.0345,y:.0529,w:.1328,h:.0204,thr:200},
+  level:{x:.2391,y:.9653,w:.0203,h:.0208,thr:150},
+  cls:{x:.2672,y:.9569,w:.0391,h:.0167,thr:140},
+  name:{x:.2672,y:.9750,w:.0391,h:.0181,thr:140},
+  hp:{x:.3781,y:.9569,w:.0492,h:.0181,thr:140},
+  mp:{x:.4594,y:.9569,w:.0453,h:.0181,thr:140},
+  exp:{x:.5469,y:.9569,w:.0680,h:.0181,thr:140},
+  log:{x:.8364,y:.6407,w:.1636,h:.1718,thr:140},
+};
+const DEF_POTS=[
+  {id:'meat',name:'Meat',type:'hp',amt:160,price:80},
+  {id:'red',name:'Red Potion',type:'hp',amt:50,price:50},
+  {id:'orange',name:'Orange Potion',type:'hp',amt:150,price:160},
+  {id:'white',name:'White Potion',type:'hp',amt:300,price:320},
+  {id:'lemon',name:'Lemon',type:'mp',amt:150,price:150},
+  {id:'blue',name:'Blue Potion',type:'mp',amt:100,price:200},
+  {id:'melix',name:'Mana Elixir',type:'mp',amt:300,price:620},
+];
+const DEF_SET={fastMs:1500,slowMs:5000,hpMin:40,mpMin:25,potBasis:'rec',askSnap:true,mainHp:'meat',mainMp:'lemon',pots:DEF_POTS};
+let SET=Object.assign(structuredClone(DEF_SET),LS.get('meo.settings',{}));
+let REG=Object.assign(structuredClone(DEF_REG),LS.get('meo.regions3',{}));
+const saveSet=()=>LS.set('meo.settings',SET), saveReg=()=>LS.set('meo.regions3',REG);
+const CLASSES=['Beginner','Warrior','Fighter','Page','Spearman','Crusader','White Knight','Dragon Knight','Hero','Paladin','Dark Knight','Magician','Wizard (Fire,Poison)','Wizard (Ice,Lightning)','Cleric','Mage (Fire,Poison)','Mage (Ice,Lightning)','Priest','Arch Mage (Fire,Poison)','Arch Mage (Ice,Lightning)','Bishop','Bowman','Hunter','Crossbowman','Ranger','Sniper','Bowmaster','Marksman','Thief','Assassin','Bandit','Hermit','Chief Bandit','Night Lord','Shadower','Pirate','Brawler','Gunslinger','Marauder','Outlaw','Buccaneer','Corsair'];
+
+// ================= runtime state =================
+const S={stream:null,video:$('#vid'),numW:null,txtW:null,ocr:false,sess:null,pip:null,frozen:null,selReg:'map',dirty:{pots:true,drops:true,hist:true},tab:'live'};
+let T=null; // tracker (not persisted)
+function newTracker(){return{exp:null,pct:null,total:null,pend:null,strikes:0,mapCur:null,mapCand:null,
+  hp:{buf:[],cur:null,max:null,mc:null,mcn:0,regen:0},mp:{buf:[],cur:null,max:null,mc:null,mcn:0,regen:0},
+  logPrev:[],recent:[],lastTL:0,lastSave:0,lastLvlRead:0,hash:{}}}
+
+// ================= capture =================
+$('#bShare').onclick=async()=>{
+  let st;
+  try{st=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:4,max:5}},audio:false})}
+  catch(e){console.error(e);toast(e.name==='NotAllowedError'?'Capture cancelled':`Capture failed: ${e.name} ${e.message}`);return}
+  S.stream?.getTracks?.().forEach(t=>t.stop());
+  S.stream=st;S.video.removeAttribute('src');S.video.srcObject=st;
+  S.video.play().catch(e=>{console.warn('video.play()',e);toast(`Video start issue: ${e.name}. Tracking may still work.`)});
+  st.getVideoTracks()[0].addEventListener('ended',()=>{S.stream=null;setPills();toast('Screen sharing stopped');if(S.sess&&!S.sess.paused)togglePause()});
+  setPills();initOCR();waitFrame().then(ok=>{if(ok){toast('Capturing ✓');grabFrame()}else toast('No frames received from the shared window yet')});
+};
+function waitFrame(ms=5000){return new Promise(res=>{const t0=Date.now();(function chk(){if(S.video.videoWidth>0)return res(true);if(Date.now()-t0>ms)return res(false);setTimeout(chk,150)})()})}
+// Test mode: play a recorded gameplay video through the tracker instead of a live capture
+function useVideoFile(f){
+  S.stream?.getTracks?.().forEach(t=>t.stop());
+  S.video.srcObject=null;S.video.src=URL.createObjectURL(f);S.video.playbackRate=+$('#vRateSel').value||1;
+  S.stream={file:f.name,getTracks:()=>[],getVideoTracks:()=>[]};
+  S.video.onended=()=>{toast('Video finished');if(S.sess&&!S.sess.paused)togglePause()};
+  S.video.play().then(()=>waitFrame()).then(()=>{setPills();initOCR();grabFrame();toast('Playing '+f.name)}).catch(e=>toast('Video failed: '+e.message));
+}
+function frameOK(){return S.stream&&S.video.videoWidth>0}
+async function initOCR(){
+  if(S.ocr||S.ocrLoading)return;S.ocrLoading=true;$('#pOcr').textContent='Loading OCR…';$('#pOcr').className='pill warn';
+  try{
+    S.numW=await Tesseract.createWorker('eng',1);
+    await S.numW.setParameters({tessedit_char_whitelist:'0123456789,.[]/%',tessedit_pageseg_mode:'7'});
+    S.txtW=await Tesseract.createWorker('eng',1);
+    S.ocr=true;loadItemDB();
+  }catch(e){console.error(e);toast('OCR failed to load (internet needed for first load)')}
+  S.ocrLoading=false;setPills();
+}
+function setPills(){
+  $('#pCap').textContent=S.stream?'Capturing':'No capture';$('#pCap').className='pill'+(S.stream?' on':'');
+  if(S.ocr){$('#pOcr').textContent='OCR ready';$('#pOcr').className='pill on'}
+  const s=S.sess;$('#pSess').textContent=!s?'Idle':s.paused?'Paused':'Tracking';$('#pSess').className='pill'+(s?(s.paused?' warn':' on'):'');
+  $('#bStart').disabled=!!s||!S.stream||!S.ocr;$('#bPause').disabled=!s;$('#bStop').disabled=!s;
+  $('#bPause').textContent=s?.paused?'▶ Resume':'⏸ Pause';
+  renderMini();
+}
+
+// ================= OCR pipeline =================
+const pcan={};
+function prep(key,src,force){ // crop -> upscale 3x -> binarize (bright text => black on white). returns canvas + change hash
+  const r=REG[key],W=src.videoWidth||src.width,H=src.videoHeight||src.height,pad=8;
+  const sc=Math.max(2,Math.min(8,(RDEF[key].px||30)/(r.h*H))); // upscale so text is ~px tall regardless of capture size
+  const sx=r.x*W,sy=r.y*H,sw=Math.max(1,r.w*W),sh=Math.max(1,r.h*H);
+  const c=pcan[key]||(pcan[key]=document.createElement('canvas')),x=c.getContext('2d',{willReadFrequently:true});
+  c.width=Math.round(sw*sc)+pad*2;c.height=Math.round(sh*sc)+pad*2;
+  x.fillStyle='#000';x.fillRect(0,0,c.width,c.height);x.imageSmoothingEnabled=true;
+  x.drawImage(src,sx,sy,sw,sh,pad,pad,c.width-pad*2,c.height-pad*2);
+  const im=x.getImageData(0,0,c.width,c.height),d=im.data,thr=r.thr,mode=RDEF[key].mode,n=c.width*c.height,m=new Uint8Array(n);
+  for(let i=0,p=0;p<n;i+=4,p++){const mn=Math.min(d[i],d[i+1],d[i+2]);
+    const lu=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+    m[p]=mode==='luma'?(lu>thr?1:0):mode==='neutral'?(lu>thr&&Math.max(d[i],d[i+1],d[i+2])-mn<(RDEF[key].sat||60)?1:0):(mn>thr?1:0)}
+  if(mode==='outline'){ // semi-transparent log text: keep pixels brighter than their neighbourhood AND next to a dark outline
+    const W2=c.width,H2=c.height,W1=W2+1,L=new Float32Array(n),I=new Float64Array(W1*(H2+1)),D=new Int32Array(W1*(H2+1)),BR=12,K=35,DR=4;
+    for(let p=0;p<n;p++)L[p]=.299*d[p*4]+.587*d[p*4+1]+.114*d[p*4+2];
+    for(let y=0;y<H2;y++){let s=0,s2=0;for(let xx=0;xx<W2;xx++){const v=L[y*W2+xx];s+=v;s2+=v<70?1:0;I[(y+1)*W1+xx+1]=I[y*W1+xx+1]+s;D[(y+1)*W1+xx+1]=D[y*W1+xx+1]+s2}}
+    const box=(A,xx,y,R)=>{const x0=Math.max(0,xx-R),x1=Math.min(W2,xx+R+1),y0=Math.max(0,y-R),y1=Math.min(H2,y+R+1);return[A[y1*W1+x1]-A[y0*W1+x1]-A[y1*W1+x0]+A[y0*W1+x0],(x1-x0)*(y1-y0)]};
+    for(let y=0;y<H2;y++)for(let xx=0;xx<W2;xx++){const p=y*W2+xx;m[p]=0;if(L[p]<=thr)continue;
+      const[s,a]=box(I,xx,y,BR);if(L[p]>s/a+K&&box(D,xx,y,DR)[0]>0)m[p]=1}}
+  if(RDEF[key].bold){const o=m.slice(),W2=c.width;for(let p=1;p<n-1;p++)if(o[p-1]||o[p+1])m[p]=1} // thicken 1px pixel-font strokes
+  let h=2166136261,ink=0;
+  for(let i=0,p=0;p<n;i+=4,p++){const v=m[p]?0:255;d[i]=d[i+1]=d[i+2]=v;if(m[p])ink++;if((p&7)===0){h^=v;h=Math.imul(h,16777619)}}
+  x.putImageData(im,0,0);return{canvas:c,hash:h>>>0,ink};
+}
+const chains=new Map(),psmOf=new Map();
+function onWorker(w,fn){const p=(chains.get(w)||Promise.resolve()).then(fn);chains.set(w,p.catch(()=>{}));return p}
+function recog(w,canvas,psm){return onWorker(w,async()=>{if(psmOf.get(w)!==psm){await w.setParameters({tessedit_pageseg_mode:String(psm)});psmOf.set(w,psm)}return (await w.recognize(canvas)).data.text||''})}
+// ---- gain log: semi-transparent, ~9px text over the game scene. Score each pixel by "bright, greyish, brighter than its
+// neighbourhood", split into text lines by row projection, then OCR each line on its own (far more reliable than one block).
+const lcan=document.createElement('canvas');
+function logScan(src,thr){
+  const r={...REG.log,thr:thr??REG.log.thr},W0=src.videoWidth||src.width,H0=src.videoHeight||src.height,f=H0/720;
+  const X=Math.round(r.x*W0),Y=Math.round(r.y*H0),W=Math.max(8,Math.round(r.w*W0)),H=Math.max(8,Math.round(r.h*H0));
+  lcan.width=W;lcan.height=H;const g=lcan.getContext('2d',{willReadFrequently:true});g.drawImage(src,X,Y,W,H,0,0,W,H);
+  const d=g.getImageData(0,0,W,H).data,n=W*H,L=new Float32Array(n),SA=new Uint8Array(n),W1=W+1,I=new Float64Array(W1*(H+1)),R=Math.max(2,Math.round(4*f));
+  for(let p=0;p<n;p++){const a=d[p*4],b=d[p*4+1],c=d[p*4+2];L[p]=.299*a+.587*b+.114*c;SA[p]=Math.max(a,b,c)-Math.min(a,b,c)}
+  for(let y=0;y<H;y++){let s=0;for(let x=0;x<W;x++){s+=L[y*W+x];I[(y+1)*W1+x+1]=I[y*W1+x+1]+s}}
+  const sc=new Float32Array(n),rows=new Uint16Array(H);let h=2166136261;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const p=y*W+x;if(L[p]<=r.thr)continue;
+    const x0=Math.max(0,x-R),x1=Math.min(W,x+R+1),y0=Math.max(0,y-R),y1=Math.min(H,y+R+1);
+    const v=(L[p]-(I[y1*W1+x1]-I[y0*W1+x1]-I[y1*W1+x0]+I[y0*W1+x0])/((x1-x0)*(y1-y0)))*(SA[p]<45?1:.3);
+    if(v>0){sc[p]=v;if(v>15){rows[y]++;if((p&3)===0){h^=p;h=Math.imul(h,16777619)}}}}
+  const bands=[],minH=Math.max(4,Math.round(5*f));let s0=-1;
+  for(let y=0;y<=H;y++){const on=y<H&&rows[y]>=4;if(on&&s0<0)s0=y;if(!on&&s0>=0){if(y-s0>=minH)bands.push([Math.max(0,s0-2),Math.min(H,y+2)]);s0=-1}}
+  // log lines sit on a fixed 13px (at 720p) grid counted up from the newest line, so cut slots on that grid
+  // (row projection alone merges neighbouring lines when the background is busy)
+  const P=Math.round(13*f),slots=[];
+  if(bands.length){const bottom=bands[bands.length-1][1];
+    for(let k=0;k<6;k++){const z=bottom-k*P,a=z-P-1;if(a<0)break;let ink=0;for(let y=a;y<z;y++)if(rows[y]>=4)ink++;if(ink>=3)slots.push([Math.max(0,a),Math.min(H,z+1)])}}
+  return{W,H,f,sc,bands,slots,hash:h>>>0}; // slots are bottom-up (slots[0] = newest line)
+}
+function logCanvas(S2,a,z,x0=0,x1=S2.W){ // inverted score (dark text on white), upscaled to ~4x native
+  const w=Math.max(1,x1-x0),h=Math.max(1,z-a),k=4/S2.f,t=document.createElement('canvas');t.width=w;t.height=h;
+  const tg=t.getContext('2d'),id=tg.createImageData(w,h);
+  for(let y=a;y<z;y++)for(let x=x0;x<x1;x++){const v=255-Math.min(255,S2.sc[y*S2.W+x]*4),q=((y-a)*w+(x-x0))*4;id.data[q]=id.data[q+1]=id.data[q+2]=v;id.data[q+3]=255}
+  tg.putImageData(id,0,0);const c=document.createElement('canvas');c.width=Math.round(w*k)+40;c.height=Math.round(h*k)+40;
+  const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.imageSmoothingEnabled=true;g.drawImage(t,20,20,c.width-40,c.height-40);return c;
+}
+const lineQ=t=>{const k=lineKind(t);return k?1+(k==='item'||lineAmount(t)>0?1:0):0};
+async function readLog(src,force){ // null => unchanged; else line texts bottom-up (index 0 = newest)
+  // text over dark scenery needs a low brightness cut-off, text over bright walls a higher one:
+  // read each line with the low one and retry with the high one only when the result doesn't parse
+  const lo=logScan(src,REG.log.thr-30);if(!force&&T&&T.hash.log===lo.hash)return null;if(T)T.hash.log=lo.hash;
+  let hi=null;const out=[],cache=T?(T.slotCache||(T.slotCache=new Map())):new Map();
+  for(const[a,z]of lo.slots.slice(0,4)){ // older lines were already counted when they were new
+    let k=2166136261;for(let y=a;y<z;y++)for(let x=0;x<lo.W;x++)if(lo.sc[y*lo.W+x]>15){k^=(y-a)*lo.W+x;k=Math.imul(k,16777619)} // text-pixel signature
+    if(cache.has(k)){out.push(cache.get(k));continue} // same line as last time: skip OCR
+    let t=(await recog(S.txtW,logCanvas(lo,a,z),7)).trim();
+    if(lineQ(t)<2){hi=hi||logScan(src);const t2=(await recog(S.txtW,logCanvas(hi,a,z),7)).trim();if(lineQ(t2)>lineQ(t))t=t2}
+    cache.set(k,t);if(cache.size>40)cache.delete(cache.keys().next().value);out.push(t)}
+  return out;
+}
+async function readRegion(key,src,force){ // null => unchanged/skip
+  const {canvas,hash,ink}=prep(key,src);
+  if(!force&&T&&T.hash[key]===hash)return null; if(T)T.hash[key]=hash;
+  if(!ink)return '';
+  return recog(RDEF[key].w==='num'?S.numW:S.txtW,canvas,RDEF[key].psm);
+}
+
+// ================= parsers =================
+function parsePair(t,knownMax){
+  const m=(t||'').replace(/[^\d\/]/g,'').match(/(\d+)\/(\d+)/);if(!m)return null;
+  let cur=+m[1],max=+m[2];if(!max||max>99999)return null;
+  let s=m[1];while(cur>max&&s.length>1){s=s.slice(1);cur=+s} // strip junk leading digits (e.g. bracket read as 1)
+  return cur<=max?[cur,max]:null;
+}
+function parseExp(t){
+  const sp=(t||'').match(/([\d][\d,.]*)\s+(\d{1,2}[.,]\d{1,2})\s*%/); // white mode turns the coloured "[" into a space
+  const s=(t||'').replace(/\s/g,'');
+  const m=sp||s.match(/([\d,.]+?)\[(\d{1,3}[.,]\d{1,2})/)||s.match(/([\d,.]+?)[\[\(1l|]?(\d{1,2}[.,]\d{2})%/);
+  if(!m)return null;const exp=parseInt(m[1].replace(/\D/g,''),10),pct=parseFloat(m[2].replace(',','.'));
+  return isFinite(exp)&&pct>=0&&pct<100?{exp,pct}:null;
+}
+const parseLevel=t=>{const n=parseInt((t||'').replace(/\D/g,''),10);return n>=1&&n<=250?n:null};
+// map names are words; reject OCR noise from minimap art (e.g. "l- - I") when the minimap has no title
+const cleanMap=t=>{t=(t||'').split('\n').map(l=>l.replace(/[^A-Za-z0-9' :\-&]/g,'').replace(/\s+/g,' ').trim()).sort((a,b)=>b.length-a.length)[0]||'';
+  const letters=(t.match(/[A-Za-z]/g)||[]).length,longWord=t.split(' ').some(w=>/^[A-Za-z']{4,}$/.test(w));
+  return t.length>=5&&longWord&&letters/t.replace(/ /g,'').length>=.7?t:null};
+const cleanName=t=>{const w=(t||'').replace(/[^A-Za-z0-9]/g,' ').trim().split(/\s+/).sort((a,b)=>b.length-a.length)[0]||'';return w.length>=3?w:null};
+function matchClass(t){t=(t||'').trim();if(t.length<3)return null;let best=null,bs=0;for(const c of CLASSES){const s=sim(t,c);if(s>bs){bs=s;best=c}}return bs>=.6?best:null}
+
+// ================= tracking logic =================
+function addEvent(type,text){const s=S.sess;if(!s)return;s.events.unshift({t:elapsed(),type,text});if(s.events.length>60)s.events.length=60}
+function curMap(){return T.mapCur||'Undefined'}
+function gainExp(d){const s=S.sess;s.exp+=d;const m=curMap();s.maps[m]=(s.maps[m]||0)+d}
+// level total = exp*100/pct; the shown % has 2 decimals, so the estimate is most precise from high-% readings
+function setTotal(r){if(r.pct>=1&&(!T.totalPct||r.pct>T.totalPct||T.totalStale)){T.total=r.exp*100/r.pct;T.totalPct=r.pct;T.totalStale=false}}
+function onExp(r){
+  if(T.exp==null){T.exp=r.exp;T.pct=r.pct;setTotal(r);return}
+  if(T.total==null&&r.pct>=1){ // need a level total estimate; derive from this reading
+    if(r.exp>=T.exp&&r.exp-T.exp<1e7){gainExp(r.exp-T.exp)}T.exp=r.exp;T.pct=r.pct;setTotal(r);return}
+  // a misread digit shifts exp but not %, so compare the % predicted from exp with the % read (tolerance = rounding + estimate error)
+  const tol=T.total?.02+r.pct*.006/T.totalPct:0;
+  const consistent=T.total?Math.abs(r.exp*100/T.total-r.pct)<=tol:r.exp>=T.exp;
+  const bigDrop=T.total&&T.exp-r.exp>T.total*.12; // deaths cost ≤10%, so a bigger drop means the bar rolled over
+  if(consistent&&!bigDrop){
+    T.strikes=0;T.pend=null;const d=r.exp-T.exp;
+    if(d>0){gainExp(d);T.exp=r.exp;T.pct=r.pct;T.drop=null;setTotal(r)}
+    else if(d<0){ // EXP went backwards (death without safety charm): require a second matching read before logging it
+      if(T.drop&&Math.abs(T.drop.exp-r.exp)<=Math.max(2,T.total*.0002)){
+        const lost=T.exp-r.exp;S.sess.expLost+=lost;S.sess.deaths++;addEvent('death',`EXP lost: -${fmtN(lost)} (death?)`);
+        T.exp=r.exp;T.pct=r.pct;T.drop=null}
+      else T.drop=r}
+    else T.drop=null;
+    return;
+  }
+  // inconsistent: level-up candidate or bad read
+  if(bigDrop||(r.exp<T.exp&&r.pct<T.pct)){
+    if(T.pend&&r.exp>=T.pend.exp&&r.pct>=T.pend.pct){ // confirmed twice -> level up
+      const g=Math.max(0,(T.total||T.exp)-T.exp)+r.exp;gainExp(g);
+      const s=S.sess;s.level=(s.level||0)+1;s.levelUps++;$('#inLevel').value=s.level;addEvent('level',`Level up! → ${s.level}`);
+      T.exp=r.exp;T.pct=r.pct;T.total=null;T.totalPct=0;setTotal(r);T.pend=null;T.strikes=0;
+    }else T.pend=r;
+    return;
+  }
+  // rebaseline after repeated disagreement (e.g. wrong total estimate) only if the new reads agree with each other
+  if(T.reb&&Math.abs(T.reb.exp-r.exp)<T.reb.exp*.01)T.strikes++;else{T.strikes=1;T.reb=r}
+  if(T.strikes>=4){T.exp=r.exp;T.pct=r.pct;T.totalStale=true;setTotal(r);T.strikes=0;T.reb=null} // no gain counted
+}
+function onBar(kind,pair){
+  if(!pair)return;const b=T[kind],s=S.sess[kind];let [cur0,max]=pair;
+  // the closing "]" is often read as a trailing 1 ("10781"): if the shorter value is already known, use it
+  if(max>=1e4&&max%10===1){const short=(max-1)/10;if(b.votes&&b.votes[short]>=1)max=short}
+  // max = most-voted value (votes decay so a real change, e.g. after a level-up, wins within ~10 reads)
+  const V=b.votes||(b.votes={});for(const k in V)V[k]*=.9;V[max]=(V[max]||0)+1;
+  let best=b.max;for(const k in V)if(best==null||V[k]>(V[best]||0)+1.5)best=+k;b.max=best;
+  if(max!==b.max){const a=String(max),e=String(b.max); // a 1-digit misread or stray bracket digit still describes the known max
+    if(!(a.startsWith(e)&&a.length===e.length+1)&&lev(a,e)>1)return}
+  if(cur0>b.max){const s2=String(cur0);cur0=+s2.slice(1);if(!(cur0<=b.max))return}
+  b.buf.push(cur0);if(b.buf.length>5)b.buf.shift();
+  const cur=median(b.buf); // filters up to two consecutive misreads
+  if(b.cur==null){b.cur=cur;return}
+  const d=cur-b.cur,min=kind==='hp'?SET.hpMin:SET.mpMin;
+  if(d<0)s.used+=-d;else if(d>=min)s.rec+=d;else if(d>0)b.regen+=d;
+  b.cur=cur;S.dirty.pots=true;
+}
+// log de-dup: new lines appear at the bottom; find overlap between previous tail and current head
+const normL=l=>l.toLowerCase().replace(/[^a-z0-9]/g,'');
+const digits=l=>l.replace(/\D/g,'');
+const sameLine=(a,b)=>digits(a)===digits(b)&&sim(a.replace(/\d/g,''),b.replace(/\d/g,''))>=.7;
+function newLines(P,C){
+  for(let k=Math.min(P.length,C.length);k>=1;k--){let ok=0;for(let i=0;i<k;i++)if(sameLine(P[P.length-k+i],C[i]))ok++;if(ok>=Math.ceil(k*.75))return C.slice(k)}
+  return C;
+}
+// "(+N)" at the end of a line. OCR often reads "+" as 1/4/t, e.g. "(141" for (+41), and drops/garbles ")".
+function lineAmount(text){
+  const m=(text||'').match(/\(([^()]{1,9})\)?\W*$/)||(text||'').match(/(\+\s*\d{1,7})\W{0,3}$/);if(!m)return 0;
+  let s=m[1].trim(),plus=/^[+]/.test(s);s=s.replace(/^[+]\s*/,'');let d=s.replace(/[^\d]/g,'');
+  if(!plus&&d.length>=2&&/^[14t]/i.test(s))d=d.slice(1);
+  const n=parseInt(d,10);return n>0&&n<1e7?n:0;
+}
+// classify an OCR'd log line by shape, since individual words are frequently mangled ("Yn Ave gala resins")
+function lineKind(text){
+  const L=text.toLowerCase();
+  if(/ea[rmn]{1,2}e?d|\bearn|\((etc|use|equip|setup|cash|ete|eto|elc)\b/.test(L))return 'item';
+  const letters=L.replace(/\([^()]*\)?\W*$/,'').replace(/[^a-z]/g,'');if(letters.length<6)return null;
+  const sm=sim(letters,'youhavegainedmesos'),se=sim(letters,'youreceivedexp');
+  if(Math.max(sm,se)<.4)return null;return sm>=se?'meso':'exp';
+}
+// new lines push older ones up one slot each: find how far the previous read shifted to see which bottom lines are new
+function newLogLines(prev,cur){
+  if(!prev.length)return cur.length;
+  for(let sh=0;sh<=cur.length;sh++){const n=Math.min(3,cur.length-sh,prev.length);if(n<=0)break;let ok=0;
+    for(let k=0;k<n;k++)if(sim(cur[sh+k],prev[k])>=.6)ok++;if(ok>=Math.ceil(n*.67))return sh}
+  // no alignment: count only lines unlike anything seen last time (avoids double counting after a noisy read)
+  let sh=0;while(sh<cur.length&&!prev.some(p=>sim(p,cur[sh])>=.6))sh++;return sh;
+}
+function onLog(lines){
+  const cur=lines.map(t=>({t,n:normL(t)})).filter(l=>l.n.length>=6);
+  const fresh=newLogLines(T.logPrev,cur.map(l=>l.n));T.logPrev=cur.map(l=>l.n);
+  const s=S.sess;
+  for(const {t:l} of cur.slice(0,fresh).reverse()){ // oldest new line first
+    const kind=lineKind(l);
+    if(kind==='item'){
+      const m=l.match(/^[^A-Za-z]*(.+?)\s+\S{0,3}\s*ea[rmn]{1,2}e?d/i)||l.match(/^[^A-Za-z]*(.+?)\s+[x×X]\s*\d/);if(!m)continue;
+      let raw=m[1].replace(/\s+[x×X«]?[\dIl!|]{1,3}$/,'').replace(/[^A-Za-z0-9' \-]/g,'').replace(/\s+/g,' ').trim();if(raw.length<3)continue;
+      const q=parseInt(((l.match(/[x×X]\s*(\d{1,4})\b/)||[])[1])||'1',10)||1;
+      let nm=canonItem(raw)||raw;const ex=Object.keys(s.drops).find(k=>sim(k,nm)>=.8);if(ex)nm=ex;
+      const cat=(l.match(/\((equip|use|etc|setup|cash)/i)||[])[1]||'';
+      s.drops[nm]=s.drops[nm]||{qty:0,cat};s.drops[nm].qty+=q;addEvent('drop',`${nm} ×${q}`);S.dirty.drops=true;itemInfo(nm);
+    }else if(kind==='exp'){const n=lineAmount(l);if(n)s.logExp+=n}
+    else if(kind==='meso'){const n=lineAmount(l);
+      const amts=T.mesoAmts||(T.mesoAmts=[]);if(n&&amts.length>=5&&n>8*median(amts))continue; // implausible outlier (e.g. extra digit)
+      if(n){amts.push(n);if(amts.length>50)amts.shift();s.mesos+=n;addEvent('meso',`+${fmtN(n)} mesos`)}}
+  }
+}
+function onMap(name){
+  if(!name)return;
+  const known=Object.keys(S.sess.maps).concat(T.mapCur?[T.mapCur]:[]).find(k=>k!=='Undefined'&&sim(k,name)>=.8);
+  if(known){if(known!==T.mapCur){T.mapCur=known;addEvent('map',`Map: ${known}`)}T.mapCand=null;return}
+  if(!T.mapCur||(T.mapCand&&sim(T.mapCand,name)>=.85)){T.mapCur=name;T.mapCand=null;addEvent('map',`Map: ${name}`)}else T.mapCand=name;
+}
+
+// ================= ticks (worker timer so a background tab isn't throttled) =================
+let ticker;
+try{ticker=new Worker(URL.createObjectURL(new Blob([`let t=[];onmessage=e=>{t.forEach(clearInterval);t=[];for(const[id,ms]of e.data)t.push(setInterval(()=>postMessage(id),ms))}`],{type:'text/javascript'})));
+  ticker.onmessage=e=>e.data==='f'?fastTick():e.data==='s'?slowTick():uiTick();}catch(e){ticker=null}
+const fallbackTimers=[];
+function startTimers(){const spec=[['f',SET.fastMs],['s',SET.slowMs],['u',1000]];
+  if(ticker)ticker.postMessage(spec);else{stopTimers();for(const[id,ms]of spec)fallbackTimers.push(setInterval(()=>id==='f'?fastTick():id==='s'?slowTick():uiTick(),ms))}}
+function stopTimers(){if(ticker)ticker.postMessage([]);fallbackTimers.splice(0).forEach(clearInterval)}
+const running=()=>S.sess&&!S.sess.paused&&frameOK()&&S.ocr;
+let fBusy=false,sBusy=false;
+async function fastTick(){
+  if(!running()||fBusy)return;fBusy=true;const v=S.video;
+  try{const [h,m,l]=await Promise.all([readRegion('hp',v),readRegion('mp',v),readLog(v)]);
+    if(!S.sess)return;
+    if(h!=null)onBar('hp',parsePair(h));if(m!=null)onBar('mp',parsePair(m));if(l!=null)onLog(l);
+    renderLive();}catch(e){console.error(e)}finally{fBusy=false}
+}
+async function slowTick(){
+  if(!running()||sBusy)return;sBusy=true;const v=S.video;
+  try{
+    const now=Date.now(),doLvl=now-T.lastLvlRead>60000;
+    const [e,mp,lv]=await Promise.all([readRegion('exp',v),readRegion('map',v),doLvl?readRegion('level',v,true):null]);
+    const s=S.sess;if(!s)return;
+    if(mp!=null)onMap(cleanMap(mp));
+    if(e!=null){const r=parseExp(e);if(r)onExp(r)}
+    if(doLvl){T.lastLvlRead=now;const L=parseLevel(lv);if(L&&(!s.level||L===s.level+1)&&L!==s.level){s.level=L;$('#inLevel').value=L}}
+    const el=elapsed();
+    T.recent.push([el,s.exp]);while(T.recent.length&&el-T.recent[0][0]>600000)T.recent.shift();
+    if(el-T.lastTL>=60000){s.timeline.push([Math.round(el/60000),s.exp]);T.lastTL=el;if(s.timeline.length>720)s.timeline=s.timeline.filter((_,i)=>i%2===0)}
+    if(now-T.lastSave>30000){T.lastSave=now;persistActive()}
+    renderLive(true);if(S.tab==='pots')renderPots();if(S.tab==='drops'&&S.dirty.drops)renderDrops();
+  }catch(e){console.error(e)}finally{sBusy=false}
+}
+function uiTick(){if(S.sess){$('#vTime').textContent=fmtDur(elapsed());renderMini()}}
+
+// ================= session control =================
+const elapsed=()=>{const s=S.sess;return s?s.activeMs+(s.paused?0:Date.now()-s.resumeAt):0};
+function newSession(){return{id:Date.now(),char:$('#inName').value.trim()||'Unknown',cls:$('#inClass').value.trim(),levelStart:+$('#inLevel').value||null,level:+$('#inLevel').value||null,levelUps:0,
+  start:Date.now(),end:null,activeMs:0,resumeAt:Date.now(),paused:false,exp:0,expLost:0,deaths:0,mesos:0,logExp:0,maps:{},drops:{},hp:{used:0,rec:0},mp:{used:0,rec:0},timeline:[[0,0]],events:[]}}
+$('#bStart').onclick=async()=>{
+  if(!$('#inName').value.trim())await identify();
+  S.sess=newSession();T=newTracker();S.dirty={pots:true,drops:true,hist:true};
+  addEvent('info','Session started');startTimers();setPills();renderAll();slowTick();
+};
+function togglePause(){const s=S.sess;if(!s)return;
+  if(s.paused){s.paused=false;s.resumeAt=Date.now();T.hash={};T.exp=null;T.hp.cur=T.mp.cur=null;T.hp.buf=[];T.mp.buf=[];T.logPrev=[];addEvent('info','Resumed')} // re-baseline so gains while paused aren't counted
+  else{s.activeMs+=Date.now()-s.resumeAt;s.paused=true;addEvent('info','Paused')}
+  setPills();persistActive();renderLive(true)}
+$('#bPause').onclick=togglePause;
+$('#bStop').onclick=()=>stopSession();
+function stopSession(){
+  const s=S.sess;if(!s)return;if(!s.paused)s.activeMs+=Date.now()-s.resumeAt;
+  stopTimers();s.end=Date.now();s.char=$('#inName').value.trim()||s.char;s.cls=$('#inClass').value.trim()||s.cls;s.level=+$('#inLevel').value||s.level;
+  const out=finalize(s);
+  const all=LS.get('meo.sessions',[]);all.push(out);LS.set('meo.sessions',all);
+  const ch=LS.get('meo.chars',{});ch[out.char]=Object.assign(ch[out.char]||{},{cls:out.cls,level:out.level,last:out.end});LS.set('meo.chars',ch);
+  localStorage.removeItem('meo.active');S.sess=null;S.lastFinished=out;S.dirty.hist=true;setPills();toast('Session saved to History');
+  if(SET.askSnap&&frameOK())openSnap(out.char);
+}
+function finalize(s){
+  const maps={};for(const[k,v]of Object.entries(s.maps))if(v>=1000)maps[k]=v;
+  const pc=potCost(s);
+  return{id:s.id,char:s.char,cls:s.cls,levelStart:s.levelStart,level:s.level,levelUps:s.levelUps,start:s.start,end:s.end,activeMs:s.activeMs,
+    exp:s.exp,expLost:s.expLost,deaths:s.deaths,mesos:s.mesos,logExp:s.logExp,maps,drops:s.drops,hp:s.hp,mp:s.mp,potCost:pc.total,potDetail:pc.detail,timeline:s.timeline};
+}
+function persistActive(){if(S.sess){const s=S.sess,snap=Object.assign({},s);if(!s.paused){snap.activeMs=s.activeMs+Date.now()-s.resumeAt;snap.paused=true}LS.set('meo.active',snap)}}
+window.addEventListener('beforeunload',persistActive);
+
+async function identify(){
+  if(!frameOK()||!S.ocr){toast('Share the game window first (and wait for OCR)');return}
+  const v=S.video;T=T||newTracker();
+  const [n,c,l]=await Promise.all([readRegion('name',v,true),readRegion('cls',v,true),readRegion('level',v,true)]);
+  const nm=cleanName(n),cl=matchClass(c),lv=parseLevel(l);
+  if(nm)$('#inName').value=nm;if(cl)$('#inClass').value=cl;if(lv)$('#inLevel').value=lv;
+  toast(`Read: ${nm||'?'} / ${cl||'?'} / Lv ${lv||'?'}. Fix anything that's wrong.`);
+  const ch=LS.get('meo.chars',{});if(nm&&!cl&&ch[nm]?.cls)$('#inClass').value=ch[nm].cls;
+}
+$('#bIdent').onclick=identify;
+['inName','inClass','inLevel'].forEach(id=>$('#'+id).addEventListener('change',()=>{const s=S.sess;if(!s)return;
+  s.char=$('#inName').value.trim()||s.char;s.cls=$('#inClass').value.trim();const L=+$('#inLevel').value;if(L){if(!s.levelStart)s.levelStart=L;s.level=L}}));
+
+// ================= potions =================
+function potCost(s){
+  const detail={};let total=0;
+  for(const k of['hp','mp']){const amt=SET.potBasis==='used'?s[k].used:s[k].rec;const main=SET.pots.find(p=>p.id===(k==='hp'?SET.mainHp:SET.mainMp));
+    if(main&&main.amt>0){const n=Math.ceil(amt/main.amt);detail[k]={name:main.name,count:n,cost:n*main.price};total+=n*main.price}}
+  return{total,detail};
+}
+function renderPots(){
+  const s=S.sess||S.lastFinished;S.dirty.pots=false;if(!s)return;
+  $('#pHpUsed').textContent=fmtN(s.hp.used);$('#pHpRec').textContent=fmtN(s.hp.rec);$('#pMpUsed').textContent=fmtN(s.mp.used);$('#pMpRec').textContent=fmtN(s.mp.rec);
+  $('#pHpRegen').textContent=T?`+${fmtN(T.hp.regen)} small regen ignored`:'';$('#pMpRegen').textContent=T?`+${fmtN(T.mp.regen)} small regen ignored`:'';
+  $('#potBody').innerHTML=SET.pots.map((p,i)=>{const amt=SET.potBasis==='used'?s[p.type].used:s[p.type].rec,n=p.amt>0?Math.ceil(amt/p.amt):0,main=(p.type==='hp'?SET.mainHp:SET.mainMp)===p.id;
+    return `<tr><td><input type="radio" name="main${p.type}" data-i="${i}" ${main?'checked':''}></td><td style="color:var(--${p.type})">${esc(p.name)}</td>
+    <td class="n"><input type="number" data-i="${i}" data-f="amt" value="${p.amt}" style="width:70px"> ${p.type.toUpperCase()}</td>
+    <td class="n"><input type="number" data-i="${i}" data-f="price" value="${p.price}" style="width:80px"></td><td class="n">${fmtN(n)}</td><td class="n">${fmtN(n*p.price)}</td></tr>`}).join('');
+  const pc=potCost(s);$('#pCost').textContent=fmtN(pc.total);$('#pMeso').textContent=fmtN(s.mesos);$('#pNet').textContent=fmtN(s.mesos-pc.total);
+  $('#pNet').style.color=s.mesos-pc.total>=0?'var(--ok)':'var(--bad)';
+}
+$('#potBody').addEventListener('change',e=>{const i=+e.target.dataset.i,p=SET.pots[i];if(!p)return;
+  if(e.target.type==='radio'){if(p.type==='hp')SET.mainHp=p.id;else SET.mainMp=p.id}else p[e.target.dataset.f]=Math.max(0,+e.target.value||0);
+  saveSet();renderPots();renderLive(true)});
+$('#potBasis').onchange=e=>{SET.potBasis=e.target.value;saveSet();renderPots();renderLive(true)};
+
+// ================= item info (maplestory.io) =================
+// Item name list (Etc/Use/Equip, GMS v83) fetched once and cached for a week, so garbled OCR names
+// ("Stiae Ming") can be snapped to real items ("Stirge Wing").
+let ITEMDB=null;
+async function loadItemDB(){
+  const c=LS.get('meo.itemdb',null);if(c&&Date.now()-c.t<7*864e5){ITEMDB=c.list;return}
+  try{const list=[];for(const cat of['Etc','Use','Equip']){const a=await (await fetch(`https://maplestory.io/api/GMS/83/item?overallCategoryFilter=${cat}&count=50000`)).json();
+      for(const i of a)if(i.name&&!i.isCash)list.push([i.name,i.id])}
+    const seen=new Set();ITEMDB=list.filter(([n])=>!seen.has(n)&&seen.add(n));LS.set('meo.itemdb',{t:Date.now(),list:ITEMDB});
+  }catch(e){console.warn('item list unavailable',e)}
+}
+function canonItem(raw){
+  if(!ITEMDB)return null;const r=raw.toLowerCase().replace(/\.+$/,'');let best=null,bs=0;
+  for(const [n] of ITEMDB){
+    let s=Math.abs(n.length-r.length)<=6?sim(n,r):0;
+    if(r.length>=8&&n.length>r.length)s=Math.max(s,sim(n.slice(0,r.length),r)-.05); // the game truncates long names ("Bubbling's Hug...")
+    if(s>bs){bs=s;best=n}}
+  return bs>=.6?best:null;
+}
+const ITEMS=LS.get('meo.items',{}),pendingItem={};
+function itemInfo(name){
+  if(name in ITEMS)return ITEMS[name];if(pendingItem[name])return undefined;pendingItem[name]=1;
+  (async()=>{try{
+    const db=ITEMDB&&ITEMDB.find(([n])=>n===name);
+    const arr=db?[{name:db[0],id:db[1]}]:await (await fetch(`https://maplestory.io/api/GMS/83/item?searchFor=${encodeURIComponent(name)}&count=10`)).json();
+    const hit=(arr||[]).find(i=>i.name?.toLowerCase()===name.toLowerCase())||(arr||[]).sort((a,b)=>sim(b.name||'',name)-sim(a.name||'',name))[0];
+    let info=null;
+    if(hit&&sim(hit.name||'',name)>=.75){let price=null;try{const d=await (await fetch(`https://maplestory.io/api/GMS/83/item/${hit.id}`)).json();price=d?.metaInfo?.price??null}catch(e){}
+      info={id:hit.id,name:hit.name,price,icon:`https://maplestory.io/api/GMS/83/item/${hit.id}/icon`}}
+    ITEMS[name]=info;LS.set('meo.items',ITEMS);S.dirty.drops=true;S.dirty.hist=true;if(S.tab==='drops')renderDrops();
+  }catch(e){console.warn('item lookup failed',name,e)}finally{delete pendingItem[name]}})();
+}
+const meowLink=n=>`https://www.google.com/search?q=${encodeURIComponent('site:meowdb.com '+n)}`;
+function dropRows(drops){let tot=0;const rows=Object.entries(drops).sort((a,b)=>b[1].qty-a[1].qty).map(([n,d])=>{const inf=itemInfo(n),pr=inf?.price,t=pr?pr*d.qty:0;tot+=t;
+  return `<tr><td>${inf?.icon?`<img class="ic" src="${inf.icon}" alt="" loading="lazy">`:''}</td><td>${esc(n)} <span class="mut small">${esc(d.cat||'')}</span></td><td class="n">${fmtN(d.qty)}</td><td class="n">${pr!=null?fmtN(pr):'—'}</td><td class="n">${t?fmtN(t):'—'}</td><td><a href="${meowLink(n)}" target="_blank" rel="noopener" style="color:var(--acc)">Price check</a></td></tr>`}).join('');
+  return{rows,tot}}
+function renderDrops(){S.dirty.drops=false;const s=S.sess||S.lastFinished;const {rows,tot}=dropRows(s?.drops||{});
+  $('#dropBody').innerHTML=rows||'<tr><td colspan="6" class="mut">No drops read yet.</td></tr>';$('#dropTotal').textContent=fmtN(tot)+' mesos'}
+
+// ================= live render =================
+function rates(){const s=S.sess,el=elapsed(),hr=el>60000?s.exp/(el/3.6e6):null;let r10=null;
+  if(T&&T.recent.length>1){const a=T.recent[0],b=T.recent[T.recent.length-1];if(b[0]-a[0]>=60000)r10=(b[1]-a[1])/((b[0]-a[0])/3.6e6)}return{el,hr,r10}}
+function renderLive(full){
+  const s=S.sess;if(!s)return;const {el,hr,r10}=rates();
+  $('#vTime').textContent=fmtDur(el);$('#sTime').textContent=s.paused?'paused':'started '+new Date(s.start).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  $('#vExp').textContent=fmtN(s.exp);$('#sExp').textContent=s.levelUps?`${s.levelUps} level-up${s.levelUps>1?'s':''}`:' ';
+  $('#vRate').textContent=hr!=null?fmtK(hr):'—';$('#sRate').textContent='last 10 min: '+(r10!=null?fmtK(r10):'—');
+  if(T&&T.pct!=null){$('#vPct').textContent=T.pct.toFixed(2)+'%';$('#barPct').style.width=T.pct+'%';
+    const rr=r10||hr;$('#sPct').textContent=T.total&&rr>0?`ETA ${fmtHM((T.total-T.exp)/rr*3.6e6)} · ${fmtN(T.total-T.exp)} to go`:'ETA —'}
+  $('#vMeso').textContent=fmtN(s.mesos);$('#sMeso').textContent=(el>60000?fmtK(s.mesos/(el/3.6e6)):'—')+' / hr';
+  const pc=potCost(s);$('#vPot').textContent=fmtN(pc.total);$('#sPot').textContent=`net ${fmtN(s.mesos-pc.total)} mesos`;
+  $('#vHpMp').innerHTML=T?`<span style="color:var(--hp)">${T.hp.cur??'?'}/${T.hp.max??'?'}</span> · <span style="color:var(--mp)">${T.mp.cur??'?'}/${T.mp.max??'?'}</span>`:'—';
+  $('#sHpMp').textContent=`${pc.detail.hp?pc.detail.hp.count+' '+pc.detail.hp.name:''} ${pc.detail.mp?'· '+pc.detail.mp.count+' '+pc.detail.mp.name:''}`;
+  $('#vDeaths').textContent=s.expLost?'-'+fmtN(s.expLost):'0';$('#sDeaths').textContent=s.deaths?`${s.deaths} death${s.deaths>1?'s':''} · net ${fmtN(s.exp-s.expLost)} EXP`:'no deaths';
+  $('#lMap').textContent=T?curMap():'—';
+  if(full){renderMaps(s);renderFeed(s);drawSpark($('#spark'),s.timeline.concat([[el/60000,s.exp]]))}
+  renderMini();
+}
+function renderMaps(s){const tot=s.exp||1;$('#mapBody').innerHTML=Object.entries(s.maps).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr class="${v<1000?'dim':''}"><td>${esc(k)}</td><td class="n">${fmtN(v)}</td><td class="n">${(v/tot*100).toFixed(1)}</td></tr>`).join('')||'<tr><td colspan="3" class="mut">No EXP yet.</td></tr>'}
+const EVC={meso:'#f5c542',drop:'#c08cff',level:'#9bd34a',death:'#e5484d',map:'#ff7ab8',info:'#9097a8'};
+function renderFeed(s){$('#feed').innerHTML=s.events.slice(0,40).map(e=>`<div><span class="t">${fmtDur(e.t)}</span><span style="color:${EVC[e.type]||'inherit'}">${esc(e.text)}</span></div>`).join('')}
+function drawSpark(c,pts){const dpr=devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;if(!w)return;c.width=w*dpr;c.height=h*dpr;const x=c.getContext('2d');x.scale(dpr,dpr);x.clearRect(0,0,w,h);
+  if(pts.length<2)return;const mx=Math.max(1,pts[pts.length-1][0]),my=Math.max(1,...pts.map(p=>p[1]));
+  x.beginPath();pts.forEach((p,i)=>{const X=p[0]/mx*(w-2)+1,Y=h-4-p[1]/my*(h-14);i?x.lineTo(X,Y):x.moveTo(X,Y)});
+  x.strokeStyle='#9bd34a';x.lineWidth=2;x.stroke();x.lineTo(w-1,h);x.lineTo(1,h);x.closePath();x.fillStyle='#9bd34a22';x.fill();
+  x.fillStyle='#9097a8';x.font='11px system-ui';x.fillText('cumulative EXP · '+fmtK(my),4,11)}
+function renderAll(){renderLive(true);renderPots();renderDrops()}
+
+// ================= tabs =================
+$('#nav').onclick=e=>{const b=e.target.closest('button');if(!b)return;S.tab=b.dataset.tab;
+  document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('act',x===b));
+  document.querySelectorAll('.tab').forEach(t=>t.hidden=t.id!=='t-'+S.tab);
+  if(S.tab==='pots')renderPots();if(S.tab==='drops')renderDrops();if(S.tab==='hist'&&S.dirty.hist)renderHist();if(S.tab==='setup')drawSetup();if(S.tab==='live')renderLive(true)};
+
+// ================= history (rendered only when changed) =================
+let histChar=null;
+function summaryText(x){const hr=x.activeMs>60000?x.exp/(x.activeMs/3.6e6):0;
+  const maps=Object.entries(x.maps).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${fmtN(v)}`).join(' · ');
+  return `${x.cls||'?'} → Lv ${x.levelStart??'?'}${x.level&&x.level!==x.levelStart?'→'+x.level:''} → ${fmtN(x.exp)} EXP → ${fmtN(hr)} EXP/hr → ${maps||'no maps ≥1k'} | ${fmtHM(x.activeMs)} · ${fmtN(x.mesos)} mesos · pots ${fmtN(x.potCost)}${x.expLost?` · EXP lost -${fmtN(x.expLost)} (${x.deaths} deaths)`:''}`}
+function renderHist(){
+  S.dirty.hist=false;const all=LS.get('meo.sessions',[]),chars=LS.get('meo.chars',{});
+  const names=[...new Set(all.map(s=>s.char))];if(!names.length){$('#charTabs').innerHTML='';$('#histBody').innerHTML='<div class="card mut">No sessions yet.</div>';return}
+  if(!names.includes(histChar))histChar=names[0];
+  $('#charTabs').innerHTML=names.map(n=>`<button data-c="${esc(n)}" class="${n===histChar?'act':''}">${esc(n)}</button>`).join('');
+  const list=all.filter(s=>s.char===histChar).sort((a,b)=>b.start-a.start),ch=chars[histChar]||{};
+  const totExp=list.reduce((a,s)=>a+s.exp,0),totMs=list.reduce((a,s)=>a+s.activeMs,0),totMeso=list.reduce((a,s)=>a+s.mesos,0);
+  let h=`<div class="card"><div class="charhead">${ch.snap?`<img class="snap" src="${ch.snap}" alt="">`:`<div class="snap mut" style="display:flex;align-items:center;justify-content:center;text-align:center">no<br>snapshot</div>`}
+    <div><div style="font-size:18px;font-weight:700">${esc(histChar)}</div><div class="mut">${esc(ch.cls||list[0].cls||'')} · Lv ${esc(ch.level||list[0].level||'?')}</div>
+    <div class="small" style="margin-top:6px">${list.length} sessions · ${fmtHM(totMs)} · ${fmtN(totExp)} EXP · avg ${fmtN(totMs?totExp/(totMs/3.6e6):0)} EXP/hr · ${fmtN(totMeso)} mesos</div>
+    <div class="row" style="margin-top:8px"><button data-snap="${esc(histChar)}">📸 Update snapshot</button></div></div></div></div>`;
+  for(const x of list){const hr=x.activeMs>60000?x.exp/(x.activeMs/3.6e6):0,{rows}=dropRows(x.drops||{});
+    h+=`<details class="sess card"><summary><b>${new Date(x.start).toLocaleDateString()} ${new Date(x.start).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</b>
+      <span>${esc(x.cls||'?')}</span><span>Lv ${x.levelStart??'?'}${x.level&&x.level!==x.levelStart?'→'+x.level:''}</span><span>${fmtN(x.exp)} EXP</span><span style="color:var(--exp)">${fmtK(hr)}/hr</span>
+      <span class="mut">${fmtHM(x.activeMs)}</span><span style="color:#f5c542">${fmtN(x.mesos)} mesos</span></summary>
+      <div class="grid2" style="margin-top:10px"><div><table><thead><tr><th>Map (≥1k EXP)</th><th class="n">EXP</th></tr></thead><tbody>
+      ${Object.entries(x.maps).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="n">${fmtN(v)}</td></tr>`).join('')||'<tr><td class="mut" colspan="2">none</td></tr>'}</tbody></table>
+      <div class="small" style="margin-top:8px">HP lost ${fmtN(x.hp.used)} · MP spent ${fmtN(x.mp.used)}<br>Pots: ${Object.values(x.potDetail||{}).map(d=>`${d.count} ${esc(d.name)}`).join(', ')||'—'} = <b>${fmtN(x.potCost)}</b> mesos · net <b>${fmtN(x.mesos-x.potCost)}</b>
+      ${x.deaths?`<br><span style="color:var(--bad)">EXP lost: -${fmtN(x.expLost)}</span> (${x.deaths} death${x.deaths>1?'s':''}) · net ${fmtN(x.exp-x.expLost)} EXP`:''}</div></div>
+      <div><table><tbody>${rows||'<tr><td class="mut">No drops</td></tr>'}</tbody></table></div></div>
+      <div class="row" style="margin-top:8px"><button data-copy="${x.id}">Copy summary</button><button class="danger" data-del="${x.id}">Delete</button></div></details>`}
+  $('#histBody').innerHTML=h;
+}
+$('#charTabs').onclick=e=>{const b=e.target.closest('button');if(b){histChar=b.dataset.c;renderHist()}};
+$('#histBody').onclick=e=>{const t=e.target;
+  if(t.dataset.copy){const x=LS.get('meo.sessions',[]).find(s=>s.id==t.dataset.copy);navigator.clipboard.writeText(summaryText(x)).then(()=>toast('Copied'))}
+  if(t.dataset.del){if(t.dataset.armed){LS.set('meo.sessions',LS.get('meo.sessions',[]).filter(s=>s.id!=t.dataset.del));renderHist()}else{t.dataset.armed=1;t.textContent='Click again to delete'}}
+  if(t.dataset.snap){if(frameOK())openSnap(t.dataset.snap);else toast('Share the game window first')}};
+$('#bExport').onclick=()=>{const blob=new Blob([JSON.stringify({sessions:LS.get('meo.sessions',[]),chars:LS.get('meo.chars',{})},null,1)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`maple-exp-${new Date().toISOString().slice(0,10)}.json`;a.click()};
+$('#bImportBtn').onclick=()=>$('#fImport').click();
+$('#fImport').onchange=async e=>{try{const d=JSON.parse(await e.target.files[0].text());const cur=LS.get('meo.sessions',[]),ids=new Set(cur.map(s=>s.id));
+  LS.set('meo.sessions',cur.concat((d.sessions||[]).filter(s=>!ids.has(s.id))));LS.set('meo.chars',Object.assign(d.chars||{},LS.get('meo.chars',{})));renderHist();toast('Imported')}catch(err){toast('Import failed')}};
+
+// ================= setup / calibration =================
+function grabFrame(){if(!frameOK())return toast('Share the game window first');const v=S.video,c=S.frozen||(S.frozen=document.createElement('canvas'));
+  c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);const sc=$('#setupCanvas');sc.height=Math.round(sc.width*c.height/c.width);drawSetup()}
+function drawSetup(tmp){const c=$('#setupCanvas'),x=c.getContext('2d');x.fillStyle='#000';x.fillRect(0,0,c.width,c.height);if(S.frozen)x.drawImage(S.frozen,0,0,c.width,c.height);
+  else{x.fillStyle='#9097a8';x.font='16px system-ui';x.fillText('Share the game window, then click "Grab frame"',20,30)}
+  for(const[k,d]of Object.entries(RDEF)){const r=REG[k];x.strokeStyle=d.color;x.lineWidth=k===S.selReg?3:1.5;x.strokeRect(r.x*c.width,r.y*c.height,r.w*c.width,r.h*c.height);
+    x.fillStyle=d.color;x.font='11px system-ui';x.fillText(d.label,r.x*c.width,Math.max(10,r.y*c.height-3))}
+  if(tmp){x.setLineDash([4,3]);x.strokeStyle='#fff';x.strokeRect(tmp.x*c.width,tmp.y*c.height,tmp.w*c.width,tmp.h*c.height);x.setLineDash([])}}
+function selectable(c,onMove,onDone){let st=null;const pt=e=>{const b=c.getBoundingClientRect();return{x:Math.min(1,Math.max(0,(e.clientX-b.left)/b.width)),y:Math.min(1,Math.max(0,(e.clientY-b.top)/b.height))}};
+  const rect=(a,b)=>({x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),w:Math.abs(a.x-b.x),h:Math.abs(a.y-b.y)});
+  c.onpointerdown=e=>{st=pt(e);c.setPointerCapture(e.pointerId)};c.onpointermove=e=>{if(st)onMove(rect(st,pt(e)))};
+  c.onpointerup=e=>{if(!st)return;const r=rect(st,pt(e));st=null;if(r.w>.003&&r.h>.003)onDone(r)}}
+selectable($('#setupCanvas'),r=>drawSetup(r),r=>{Object.assign(REG[S.selReg],r);saveReg();if(T)T.hash={};drawSetup();renderRegList()});
+function renderRegList(){$('#regList').innerHTML=Object.entries(RDEF).map(([k,d])=>`<div class="reg ${k===S.selReg?'sel':''}" data-k="${k}"><span class="sw" style="background:${d.color}"></span><span class="nm">${d.label}</span>
+  <span class="mut small">thr</span><input type="range" min="60" max="240" value="${REG[k].thr}" data-thr="${k}"><span class="mut small" style="width:28px">${REG[k].thr}</span></div>`).join('');$('#selReg').textContent=RDEF[S.selReg].label}
+$('#regList').onclick=e=>{const r=e.target.closest('.reg');if(r&&e.target.type!=='range'){S.selReg=r.dataset.k;renderRegList();drawSetup()}};
+$('#regList').oninput=e=>{const k=e.target.dataset.thr;if(k){REG[k].thr=+e.target.value;e.target.nextElementSibling.textContent=e.target.value;saveReg()}};
+$('#bGrab').onclick=grabFrame;
+$('#bResetReg').onclick=()=>{REG=structuredClone(DEF_REG);saveReg();renderRegList();drawSetup();toast('Regions reset to defaults')};
+$('#bTest').onclick=async()=>{
+  if(!S.frozen)grabFrame();if(!S.frozen)return;if(!S.ocr){toast('OCR still loading…');return}
+  $('#ocrRes').innerHTML='<span class="mut">Reading…</span><span></span>';const out=[];
+  for(const k of Object.keys(RDEF)){
+    if(k==='log'){const S2=logScan(S.frozen),ls=await readLog(S.frozen,true);
+      out.push(`<b style="color:${RDEF.log.color}">Gain log</b><div><img src="${logCanvas(S2,0,S2.H).toDataURL()}" alt=""><div>${esc(ls.slice().reverse().map(l=>`${l}  → ${lineKind(l)||'?'}${lineAmount(l)?' +'+lineAmount(l):''}`).join(' ⏎ ')||'(no text lines found)')}</div></div>`);continue}
+    const {canvas}=prep(k,S.frozen);const img=canvas.toDataURL();const t=await recog(RDEF[k].w==='num'?S.numW:S.txtW,canvas,RDEF[k].psm);
+    let parsed;switch(k){case'hp':case'mp':parsed=parsePair(t);parsed=parsed?parsed.join(' / '):'✗';break;case'exp':parsed=parseExp(t);parsed=parsed?`${fmtN(parsed.exp)} @ ${parsed.pct}%`:'✗';break;
+      case'level':parsed=parseLevel(t)??'✗';break;case'map':parsed=cleanMap(t)??'✗ (→ Undefined)';break;case'cls':parsed=matchClass(t)??'✗';break;case'name':parsed=cleanName(t)??'✗';break;default:parsed=t.trim().split('\n').filter(Boolean).join(' ⏎ ')||'(empty)'}
+    out.push(`<b style="color:${RDEF[k].color}">${RDEF[k].label}</b><div><img src="${img}" alt=""><div>${esc(parsed)}</div></div>`)}
+  $('#ocrRes').innerHTML=out.join('')};
+function bindNum(id,key){const el=$(id);el.value=SET[key];el.onchange=()=>{SET[key]=Math.max(+el.min||0,+el.value||DEF_SET[key]);el.value=SET[key];saveSet();if(S.sess)startTimers()}}
+bindNum('#sFast','fastMs');bindNum('#sSlow','slowMs');bindNum('#sHpMin','hpMin');bindNum('#sMpMin','mpMin');
+$('#bVidBtn').onclick=()=>$('#fVid').click();
+$('#fVid').onchange=e=>{const f=e.target.files[0];if(f)useVideoFile(f);e.target.value=''};
+$('#vRateSel').onchange=e=>{S.video.playbackRate=+e.target.value};
+$('#sAskSnap').checked=SET.askSnap;$('#sAskSnap').onchange=e=>{SET.askSnap=e.target.checked;saveSet()};
+$('#potBasis').value=SET.potBasis;
+
+// ================= snapshot =================
+let snapFor=null,snapRect=null,snapImg=null;
+function openSnap(name){snapFor=name;snapRect=null;const v=S.video;snapImg=document.createElement('canvas');snapImg.width=v.videoWidth;snapImg.height=v.videoHeight;snapImg.getContext('2d').drawImage(v,0,0);
+  const c=$('#snapCanvas');c.height=Math.round(c.width*snapImg.height/snapImg.width);drawSnap();$('#snapFor').textContent='For: '+name;$('#bSnapSave').disabled=true;$('#snapModal').hidden=false}
+function drawSnap(r){const c=$('#snapCanvas'),x=c.getContext('2d');x.drawImage(snapImg,0,0,c.width,c.height);r=r||snapRect;if(r){x.strokeStyle='#f5a623';x.lineWidth=2;x.strokeRect(r.x*c.width,r.y*c.height,r.w*c.width,r.h*c.height)}}
+selectable($('#snapCanvas'),r=>drawSnap(r),r=>{snapRect=r;drawSnap();$('#bSnapSave').disabled=false});
+$('#bSnapSkip').onclick=()=>{$('#snapModal').hidden=true};
+$('#bSnapSave').onclick=()=>{const r=snapRect,W=snapImg.width,H=snapImg.height,sw=r.w*W,sh=r.h*H,sc=Math.min(1,160/sh),o=document.createElement('canvas');
+  o.width=Math.round(sw*sc);o.height=Math.round(sh*sc);const x=o.getContext('2d');x.imageSmoothingEnabled=false;x.drawImage(snapImg,r.x*W,r.y*H,sw,sh,0,0,o.width,o.height);
+  const ch=LS.get('meo.chars',{});ch[snapFor]=Object.assign(ch[snapFor]||{},{snap:o.toDataURL('image/png')});LS.set('meo.chars',ch);$('#snapModal').hidden=true;S.dirty.hist=true;if(S.tab==='hist')renderHist();toast('Snapshot saved')};
+$('#bSnap').onclick=()=>{if(!frameOK())return toast('Share the game window first');openSnap($('#inName').value.trim()||'Unknown')};
+
+// ================= pop-out mini overlay (Document Picture-in-Picture = always on top) =================
+const MINI=`<div class="mini"><div class="r"><b id="mStat">Idle</b><span id="mTime">0:00:00</span></div>
+<div class="big" id="mRate">— /hr</div><div class="r"><span>EXP</span><span id="mExp">0</span></div><div class="r"><span>Level</span><span id="mPct">—</span></div>
+<div class="r"><span>Mesos</span><span id="mMeso">0</span></div><div class="r"><span>Pots</span><span id="mPot">0</span></div><div class="r"><span>Map</span><span id="mMap" style="text-align:right;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:150px">—</span></div>
+<div class="r" style="margin-top:6px;justify-content:flex-start;gap:4px"><button id="mStart">▶</button><button id="mPause">⏸</button><button id="mStop">■</button></div></div>`;
+$('#bPip').onclick=async()=>{
+  if(S.pip){S.pip.close();return}
+  try{
+    if('documentPictureInPicture' in window)S.pip=await documentPictureInPicture.requestWindow({width:240,height:200});
+    else{S.pip=window.open('','mapleMini','width=260,height=230');toast('Always-on-top needs Chrome/Edge 116+; opened a normal popup')}
+    if(!S.pip)return;const d=S.pip.document;d.title='EXP';d.head.innerHTML='';d.head.append($('#mainStyle').cloneNode(true));d.body.style.margin='0';d.body.innerHTML=MINI;
+    d.getElementById('mStart').onclick=()=>$('#bStart').click();d.getElementById('mPause').onclick=togglePause;d.getElementById('mStop').onclick=stopSession;
+    S.pip.addEventListener('pagehide',()=>{S.pip=null});renderMini();
+  }catch(e){toast('Pop-out failed: '+e.message)}
+};
+function renderMini(){const w=S.pip;if(!w||w.closed)return;const d=w.document,g=id=>d.getElementById(id);if(!g('mStat'))return;const s=S.sess;
+  g('mStat').textContent=!s?'Idle':s.paused?'Paused':'● Tracking';g('mStat').style.color=!s?'':s.paused?'var(--acc)':'var(--ok)';
+  g('mStart').disabled=!!s||!S.stream||!S.ocr;g('mPause').disabled=g('mStop').disabled=!s;if(!s)return;
+  const {el,hr}=rates();g('mTime').textContent=fmtDur(el);g('mRate').textContent=(hr!=null?fmtK(hr):'—')+' /hr';g('mExp').textContent=fmtN(s.exp);
+  g('mPct').textContent=T&&T.pct!=null?`${s.level?'Lv'+s.level+' · ':''}${T.pct.toFixed(2)}%`:'—';g('mMeso').textContent=fmtN(s.mesos);g('mPot').textContent='-'+fmtN(potCost(s).total);g('mMap').textContent=T?curMap():'—'}
+
+// ================= boot =================
+(function boot(){
+  renderRegList();drawSetup();
+  const ch=LS.get('meo.chars',{}),last=LS.get('meo.sessions',[]).slice(-1)[0];
+  if(last){$('#inName').value=last.char;$('#inClass').value=ch[last.char]?.cls||last.cls||'';$('#inLevel').value=ch[last.char]?.level||last.level||''}
+  const act=LS.get('meo.active',null);
+  if(act){S.sess=act;S.sess.paused=true;T=newTracker();setPills();renderAll();
+    $('#feed').insertAdjacentHTML('afterbegin','<div style="color:var(--acc)">Recovered an unfinished session (paused). Share the window and press Resume, or Stop to save it.</div>');startTimers()}
+  setPills();
+})();
+</script>
+</body>
+</html>

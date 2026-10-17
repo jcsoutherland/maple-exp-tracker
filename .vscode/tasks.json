@@ -1,0 +1,16 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "dev server", "type": "npm", "script": "dev", "isBackground": true, "problemMatcher": [] },
+    { "label": "unit tests", "type": "npm", "script": "test", "group": "test", "problemMatcher": [] },
+    { "label": "build", "type": "npm", "script": "build", "group": "build", "problemMatcher": ["$tsc"] },
+    {
+      "label": "replay gameplay video",
+      "type": "shell",
+      "command": "npm run replay",
+      "options": { "env": { "MAPLE_VIDEO": "${input:video}" } },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [{ "id": "video", "type": "promptString", "description": "Path to a gameplay recording (.mp4)" }]
+}

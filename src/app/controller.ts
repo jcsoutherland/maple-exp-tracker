@@ -1,0 +1,348 @@
+import { Capture } from '../core/capture';
+import { REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
+import { canonItem, canonMap, loadOsms, osmsReady } from '../core/data/osms';
+import { logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
+import type { OcrEngine } from '../core/ocr/engine';
+import { TesseractEngine } from '../core/ocr/tesseract';
+import { cleanMap, cleanName, lineAmount, lineKind, lineQuality, matchClass, parseExp, parseLevel, parsePair } from '../core/parse';
+import { elapsed, finalize, newSession, type SavedSession, type Session } from '../core/session';
+import * as store from '../core/storage';
+import { Ticker } from '../core/ticker';
+import { Tracker } from '../core/tracker';
+import { normLine, sim } from '../core/util';
+
+export interface Identity { name: string; cls: string; level: number | null }
+export interface OcrTestRow { key: RegionKey | 'log'; label: string; color: string; img: string; raw: string; parsed: string }
+
+/**
+ * Owns capture, OCR and the tracker, and runs each read on its own cadence:
+ *  - pickup log: pixel-change check at ~15 Hz on the newest line; OCR only when a line appears (plus a periodic re-read)
+ *  - HP/MP every barsMs, EXP every expMs
+ *  - map: every mapMs if the title pixels changed, and whenever another mapExpStep EXP has been earned
+ *  - name/class once per session; level at session start and after each detected level-up
+ * The UI subscribes for change notifications; nothing here touches React.
+ */
+export class Controller {
+  readonly capture = new Capture();
+  engine: OcrEngine = new TesseractEngine();
+  ocrState: 'idle' | 'loading' | 'ready' | 'error' = 'idle';
+  settings: Settings = store.loadSettings();
+  regions: Record<RegionKey, Region> = store.loadRegions();
+  identity: Identity = { name: '', cls: '', level: null };
+  sess: Session | null = null;
+  tracker: Tracker | null = null;
+  lastFinished: SavedSession | null = null;
+  historyVersion = 0;
+  /** reads/sec of the pickup-log watcher and OCR calls, for the performance readout */
+  stats = { logChecks: 0, ocrCalls: 0, lastTickMs: 0 };
+
+  private ticker = new Ticker();
+  private listeners = new Set<() => void>();
+  private version = 0;
+  private busy = { log: false, bars: false, exp: false, map: false };
+  private lastLog: LogScan | null = null;
+  private slotCache = new Map<number, string>();
+  /** recently counted log lines (normalised text), for the fallback text check */
+  private counted: { n: string; t: number }[] = [];
+  /** per visible log line (bottom-up, aligned with lastLog.slots): counted yet, OCR attempts */
+  private logLines: { done: boolean; tries: number; lastTry: number; guess: boolean }[] = [];
+  private mapSig = 0;
+  private mapExpAt = 0;
+  private recent: [number, number][] = [];
+  private lastTimeline = 0;
+  private lastSave = 0;
+  private scratch = { sig: document.createElement('canvas') };
+
+  constructor() {
+    const ch = store.loadChars(), last = store.loadSessions().slice(-1)[0];
+    if (last) this.identity = { name: last.char, cls: ch[last.char]?.cls || last.cls, level: ch[last.char]?.level ?? last.level };
+    const act = store.loadActive();
+    if (act) { // recover an unfinished session (paused) after a crash or closed tab
+      act.paused = true;
+      this.sess = act;
+      this.tracker = this.makeTracker(act);
+      this.tracker.event('info', 'Recovered unfinished session (paused)');
+    }
+    this.capture.onEnded = () => { if (this.sess && !this.sess.paused) this.togglePause(); this.notify(); };
+    loadOsms().then(() => this.notify());
+  }
+
+  // ---------- subscription ----------
+  subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
+  getVersion = () => this.version;
+  notify() { this.version++; this.listeners.forEach(l => l()); }
+
+  // ---------- setup ----------
+  async initOcr() {
+    if (this.ocrState === 'ready' || this.ocrState === 'loading') return;
+    this.ocrState = 'loading'; this.notify();
+    try { await this.engine.init(); this.ocrState = 'ready'; } catch (e) { console.error(e); this.ocrState = 'error'; }
+    this.notify();
+  }
+  async shareScreen() { const ok = await this.capture.startScreen(); this.initOcr(); this.notify(); return ok; }
+  async useVideo(file: File, rate: number) { const ok = await this.capture.useFile(file, rate); this.initOcr(); this.notify(); return ok; }
+  setRegion(k: RegionKey, r: Partial<Region>) { this.regions = { ...this.regions, [k]: { ...this.regions[k], ...r } }; store.saveRegions(this.regions); this.notify(); }
+  resetRegions() { localStorage.removeItem('met.regions'); this.regions = store.loadRegions(); this.notify(); }
+  updateSettings(p: Partial<Settings>) {
+    this.settings = { ...this.settings, ...p };
+    store.saveSettings(this.settings);
+    if (this.sess && !this.sess.paused) this.startTimers();
+    this.notify();
+  }
+  setIdentity(p: Partial<Identity>) {
+    this.identity = { ...this.identity, ...p };
+    if (this.sess) { if (p.name) this.sess.char = p.name; if (p.cls !== undefined) this.sess.cls = p.cls; if (p.level) { this.sess.level = p.level; this.sess.levelStart ??= p.level; } }
+    this.notify();
+  }
+
+  private makeTracker(s: Session) {
+    return new Tracker(s, {
+      hpMin: () => this.settings.hpMin, mpMin: () => this.settings.mpMin,
+      canonItem: raw => canonItem(raw), canonMap: raw => canonMap(raw), itemsKnown: osmsReady,
+    });
+  }
+  private get canRun() { return !!this.sess && !this.sess.paused && this.capture.ready && this.ocrState === 'ready'; }
+  private read(key: RegionKey, src: FrameSource) {
+    const def = REGION_DEFS[key], p = prepRegion(src, this.regions[key], def);
+    if (!p.ink) return Promise.resolve('');
+    this.stats.ocrCalls++;
+    return this.engine.read(p.canvas, def.engine === 'num' ? 'num' : 'line');
+  }
+
+  /** Read name / class / level from screen (once per session, or on demand). */
+  async identify() {
+    if (!this.capture.ready || this.ocrState !== 'ready') return null;
+    const v = this.capture.video;
+    const [n, c, l] = await Promise.all([this.read('name', v), this.read('cls', v), this.read('level', v)]);
+    const got = { name: cleanName(n), cls: matchClass(c), level: parseLevel(l) };
+    const ch = store.loadChars();
+    this.setIdentity({
+      ...(got.name && !this.identity.name ? { name: got.name } : {}),
+      ...(got.cls ? { cls: got.cls } : !this.identity.cls && got.name && ch[got.name]?.cls ? { cls: ch[got.name].cls } : {}),
+      ...(got.level ? { level: got.level } : {}),
+    });
+    return got;
+  }
+
+  // ---------- session ----------
+  async start() {
+    if (!this.identity.name) await this.identify();
+    else if (!this.identity.level) { const l = parseLevel(await this.read('level', this.capture.video)); if (l) this.setIdentity({ level: l }); }
+    const { name, cls, level } = this.identity;
+    this.sess = newSession(name, cls, level);
+    this.tracker = this.makeTracker(this.sess);
+    this.tracker.event('info', 'Session started');
+    this.resetWatchers();
+    this.startTimers();
+    this.notify();
+    this.tickExp(); this.tickMap(true);
+  }
+  private resetWatchers() {
+    this.lastLog = null; this.slotCache.clear(); this.counted = []; this.logLines = []; this.mapSig = 0; this.mapExpAt = 0; this.recent = []; this.lastTimeline = 0;
+  }
+  togglePause() {
+    const s = this.sess;
+    if (!s) return;
+    if (s.paused) { s.paused = false; s.resumeAt = Date.now(); this.tracker?.rebaseline(); this.resetWatchers(); this.tracker?.event('info', 'Resumed'); this.startTimers(); }
+    else { s.activeMs += Date.now() - s.resumeAt; s.paused = true; this.tracker?.event('info', 'Paused'); this.ticker.set({ ui: [1000, () => this.notify()] }); }
+    this.persist(true);
+    this.notify();
+  }
+  stop(): SavedSession | null {
+    const s = this.sess;
+    if (!s) return null;
+    this.ticker.stop();
+    s.char = this.identity.name || s.char; s.cls = this.identity.cls || s.cls;
+    const out = finalize(s, this.settings);
+    store.saveSessions([...store.loadSessions(), out]);
+    const ch = store.loadChars();
+    ch[out.char] = { ...ch[out.char], cls: out.cls, level: out.level, last: out.end };
+    store.saveChars(ch);
+    store.saveActive(null);
+    this.sess = null; this.tracker = null; this.lastFinished = out; this.historyVersion++;
+    if (out.level) this.identity.level = out.level;
+    this.notify();
+    return out;
+  }
+  private persist(force = false) {
+    const s = this.sess;
+    if (!s || (!force && Date.now() - this.lastSave < 30000)) return;
+    this.lastSave = Date.now();
+    store.saveActive(s.paused ? s : { ...s, activeMs: elapsed(s), paused: true });
+  }
+  persistNow() { this.persist(true); }
+
+  // ---------- scheduling ----------
+  private startTimers() {
+    const sc = this.settings.schedule;
+    this.ticker.set({
+      log: [sc.logWatchMs, () => this.tickLog()],
+      bars: [sc.barsMs, () => this.tickBars()],
+      exp: [sc.expMs, () => this.tickExp()],
+      map: [Math.min(sc.mapMs, 2000), () => this.tickMap(false)],
+      ui: [1000, () => { this.persist(); this.notify(); }],
+    });
+  }
+
+  private async tickLog() {
+    if (!this.canRun || this.busy.log) return;
+    this.busy.log = true;
+    const t0 = performance.now();
+    try {
+      const v = this.capture.video, r = this.regions.log;
+      const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'));
+      this.stats.logChecks++;
+      const first = !this.lastLog;
+      const { count, aligned } = newLineCount(this.lastLog, lo);
+      this.lastLog = lo;
+      const now = Date.now();
+      // Follow each line as it scrolls up: new lines enter at slot 0 and push the rest up by `count`.
+      // Lines already on screen when watching starts belong to before the session (done = true).
+      const fresh = Array.from({ length: count }, () => ({ done: first, tries: 0, lastTry: 0, guess: !aligned && !first }));
+      this.logLines = (aligned ? [...fresh, ...this.logLines] : fresh.concat(lo.slots.slice(count).map(() => ({ done: true, tries: 0, lastTry: 0, guess: false }))))
+        .slice(0, lo.slots.length);
+      // Read pending lines among the newest four; a line that doesn't parse is retried on later ticks (≤4 tries,
+      // ≥250 ms apart) and counted the first time it does, so each line is counted once but gets several chances.
+      const ready: string[] = [];
+      let hi: LogScan | null = null;
+      for (let i = Math.min(3, this.logLines.length - 1); i >= 0; i--) { // oldest first
+        const ln = this.logLines[i];
+        if (ln.done || ln.tries >= 4 || now - ln.lastTry < 250) continue;
+        ln.tries++; ln.lastTry = now;
+        const res = await this.readSlot(lo, i, () => (hi ??= logScan(v, r, r.thr, document.createElement('canvas'))));
+        if (lineQuality(res) < 2) continue;
+        ln.done = true;
+        // a guessed alignment can re-present an old line as new: skip text that was counted moments ago
+        if (ln.guess && this.counted.some(c => now - c.t < 6000 && sim(c.n, normLine(res)) >= 0.8)) continue;
+        this.counted.push({ n: normLine(res), t: now });
+        ready.push(res);
+      }
+      this.counted = this.counted.filter(c => now - c.t < 6000);
+      if (ready.length) { this.tracker?.onLogLines(ready); this.notify(); }
+    } catch (e) { console.error(e); } finally { this.busy.log = false; this.stats.lastTickMs = performance.now() - t0; }
+  }
+
+  /**
+   * OCR one log line slot. Text over dark scenery needs a low brightness cut-off and over bright walls a higher one:
+   * read with the low one and retry with the high one only if the result doesn't parse. Results are cached by the
+   * slot's text-pixel signature, so an unchanged line is never OCR'd twice.
+   */
+  private async readSlot(lo: LogScan, i: number, high: () => LogScan): Promise<string> {
+    const slot = lo.slots[i], sig = slotSignature(lo, slot);
+    const hit = this.slotCache.get(sig);
+    if (hit !== undefined) return hit;
+    this.stats.ocrCalls++;
+    let t = await this.engine.read(logLineCanvas(lo, slot), 'line');
+    if (lineQuality(t) < 2) {
+      this.stats.ocrCalls++;
+      const t2 = await this.engine.read(logLineCanvas(high(), slot), 'line');
+      if (lineQuality(t2) > lineQuality(t)) t = t2;
+    }
+    this.slotCache.set(sig, t);
+    if (this.slotCache.size > 60) this.slotCache.delete(this.slotCache.keys().next().value!);
+    return t;
+  }
+
+  /** OCR the newest `count` lines of a scan (Setup → Test OCR). */
+  async readLogLines(src: FrameSource, lo: LogScan, count = 4): Promise<string[]> {
+    const out: string[] = [];
+    let hi: LogScan | null = null;
+    for (let i = 0; i < Math.min(count, lo.slots.length); i++)
+      out.push(await this.readSlot(lo, i, () => (hi ??= logScan(src, this.regions.log, this.regions.log.thr, document.createElement('canvas')))));
+    return out;
+  }
+
+  private async tickBars() {
+    if (!this.canRun || this.busy.bars) return;
+    this.busy.bars = true;
+    try {
+      const v = this.capture.video;
+      const [h, m] = await Promise.all([this.read('hp', v), this.read('mp', v)]);
+      this.tracker?.onBar('hp', parsePair(h));
+      this.tracker?.onBar('mp', parsePair(m));
+    } catch (e) { console.error(e); } finally { this.busy.bars = false; }
+  }
+
+  private async tickExp() {
+    if (!this.canRun || this.busy.exp) return;
+    this.busy.exp = true;
+    try {
+      const r = parseExp(await this.read('exp', this.capture.video));
+      const s = this.sess, t = this.tracker;
+      if (!r || !s || !t) return;
+      if (t.onExp(r)) { // level-up: confirm with the level digits
+        this.identity.level = s.level;
+        this.read('level', this.capture.video).then(x => { const l = parseLevel(x); if (l && s.level && Math.abs(l - s.level) <= 1) s.level = this.identity.level = l; });
+      }
+      const el = elapsed(s);
+      this.recent.push([el, s.exp]);
+      while (this.recent.length && el - this.recent[0][0] > 600000) this.recent.shift();
+      if (el - this.lastTimeline >= 60000) {
+        s.timeline.push([Math.round(el / 60000), s.exp]);
+        this.lastTimeline = el;
+        if (s.timeline.length > 720) s.timeline = s.timeline.filter((_, i) => i % 2 === 0);
+      }
+      if (s.exp - this.mapExpAt >= this.settings.schedule.mapExpStep) this.tickMap(true);
+      this.notify();
+    } catch (e) { console.error(e); } finally { this.busy.exp = false; }
+  }
+
+  private lastMapRead = 0;
+  private async tickMap(force: boolean) {
+    if (!this.canRun || this.busy.map) return;
+    if (!force && Date.now() - this.lastMapRead < this.settings.schedule.mapMs) return;
+    const v = this.capture.video, sig = regionSignature(v, this.regions.map, this.scratch.sig);
+    this.lastMapRead = Date.now();
+    if (!force && sig === this.mapSig) return; // title pixels unchanged: same map
+    this.busy.map = true;
+    try {
+      this.mapSig = sig;
+      this.mapExpAt = this.sess?.exp ?? 0;
+      this.tracker?.onMap(cleanMap(await this.read('map', v)));
+      this.notify();
+    } catch (e) { console.error(e); } finally { this.busy.map = false; }
+  }
+
+  /** EXP/hr over the whole session and over the last 10 minutes. */
+  rates() {
+    const s = this.sess, el = elapsed(s);
+    const hr = s && el > 60000 ? s.exp / (el / 3.6e6) : null;
+    let r10: number | null = null;
+    if (this.recent.length > 1) {
+      const a = this.recent[0], b = this.recent[this.recent.length - 1];
+      if (b[0] - a[0] >= 60000) r10 = (b[1] - a[1]) / ((b[0] - a[0]) / 3.6e6);
+    }
+    return { el, hr, r10 };
+  }
+
+  // ---------- diagnostics ----------
+  /** Run every region once on a frame and return the prepared images and readings (Setup → Test OCR). */
+  async testOcr(src: FrameSource): Promise<OcrTestRow[]> {
+    const rows: OcrTestRow[] = [];
+    for (const key of Object.keys(REGION_DEFS) as RegionKey[]) {
+      const def = REGION_DEFS[key];
+      if (key === 'log') {
+        const r = this.regions.log, lo = logScan(src, r, r.thr - 30, document.createElement('canvas'));
+        const saved = this.slotCache; this.slotCache = new Map();
+        const lines = await this.readLogLines(src, lo);
+        this.slotCache = saved;
+        rows.push({ key, label: def.label, color: def.color, img: logPreviewCanvas(lo).toDataURL(), raw: lines.join(' ⏎ '),
+          parsed: lines.slice().reverse().map(l => `${lineKind(l) ?? '?'}${lineAmount(l) ? ' +' + lineAmount(l) : ''}`).join(' ⏎ ') || '(no lines)' });
+        continue;
+      }
+      const p = prepRegion(src, this.regions[key], def);
+      const raw = p.ink ? await this.engine.read(p.canvas, def.engine === 'num' ? 'num' : 'line') : '';
+      let parsed: string;
+      switch (key) {
+        case 'hp': case 'mp': { const v = parsePair(raw); parsed = v ? v.join(' / ') : '✗'; break; }
+        case 'exp': { const v = parseExp(raw); parsed = v ? `${v.exp.toLocaleString()} @ ${v.pct}%` : '✗'; break; }
+        case 'level': parsed = String(parseLevel(raw) ?? '✗'); break;
+        case 'map': { const c = cleanMap(raw); parsed = c ? (canonMap(c) ? `${canonMap(c)} ✓` : c) : '✗ (→ Undefined)'; break; }
+        case 'cls': parsed = matchClass(raw) ?? '✗'; break;
+        default: parsed = cleanName(raw) ?? '✗';
+      }
+      rows.push({ key, label: def.label, color: def.color, img: p.canvas.toDataURL(), raw, parsed });
+    }
+    return rows;
+  }
+}
