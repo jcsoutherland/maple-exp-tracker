@@ -33,7 +33,7 @@ export function CharacterStage() {
       if (!sp.look || !idleIn.length) return;
       // floor shadow (soft: it's lighting, not part of the sprite)
       const sh = g.createRadialGradient(FEET_X * Z, GROUND * Z, 0, FEET_X * Z, GROUND * Z, 26 * Z);
-      sh.addColorStop(0, 'rgba(40,44,56,0.32)'); sh.addColorStop(1, 'rgba(40,44,56,0)');
+      sh.addColorStop(0, 'rgba(0,0,0,0.55)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
       g.save(); g.scale(1, 0.22); g.fillStyle = sh; g.beginPath(); g.arc(FEET_X * Z, GROUND * Z / 0.22, 26 * Z, 0, Math.PI * 2); g.fill(); g.restore();
 
       // idle ping-pongs (0,1,2,1); the attack plays through once all its frames are in, then a short rest
