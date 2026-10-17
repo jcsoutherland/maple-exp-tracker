@@ -2,45 +2,60 @@ import { useEffect, useRef } from 'react';
 import { useCtrl } from './hooks';
 
 /**
- * The player's character, cut out of the live capture and animated: the idle loop normally, the attack loop while
- * EXP or loot is coming in. Frames come from the controller's SpriteLearner.
+ * The character as pixel art: a breathing idle loop, or the class attack (bow / sword / wand / stars / gun / punch)
+ * while EXP or loot is coming in. Until the avatar exists, shows the live capture while it's being made.
  */
-export function CharacterStage({ size = 2 }: { size?: number }) {
+export function CharacterStage() {
   const c = useCtrl();
   const ref = useRef<HTMLCanvasElement>(null);
+  const a = c.avatar, fighting = c.fighting;
+
   useEffect(() => {
     let i = 0;
     const scratch = document.createElement('canvas');
     const id = window.setInterval(() => {
       const cv = ref.current;
       if (!cv) return;
-      const frames = c.spriteFrames();
       const g = cv.getContext('2d')!;
+      g.imageSmoothingEnabled = false;
       g.clearRect(0, 0, cv.width, cv.height);
-      // floor shadow
-      g.fillStyle = 'rgba(0,0,0,.35)';
-      g.beginPath(); g.ellipse(cv.width / 2, cv.height - 10, cv.width * 0.22, 7, 0, 0, Math.PI * 2); g.fill();
-      if (!frames.length) return;
-      const fr = frames[i++ % frames.length];
+      const frames = c.avatarFrames();
+      if (frames.length) {
+        const fr = frames[i++ % frames.length], sc = Math.max(1, Math.floor(Math.min(cv.width / fr.width, cv.height / fr.height)));
+        scratch.width = fr.width; scratch.height = fr.height;
+        scratch.getContext('2d')!.putImageData(fr, 0, 0);
+        g.drawImage(scratch, Math.round((cv.width - fr.width * sc) / 2), cv.height - fr.height * sc, fr.width * sc, fr.height * sc);
+        return;
+      }
+      // still capturing: show the live crop softly
+      const live = c.spriteFrames();
+      if (!live.length) return;
+      const fr = live[i++ % live.length];
       scratch.width = fr.width; scratch.height = fr.height;
       scratch.getContext('2d')!.putImageData(fr, 0, 0);
-      g.imageSmoothingEnabled = false;
-      const w = fr.width * size, h = fr.height * size;
-      g.drawImage(scratch, (cv.width - w) / 2, cv.height - h - 4, w, h);
-    }, c.fighting ? 120 : 220);
+      g.globalAlpha = 0.55;
+      g.drawImage(scratch, (cv.width - fr.width * 1.6) / 2, cv.height - fr.height * 1.6, fr.width * 1.6, fr.height * 1.6);
+      g.globalAlpha = 1;
+    }, fighting ? 90 : 170);
     return () => clearInterval(id);
-  }, [c, size, c.fighting]);
+  }, [c, fighting, a]);
 
-  const state = c.spriteState, n = c.sprite.sampleCount;
-  const caption = !c.sess ? 'Start a session to bring your character in'
-    : state === 'searching' ? `Looking for “${c.identity.name || '?'}” on screen…`
-    : state === 'lost' ? 'Character off screen'
-    : !c.sprite.maskReady ? `Learning the background… (${Math.min(n, 8)}/8 views — moving around helps)`
-    : c.fighting ? '⚔ Fighting' : 'Idle';
+  const caption = a ? (fighting ? '⚔ Fighting' : 'Idle')
+    : !c.sess ? 'Start a session — your pixel character is made from the capture'
+    : c.spriteState === 'searching' ? `Looking for “${c.identity.name || '?'}” on screen…`
+    : c.spriteState === 'lost' ? 'Character off screen'
+    : `Making your pixel character… (${Math.min(c.sprite.sampleCount, 8)}/8 views — moving around helps)`;
+
   return (
     <div className="stage">
-      <canvas ref={ref} width={120 * size + 40} height={100 * size + 16} />
-      <div className="stage-cap">{caption}</div>
+      <canvas ref={ref} width={300} height={190} />
+      <div className="stage-cap">
+        {caption}
+        {a && <>
+          <button className="sm" title="Make a new pixel character from the next good frames" onClick={() => c.retakeAvatar()}>↻ Retake</button>
+          <button className="sm" title="Flip which way the character faces (attacks fire that way)" onClick={() => c.setFacing(a.facing === 'left' ? 'right' : 'left')}>⇄ Flip</button>
+        </>}
+      </div>
     </div>
   );
 }

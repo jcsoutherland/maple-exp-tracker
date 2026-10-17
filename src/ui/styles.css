@@ -123,3 +123,5 @@ table.drops td{vertical-align:middle}
 .drops .links a{color:var(--mut);margin-right:10px;text-decoration:none;font-size:12px}
 .drops .links a:hover{color:var(--acc)}
 .mchart-empty{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:12px;border:1px dashed var(--line);border-radius:6px}
+.stage-cap{display:flex;gap:6px;align-items:center;justify-content:center;flex-wrap:wrap}
+.snap{image-rendering:pixelated}

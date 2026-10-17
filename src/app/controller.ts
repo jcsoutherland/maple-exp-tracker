@@ -1,4 +1,5 @@
 import { Capture } from '../core/capture';
+import { buildAnimations, classFamily, imageDataToUrl, pixelize, urlToImageData, type Animations, type Facing } from '../core/pixelart';
 import { findTagCandidates, grabBox, spriteBox, SpriteLearner, tagOcrCanvas, TagTracker, toDataUrl, type Box } from '../core/character';
 import { REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
 import { canonItem, canonMap, loadOsms, monsterNames, osmsReady } from '../core/data/osms';
@@ -57,6 +58,9 @@ export class Controller {
   constructor() {
     const ch = store.loadChars(), last = store.loadSessions().slice(-1)[0];
     if (last) this.identity = { name: last.char, cls: ch[last.char]?.cls || last.cls, level: ch[last.char]?.level ?? last.level };
+    // whatever the user last typed/confirmed wins over history
+    const saved = store.loadIdentity();
+    if (saved?.name) this.identity = { ...this.identity, ...saved, level: saved.level ?? ch[saved.name]?.level ?? this.identity.level };
     const act = store.loadActive();
     if (act) { // recover an unfinished session (paused) after a crash or closed tab
       act.paused = true;
@@ -66,6 +70,7 @@ export class Controller {
     }
     this.capture.onEnded = () => { if (this.sess && !this.sess.paused) this.togglePause(); this.notify(); };
     loadOsms().then(() => this.notify());
+    if (this.identity.name) this.loadAvatar(this.identity.name);
   }
 
   // ---------- subscription ----------
@@ -92,6 +97,9 @@ export class Controller {
   }
   setIdentity(p: Partial<Identity>) {
     this.identity = { ...this.identity, ...p };
+    store.saveIdentity(this.identity);
+    if (p.cls !== undefined && this.avatar) this.avatar = { ...this.avatar, anim: buildAnimations(this.avatar.base, classFamily(this.identity.cls), this.avatar.facing) };
+    if (p.name !== undefined && p.name !== this.avatar?.name) this.loadAvatar(p.name);
     if (this.sess) { if (p.name) this.sess.char = p.name; if (p.cls !== undefined) this.sess.cls = p.cls; if (p.level) { this.sess.level = p.level; this.sess.levelStart ??= p.level; } }
     this.notify();
   }
@@ -115,8 +123,11 @@ export class Controller {
     if (!this.capture.ready || this.ocrState !== 'ready') return null;
     const v = this.capture.video;
     const [n, c, l] = await Promise.all([this.read('name', v), this.read('cls', v), this.read('level', v)]);
-    const got = { name: cleanName(n), cls: matchClass(c), level: parseLevel(l) };
     const ch = store.loadChars();
+    // the status-bar name is ~9px tall and OCR confuses letters ('Flynny' → 'Flyriny'): snap to a known character
+    let name = cleanName(n);
+    if (name) { const known = Object.keys(ch).map(k => ({ k, s: sim(k, name!) })).sort((a, b) => b.s - a.s)[0]; if (known && known.s >= 0.6) name = known.k; }
+    const got = { name, cls: matchClass(c), level: parseLevel(l) };
     this.setIdentity({
       ...(got.name && !this.identity.name ? { name: got.name } : {}),
       ...(got.cls ? { cls: got.cls } : !this.identity.cls && got.name && ch[got.name]?.cls ? { cls: ch[got.name].cls } : {}),
@@ -350,6 +361,7 @@ export class Controller {
   private async tickSprite() {
     const name = this.identity.name || this.sess?.char;
     if (!this.canRun || this.busySprite || !name || name === 'Unknown') return;
+    if (this.avatar?.name === name) { this.spriteState = 'tracking'; return; } // avatar made: no need to keep tracking the character
     this.busySprite = true;
     try {
       const v = this.capture.video, now = Date.now();
@@ -366,10 +378,14 @@ export class Controller {
       if (!box) return;
       const sb = spriteBox(v, box.x + box.w / 2, box.y);
       if (!sb) return;
-      const hadMask = this.sprite.maskReady;
       this.sprite.add(grabBox(v, sb, this.spriteScratch), { x: box.x, y: box.y }, this.fighting, now);
       // automatic snapshot: the first crop at session start, replaced by a cut-out once the background is learned
-      if (this.snapSaved === 'none' || (this.snapSaved === 'raw' && !hadMask && this.sprite.maskReady)) this.saveSnapshot(name);
+      if (!this.avatar?.base && this.snapSaved === 'none') this.saveSnapshot(name);
+      // one good idle frame → pixel-art avatar (kept across sessions until 'Retake')
+      if (this.sprite.maskReady && (!this.avatar || this.avatar.name !== name) && !this.avatarBusy) {
+        this.avatarBusy = true;
+        try { if (store.loadChars()[name]?.pixel) await this.loadAvatar(name); else this.captureAvatar(name); } finally { this.avatarBusy = false; }
+      }
     } catch (e) { console.error(e); } finally { this.busySprite = false; }
   }
 
@@ -414,6 +430,60 @@ export class Controller {
     if (ck.ok >= 1) this.tagCheck = null;
     else if (ck.tries >= 4) { this.tag = null; this.tagCheck = null; } // wasn't us
   }
+
+  // ---------- pixel-art avatar ----------
+  /** pixel-art version of the character with pre-rendered idle / class-attack loops */
+  avatar: { name: string; base: ImageData; anim: Animations; facing: Facing } | null = null;
+  private avatarBusy = false;
+
+  /** Load the saved avatar for a character (if any) and build its animations for the current class. */
+  async loadAvatar(name = this.identity.name) {
+    const ch = store.loadChars()[name];
+    if (!name || !ch?.pixel) { this.avatar = null; this.notify(); return; }
+    const base = await urlToImageData(ch.pixel), facing = ch.facing ?? 'left';
+    this.avatar = { name, base, facing, anim: buildAnimations(base, classFamily(this.identity.cls || ch.cls || ''), facing) };
+    this.notify();
+  }
+
+  /** Make the avatar from the steadiest cut-out idle frame (once the background has been learned). */
+  private captureAvatar(name: string) {
+    const frames = this.sprite.idle.length >= 3 ? this.sprite.idle : [...this.sprite.idle, ...this.sprite.attack];
+    const cuts = frames.map(f => this.sprite.cutout(f, true)).filter((c): c is ImageData => !!c);
+    if (cuts.length < 2) return;
+    // pick the frame whose silhouette size is the median: avoids frames where a stray patch of scenery got in
+    const area = (c: ImageData) => { let n = 0; for (let i = 3; i < c.data.length; i += 4) if (c.data[i] > 128) n++; return n; };
+    const sorted = cuts.map(c => ({ c, a: area(c) })).sort((x, y) => x.a - y.a);
+    const base = pixelize(sorted[sorted.length >> 1].c, 48);
+    const ch = store.loadChars();
+    const facing = ch[name]?.facing ?? 'left';
+    ch[name] = { ...ch[name], pixel: imageDataToUrl(base), snap: imageDataToUrl(base) };
+    store.saveChars(ch);
+    this.avatar = { name, base, facing, anim: buildAnimations(base, classFamily(this.identity.cls), facing) };
+    this.historyVersion++;
+    this.notify();
+  }
+
+  /** Throw away the avatar; a new one is made from the next good frames. */
+  retakeAvatar() {
+    const name = this.identity.name, ch = store.loadChars();
+    if (ch[name]) { delete ch[name].pixel; store.saveChars(ch); }
+    this.avatar = null;
+    this.notify();
+  }
+
+  /** Which way the character faces in the picture (attacks fire that way). */
+  setFacing(facing: Facing) {
+    const a = this.avatar;
+    if (!a) return;
+    const ch = store.loadChars();
+    ch[a.name] = { ...ch[a.name], facing };
+    store.saveChars(ch);
+    this.avatar = { ...a, facing, anim: buildAnimations(a.base, classFamily(this.identity.cls), facing) };
+    this.notify();
+  }
+
+  /** Current loop to play: the class attack while EXP/loot is coming in, else idle. */
+  avatarFrames(): ImageData[] { return this.avatar ? (this.fighting ? this.avatar.anim.attack : this.avatar.anim.idle) : []; }
 
   /** Frames for the UI: rendered with the cut-out (or a vignette), the attack loop while fighting. */
   spriteFrames(): ImageData[] {

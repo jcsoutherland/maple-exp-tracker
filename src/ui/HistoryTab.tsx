@@ -48,7 +48,7 @@ export function HistoryTab({ onSnapshot }: { onSnapshot: (name: string) => void 
       </div>
       <div className="card">
         <div className="charhead">
-          <SpriteLoop frames={ch.sprite?.idle?.length ? ch.sprite.idle : ch.snap ? [ch.snap] : []} />
+          <SpriteLoop frames={ch.pixel ? [ch.pixel] : ch.sprite?.idle?.length ? ch.sprite.idle : ch.snap ? [ch.snap] : []} />
           <div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{cur}</div>
             <div className="mut">{ch.cls || list[0].cls} · Lv {ch.level ?? list[0].level ?? '?'}</div>

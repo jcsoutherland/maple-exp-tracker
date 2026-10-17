@@ -29,6 +29,9 @@ export interface CharInfo {
   snap?: string;
   /** short animation loops captured during the last session */
   sprite?: { idle: string[]; attack: string[]; cutout: boolean };
+  /** pixel-art avatar (PNG data URL) made from one idle frame, and which way it faces */
+  pixel?: string;
+  facing?: 'left' | 'right';
 }
 export const loadChars = () => read<Record<string, CharInfo>>(K.chars, {});
 export const saveChars = (c: Record<string, CharInfo>) => write(K.chars, c);
@@ -36,3 +39,7 @@ export const saveChars = (c: Record<string, CharInfo>) => write(K.chars, c);
 /** In-progress session, saved periodically so a closed tab or crash doesn't lose it. */
 export const loadActive = () => read<Session | null>(K.active, null);
 export const saveActive = (s: Session | null) => (s ? write(K.active, s) : localStorage.removeItem(K.active));
+
+/** The character name/class/level the user last typed or confirmed (never overwritten by OCR). */
+export const loadIdentity = () => read<{ name: string; cls: string; level: number | null } | null>('met.identity', null);
+export const saveIdentity = (i: { name: string; cls: string; level: number | null }) => write('met.identity', i);

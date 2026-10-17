@@ -264,11 +264,12 @@ export class SpriteLearner {
   }
 
   /** Per-frame alpha: colour classification, keep the shape standing above the tag, fill holes, feather. */
-  private segment(fr: SpriteFrame): Float32Array | null {
+  /** `strict` (for the avatar): a firmer colour test, and thin attachments (props, scenery) trimmed off. */
+  private segment(fr: SpriteFrame, strict = false): Float32Array | null {
     const { fgP, bgP } = this;
     if (!fgP || !bgP) return null;
     const d = fr.data.data, w = this.w, h = this.h, N = w * h, cls = new Uint8Array(N);
-    for (let p = 0; p < N; p++) { const k = SpriteLearner.bin(d, p * 4); cls[p] = fgP[k] > 1.3 * bgP[k] ? 1 : 0; }
+    for (let p = 0; p < N; p++) { const k = SpriteLearner.bin(d, p * 4); cls[p] = fgP[k] > (strict ? 2.2 : 1.3) * bgP[k] ? 1 : 0; }
     // grow from character-coloured pixels in the centre (8-connected)
     const keep = new Uint8Array(N), st: number[] = [];
     for (let y = Math.round(h * 0.25); y < Math.round(h * 0.95); y++) for (let x = Math.round(w * 0.35); x < Math.round(w * 0.65); x++) {
@@ -292,8 +293,9 @@ export class SpriteLearner {
         if (q >= 0 && !keep[q] && !outside[q]) { outside[q] = 1; st.push(q); }
     }
     let count = 0;
-    const solid = new Uint8Array(N);
+    let solid = new Uint8Array(N);
     for (let p = 0; p < N; p++) if (!outside[p]) { solid[p] = 1; count++; }
+    if (strict) { solid = openLargest(solid, w, h); count = solid.reduce((a, v) => a + v, 0); }
     if (count / N > 0.7 || count / N < 0.03) return null; // segmentation failed for this frame
     // 1px grow + soft edge
     const a = new Float32Array(N);
@@ -308,6 +310,15 @@ export class SpriteLearner {
       a[y * w + x] = m;
     }
     return a;
+  }
+
+  /** The frame with only the character opaque, or null if the background isn't learned yet / this frame failed. */
+  cutout(fr: SpriteFrame, strict = false): ImageData | null {
+    const m = this.segment(fr, strict);
+    if (!m) return null;
+    const out = new ImageData(new Uint8ClampedArray(fr.data.data), fr.data.width, fr.data.height);
+    for (let p = 0; p < m.length; p++) out.data[p * 4 + 3] = Math.round(255 * m[p]);
+    return out;
   }
 
   /** Frame rendered with the cut-out, or a soft vignette while the colour model isn't ready / a frame fails. */
@@ -325,6 +336,40 @@ export class SpriteLearner {
     this.cache.set(fr, out);
     return out;
   }
+}
+
+/** Erode 1px, keep the largest 8-connected blob, dilate back: drops thin bridges to props and stray patches. */
+function openLargest(m: Uint8Array, w: number, h: number): Uint8Array {
+  const N = w * h, er = new Uint8Array(N);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const p = y * w + x;
+    er[p] = m[p] && m[p - 1] && m[p + 1] && m[p - w] && m[p + w] ? 1 : 0;
+  }
+  const lab = new Int32Array(N), st: number[] = [];
+  let best = 0, bestN = 0, id = 0;
+  for (let p = 0; p < N; p++) {
+    if (!er[p] || lab[p]) continue;
+    id++; let n = 0; lab[p] = id; st.push(p);
+    while (st.length) {
+      const q = st.pop()!, x = q % w, y = (q / w) | 0; n++;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const r = yy * w + xx; if (er[r] && !lab[r]) { lab[r] = id; st.push(r); }
+      }
+    }
+    if (n > bestN) { bestN = n; best = id; }
+  }
+  const out = new Uint8Array(N);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let on = 0;
+    for (let dy = -1; dy <= 1 && !on; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if (xx >= 0 && yy >= 0 && xx < w && yy < h && lab[yy * w + xx] === best) { on = 1; break; }
+    }
+    out[y * w + x] = on && m[y * w + x] ? 1 : 0;
+  }
+  return out;
 }
 
 /** ImageData → PNG data URL, nearest-neighbour scaled. */

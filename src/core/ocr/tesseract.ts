@@ -1,32 +1,56 @@
 import { createWorker, PSM, type Worker } from 'tesseract.js';
 import type { OcrEngine, OcrKind } from './engine';
 
-/** Two Tesseract workers: one restricted to status-bar characters, one for general single-line text. */
+const PARAMS: Record<OcrKind, Partial<Record<string, string>>> = {
+  num: { tessedit_char_whitelist: '0123456789,.[]/%', tessedit_pageseg_mode: PSM.SINGLE_LINE },
+  line: { tessedit_pageseg_mode: PSM.SINGLE_LINE },
+};
+/** A single line never takes this long; past it the worker is assumed stuck and is restarted. */
+const JOB_TIMEOUT_MS = 6000;
+
+/**
+ * Two Tesseract workers: one restricted to status-bar characters, one for general single-line text.
+ * Jobs per worker run one at a time; a job that hangs is abandoned and its worker replaced, so a single bad image
+ * can never freeze the read pipeline.
+ */
 export class TesseractEngine implements OcrEngine {
   readonly name = 'Tesseract';
-  private num: Worker | null = null;
-  private text: Worker | null = null;
-  private queue = new Map<Worker, Promise<unknown>>();
+  private workers: Partial<Record<OcrKind, Promise<Worker>>> = {};
+  private queue: Partial<Record<OcrKind, Promise<unknown>>> = {};
+
+  private spawn(kind: OcrKind) {
+    const w = createWorker('eng', 1).then(async wk => { await wk.setParameters(PARAMS[kind]); return wk; });
+    this.workers[kind] = w;
+    return w;
+  }
 
   async init() {
-    if (this.num) return;
-    this.num = await createWorker('eng', 1);
-    await this.num.setParameters({ tessedit_char_whitelist: '0123456789,.[]/%', tessedit_pageseg_mode: PSM.SINGLE_LINE });
-    this.text = await createWorker('eng', 1);
-    await this.text.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_LINE });
+    if (this.workers.num) return;
+    await Promise.all([this.spawn('num'), this.spawn('line')]);
   }
 
   read(canvas: HTMLCanvasElement, kind: OcrKind): Promise<string> {
-    const w = kind === 'num' ? this.num : this.text;
-    if (!w) return Promise.resolve('');
-    // each worker handles one job at a time; chain so callers can fire concurrently
-    const job = (this.queue.get(w) || Promise.resolve()).then(async () => (await w.recognize(canvas)).data.text.trim());
-    this.queue.set(w, job.catch(() => undefined));
-    return job;
+    if (!this.workers[kind] || canvas.width < 4 || canvas.height < 4) return Promise.resolve('');
+    const job = (this.queue[kind] || Promise.resolve()).then(async () => {
+      const wp = this.workers[kind]!;
+      let timer = 0;
+      const timeout = new Promise<'timeout'>(res => { timer = window.setTimeout(() => res('timeout'), JOB_TIMEOUT_MS); });
+      const r = await Promise.race([wp.then(w => w.recognize(canvas)), timeout]);
+      clearTimeout(timer);
+      if (r === 'timeout') {
+        console.warn(`OCR ${kind} worker stuck; restarting it`);
+        wp.then(w => w.terminate()).catch(() => undefined);
+        this.spawn(kind);
+        return '';
+      }
+      return r.data.text.trim();
+    });
+    this.queue[kind] = job.catch(() => undefined);
+    return job.catch(() => '');
   }
 
   async dispose() {
-    await Promise.all([this.num?.terminate(), this.text?.terminate()]);
-    this.num = this.text = null;
+    await Promise.all(Object.values(this.workers).map(p => p!.then(w => w.terminate()).catch(() => undefined)));
+    this.workers = {};
   }
 }
