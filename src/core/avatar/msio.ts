@@ -9,7 +9,7 @@ import { FACE, GEAR, HAIR, WEAPONS, type LadderRow, type WeaponRow } from './cat
  */
 const API = 'https://maplestory.io/api';
 /** bump when the look format or rules change, so older saved looks are re-rolled */
-export const LOOK_V = 3;
+export const LOOK_V = 4;
 
 export interface CharLook {
   v: number;
