@@ -1,3 +1,4 @@
+import type { CharLook } from './avatar/msio';
 import { DEFAULT_REGIONS, DEFAULT_SETTINGS, type Region, type RegionKey, type Settings } from './config';
 import type { SavedSession, Session } from './session';
 
@@ -23,7 +24,13 @@ export const saveRegions = (r: Record<RegionKey, Region>) => write(K.regions, r)
 export const loadSessions = () => read<SavedSession[]>(K.sessions, []);
 export const saveSessions = (s: SavedSession[]) => write(K.sessions, s);
 
-export interface CharInfo { cls?: string; level?: number | null; last?: number }
+export interface CharInfo {
+  cls?: string; level?: number | null; last?: number;
+  /** randomly rolled appearance (rendered with real Maple sprites) */
+  look?: CharLook;
+  /** small still of that look for History */
+  thumb?: string;
+}
 /** pictures earlier versions captured from the screen; no longer used, and they take up storage */
 const LEGACY_CHAR_KEYS = ['snap', 'sprite', 'pixel', 'facing', 'pixelV'];
 export const loadChars = () => {

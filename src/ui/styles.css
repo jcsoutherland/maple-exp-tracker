@@ -57,6 +57,7 @@ tr.dim td{color:var(--mut);opacity:.6}
 .charhead{display:flex;gap:14px;align-items:center}
 .snap{width:112px;height:120px;background:var(--panel2);border-radius:8px;display:flex;align-items:flex-end;overflow:hidden}
 .snap canvas{flex:none;margin-left:-44px;image-rendering:pixelated}
+.snap img.thumb{margin:auto auto 4px;image-rendering:pixelated}
 header h1{display:flex;align-items:center;gap:8px}
 .logo{width:22px;height:22px;image-rendering:pixelated}
 .sess{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:10px}

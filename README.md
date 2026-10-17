@@ -8,7 +8,7 @@ A lightweight, browser-based overlay for **MapleStory Classic World**. It watche
 - **EXP per map.** Maps under 1,000 EXP are dropped when a session is saved, and map names that can't be read or aren't real maps (checked against the OSMS map list) count as "Cannot determine".
 - **HP/MP used**, converted to potion counts and cost (Meat, Lemon, Red/Orange/White/Blue Potion, Mana Elixir), plus net mesos.
 - **History per character**, with copyable summaries and JSON export/import.
-- **Pixel-art character sheet**: an original pixel-art explorer for your job (Warrior, Magician, Bowman, Thief or Beginner) idles, and plays its class attack while EXP or loot comes in.
+- **Character sheet**: when a session starts, a random look is rolled for your job (skin, hair, face and class-legal Classic gear for your level) and saved per character. It's drawn with real MapleStory sprites from the [maplestory.io](https://maplestory.io) renderer: idle, plus the weapon's own attack (bow shot, swing, stab…) while EXP or loot comes in, on a pixel-art backdrop that follows the current map's region. Frames are fetched once and cached on your device (never committed to this repo); an original pixel-art explorer stands in until they arrive.
 - **Pop-out overlay** using Document Picture-in-Picture, which stays on top of the game.
 
 ## Use it

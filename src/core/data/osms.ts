@@ -1,4 +1,4 @@
-import { createStore, get, set } from 'idb-keyval';
+import { cached, getBlob, setBlob } from './cache';
 import { sim } from '../util';
 
 /**
@@ -7,35 +7,19 @@ import { sim } from '../util';
  * is downloaded once. Their data has no license, so we read it from their site rather than copying it into this repo.
  */
 export const OSMS_BASE = 'https://osmsdataexplorer.com/data/current/';
-const TTL = 7 * 864e5;
-let storeRef: ReturnType<typeof createStore> | null = null;
-// opened lazily so importing this module never touches IndexedDB (unit tests run in Node)
-const db = () => (storeRef ??= createStore('maple-exp-tracker', 'osms'));
-
 export interface ItemRec { id: number; name: string; cat: string; price: number | null; desc: string }
-export interface MapRec { id: number; name: string; street: string }
+/** a map; `mark` is its region emblem (e.g. 'Henesys', 'KerningCity'), used to theme the character scene */
+export interface MapRec { id: number; name: string; street: string; region: string; mark: string }
 
 let items: ItemRec[] | null = null;
 let maps: MapRec[] | null = null;
 let byName = new Map<string, ItemRec>();
+let itemIds = new Set<number>();
 let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
-async function cached<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-  const hit = await get<{ t: number; v: T }>(key, db()).catch(() => undefined);
-  if (hit && Date.now() - hit.t < TTL) return hit.v;
-  try {
-    const v = await fetcher();
-    await set(key, { t: Date.now(), v }, db()).catch(() => undefined);
-    return v;
-  } catch (e) {
-    if (hit) return hit.v; // offline: stale data beats none
-    throw e;
-  }
-}
-
 interface RawItem { id: number; name: string; category?: string; stats?: { price?: number }; description?: string }
-interface RawMap { id: number; name: string; street_name?: string }
+interface RawMap { id: number; name: string; street_name?: string; region?: string; map_mark?: string }
 
 export function loadOsms(): Promise<void> {
   return (loading ??= (async () => {
@@ -44,13 +28,14 @@ export function loadOsms(): Promise<void> {
         const d = await (await fetch(OSMS_BASE + 'items.json')).json() as { items: RawItem[] };
         return d.items.filter(i => i.name).map(i => ({ id: i.id, name: i.name, cat: i.category || '', price: i.stats?.price ?? null, desc: i.description || '' }));
       }),
-      cached('maps-v2', async () => {
+      cached('maps-v3', async () => {
         const d = await (await fetch(OSMS_BASE + 'maps.json')).json() as { regions: { maps: RawMap[] }[] };
-        return d.regions.flatMap(r => r.maps).map(m => ({ id: m.id, name: m.name.trim(), street: (m.street_name || '').trim() }));
+        return d.regions.flatMap(r => r.maps).map(m => ({ id: m.id, name: m.name.trim(), street: (m.street_name || '').trim(), region: m.region || '', mark: m.map_mark || '' }));
       }),
     ]);
     items = it; maps = mp;
     // first record wins for duplicated names (e.g. two "Red Potion" ids)
+    itemIds = new Set(it.map(i => i.id));
     byName = new Map();
     for (const i of it) if (!byName.has(i.name.toLowerCase())) byName.set(i.name.toLowerCase(), i);
     listeners.forEach(l => l());
@@ -58,6 +43,10 @@ export function loadOsms(): Promise<void> {
 }
 
 export const osmsReady = () => items !== null;
+/** The map record for an exact map name (as canonMap returns it). */
+export const mapRecord = (name: string) => maps?.find(m => m.name === name) ?? null;
+/** Is this item id in MapleStory Classic (per OSMS)? Unknown (list not loaded) counts as yes. */
+export const inClassic = (id: number) => !items || itemIds.has(id);
 export const mapsReady = () => maps !== null && maps.length > 0;
 export const onOsmsLoaded = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 export const itemByName = (name: string) => byName.get(name.toLowerCase()) || null;
@@ -109,12 +98,12 @@ export function itemIcon(id: number): Promise<string | null> {
   if (!p) {
     p = (async () => {
       const key = 'icon:' + id;
-      let blob = await get<Blob>(key, db()).catch(() => undefined);
+      let blob = await getBlob(key);
       if (!blob) {
         const res = await fetch(`${OSMS_BASE}images/items/${String(id).padStart(8, '0')}.png`);
         if (!res.ok) return null;
         blob = await res.blob();
-        await set(key, blob, db()).catch(() => undefined);
+        await setBlob(key, blob);
       }
       return URL.createObjectURL(blob);
     })().catch(() => null);

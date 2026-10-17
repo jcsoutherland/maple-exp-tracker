@@ -1,7 +1,9 @@
 import { Capture } from '../core/capture';
-import { classAvatar, type Animations } from '../core/pixelart';
+import { rollLook, SpriteLoader } from '../core/avatar/msio';
+import { classAvatar, classLook, type Animations } from '../core/pixelart';
+import { themeFor, type Theme } from '../core/scene';
 import { REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
-import { canonItem, canonMap, loadOsms, mapsReady, osmsReady } from '../core/data/osms';
+import { canonItem, canonMap, loadOsms, mapRecord, mapsReady, osmsReady } from '../core/data/osms';
 import { logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
@@ -76,6 +78,7 @@ export class Controller {
     }
     this.capture.onEnded = () => { if (this.sess && !this.sess.paused) this.togglePause(); this.notify(); };
     loadOsms().then(() => this.notify());
+    this.loadLook();
   }
 
   // ---------- subscription ----------
@@ -101,8 +104,12 @@ export class Controller {
     this.notify();
   }
   setIdentity(p: Partial<Identity>) {
+    const before = this.identity;
     this.identity = { ...this.identity, ...p };
     store.saveIdentity(this.identity);
+    if (this.identity.name !== before.name || classLook(this.identity.cls) !== classLook(before.cls)) {
+      if (this.sess) this.ensureLook(); else this.loadLook();
+    }
     if (this.sess) { if (p.name) this.sess.char = p.name; if (p.cls !== undefined) this.sess.cls = p.cls; if (p.level) { this.sess.level = p.level; this.sess.levelStart ??= p.level; } }
     this.notify();
   }
@@ -146,6 +153,7 @@ export class Controller {
     const { name, cls, level } = this.identity;
     this.sess = newSession(name, cls, level);
     this.tracker = this.makeTracker(this.sess);
+    this.ensureLook();
     this.tracker.event('info', 'Session started');
     this.resetWatchers();
     this.startTimers();
@@ -348,6 +356,50 @@ export class Controller {
   get fighting() { return Date.now() - this.lastActive < 4000; }
   /** The pixel-art explorer for the current job (idle / attack loops). */
   get avatar(): Animations { return classAvatar(this.identity.cls); }
+
+  /** Real Maple sprite frames for the character's saved look (pixel art shows until they're in). */
+  readonly sprites = new SpriteLoader();
+  /** backdrop for the current map */
+  get theme(): Theme { return themeFor(this.tracker?.mapCur ? mapRecord(this.tracker.mapCur) : null); }
+
+  /** Load the character's saved look (if it suits the current job) and its frames. */
+  private loadLook() {
+    const look = store.loadChars()[this.identity.name]?.look;
+    this.sprites.load(look && look.branch === classLook(this.identity.cls) ? look : null, () => this.onSpriteFrame());
+  }
+  /** A session starts with a look: roll a random one for the job if the character has none (or changed branch). */
+  private async ensureLook() {
+    const { name, cls, level } = this.identity;
+    if (!name || name === 'Unknown') return;
+    const cur = store.loadChars()[name]?.look;
+    if (cur && cur.branch === classLook(cls)) { if (JSON.stringify(this.sprites.look) !== JSON.stringify(cur)) this.loadLook(); return; }
+    try {
+      await loadOsms(); // gear is limited to items that exist in MapleStory Classic
+      const look = await rollLook(cls, level);
+      const ch = store.loadChars();
+      ch[name] = { ...ch[name], look, thumb: undefined };
+      store.saveChars(ch);
+      this.tracker?.event('info', 'New character look rolled');
+      this.loadLook();
+    } catch (e) {
+      // maplestory.io is often overloaded: try again in a minute while the session runs
+      console.warn('could not roll a character look; retrying in 60s', e);
+      if (this.sess) setTimeout(() => { if (this.sess) this.ensureLook(); }, 60_000);
+    }
+  }
+  /** Keep a small still of the character for History once the first idle frame is in. */
+  private onSpriteFrame() {
+    const f = this.sprites.frames.idle[0], name = this.identity.name, ch = store.loadChars();
+    if (f && name && ch[name]?.look && !ch[name].thumb) {
+      const c = document.createElement('canvas'), h = Math.ceil(f.height / 2) + 1; // FeetCenter: the character is the top half
+      c.width = f.width; c.height = h;
+      c.getContext('2d')!.drawImage(f, 0, 0);
+      ch[name] = { ...ch[name], thumb: c.toDataURL('image/png') };
+      store.saveChars(ch);
+      this.historyVersion++;
+    }
+    this.notify();
+  }
 
   // ---------- diagnostics ----------
   /** Run every region once on a frame and return the prepared images and readings (Setup → Test OCR). */

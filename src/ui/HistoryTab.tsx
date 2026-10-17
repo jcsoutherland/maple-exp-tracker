@@ -49,7 +49,7 @@ export function HistoryTab() {
       </div>
       <div className="card">
         <div className="charhead">
-          <div className="snap"><AvatarCanvas cls={ch.cls || list[0].cls || ''} zoom={2} /></div>
+          <div className="snap">{ch.thumb ? <img className="thumb" src={ch.thumb} alt="" /> : <AvatarCanvas cls={ch.cls || list[0].cls || ''} zoom={2} />}</div>
           <div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{cur}</div>
             <div className="mut">{ch.cls || list[0].cls} · Lv {ch.level ?? list[0].level ?? '?'}</div>

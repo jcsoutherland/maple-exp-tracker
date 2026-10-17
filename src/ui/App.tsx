@@ -48,7 +48,7 @@ export function App() {
         {tab === 'hist' && <HistoryTab />}
         {tab === 'setup' && <SetupTab />}
         <div className="credit-line">
-          Item and map data from <a href="https://osmsdataexplorer.com" target="_blank" rel="noopener">OSMS Data Explorer</a> by @ohmi, cached on this device.
+          Item and map data from <a href="https://osmsdataexplorer.com" target="_blank" rel="noopener">OSMS Data Explorer</a> by @ohmi; character sprites from <a href="https://maplestory.io" target="_blank" rel="noopener">maplestory.io</a>. Both cached on this device.
         </div>
       </main>
       {pip.win && <MiniOverlay win={pip.win} />}
