@@ -389,17 +389,19 @@ export class Controller {
   /** Does a saved look still suit the character (current format, job branch and gender)? */
   private lookFits(l: CharLook) { return l.v === LOOK_V && l.branch === classLook(this.identity.cls) && l.gender === (this.identity.gender ?? 0); }
   /** A session starts with a look: roll a random one if the character has none that fits (job branch, gender). */
-  private ensureLook() {
+  private ensureLook(force = false) {
     const { name, cls, level } = this.identity;
     if (!name || name === 'Unknown') return;
     const cur = store.loadChars()[name]?.look;
-    if (cur && this.lookFits(cur)) { if (JSON.stringify(this.sprites.look) !== JSON.stringify(cur)) this.loadLook(); return; }
+    if (!force && cur && this.lookFits(cur)) { if (JSON.stringify(this.sprites.look) !== JSON.stringify(cur)) this.loadLook(); return; }
     const ch = store.loadChars();
     ch[name] = { ...ch[name], look: rollLook(cls, level, this.identity.gender ?? 0), thumb: undefined };
     store.saveChars(ch);
     this.tracker?.event('info', 'New character look rolled');
     this.loadLook();
   }
+  /** Roll a different random look for the character (the dice button). */
+  rerollLook() { this.ensureLook(true); }
   /** Keep a small still of the character for History once the first idle frame is in. */
   private onSpriteFrame() {
     const f = this.sprites.frames.idle[0], name = this.identity.name, ch = store.loadChars();
