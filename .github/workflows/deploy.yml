@@ -47,7 +47,7 @@ jobs:
           key: mirror-${{ github.run_id }}
       - run: npm run build
         env:
-          BASE_PATH: /${{ github.event.repository.name }}/
+          BASE_PATH: / # served from the root of the custom domain (mapleclassic.training)
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

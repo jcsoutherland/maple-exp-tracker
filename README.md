@@ -2,7 +2,7 @@
 
 A training tracker for **MapleStory Classic World** that runs in your browser. It watches your game window and keeps track of your session for you: EXP, mesos, drops, potions and more. Nothing to install, and everything stays on your computer.
 
-**Open it:** https://jcsoutherland.github.io/maple-exp-tracker/ (Chrome or Edge)
+**Open it:** https://mapleclassic.training (Chrome or Edge)
 
 ## What it tracks
 
