@@ -21,7 +21,7 @@ A training tracker for **MapleStory Classic World** that runs in your browser. I
 3. Open the **Setup** tab and click **Grab frame**, then **Test OCR**. Each box on the picture should sit on the thing it reads (map name, HP, MP, EXP, pickup log and so on). If one is off, select it in the list and drag a new box over the right spot.
 4. Go to the **Live** tab, check your name, class and level, and click **▶ Start session**.
 
-That's it. Play as usual and the dashboard fills in by itself.
+That's it. Play as usual and the dashboard fills in by itself. When you're done, **■ End & save** saves the session to the History tab and clears the dashboard for your next one.
 
 ## Counting your potions
 

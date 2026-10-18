@@ -20,7 +20,7 @@ export function App() {
     try { toast((await c.shareScreen()) ? 'Capturing ✓' : 'No frames received from the shared window yet'); }
     catch (e) { const err = e as DOMException; toast(err.name === 'NotAllowedError' ? 'Capture cancelled' : `Capture failed: ${err.name} ${err.message}`); }
   };
-  const stop = () => { c.stop(); toast('Session saved to History'); };
+  const stop = () => { c.stop(); toast('Session ended and saved to History'); };
 
   return (
     <>
@@ -37,7 +37,7 @@ export function App() {
           : <button onClick={share}>Share game window</button>}
         <button className="pri" disabled={!!s || !cap.ready || c.ocrState !== 'ready'} onClick={() => c.start()}>▶ Start session</button>
         <button disabled={!s} onClick={() => c.togglePause()}>{s?.paused ? '▶ Resume' : '⏸ Pause'}</button>
-        <button className="danger" disabled={!s} onClick={stop}>■ Stop</button>
+        <button className="danger" disabled={!s} onClick={stop} title="End this session: save it to History and clear the dashboard for a fresh start">■ End &amp; save</button>
         <button onClick={pip.toggle} title="Always-on-top mini overlay">⧉ Pop-out overlay</button>
       </header>
       <nav>
