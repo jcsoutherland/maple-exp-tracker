@@ -163,6 +163,13 @@ describe('HP/MP gauges', () => {
     feed(t, 'hp', [40, 40, 40, ...Array(20).fill(_), 80, 80, 80, 80]); // 2 s unreadable
     expect(s.hp.jumps ?? []).toEqual([]);
   });
+  it('notes when MP is spent (the character is attacking)', () => {
+    const { t } = withMax();
+    feed(t, 'mp', [80, 80, 80, 80]);
+    expect(t.lastDrop('mp')).toBe(-Infinity);
+    feed(t, 'mp', [78, 78, 78]);
+    expect(t.lastDrop('mp')).toBe(clock - 100); // the second 78 makes the median drop
+  });
   it('ignores the OCR numbers for potions while the gauge is readable', () => {
     const { s, t } = withMax();
     feed(t, 'hp', [90, 90, 90]);

@@ -26,13 +26,13 @@ export function App() {
     <>
       <header>
         <h1><img className="logo" src={import.meta.env.BASE_URL + 'favicon.svg'} alt="" /> Maple EXP Tracker</h1>
-        <span className={'pill' + (cap.ready ? ' on' : '')}>{cap.ready ? (cap.kind === 'file' ? 'Video: ' + cap.label : 'Capturing') : 'No capture'}</span>
+        <span className={'pill' + (cap.ready ? ' on' : cap.sharing ? ' warn' : '')}>{cap.ready ? (cap.kind === 'file' ? 'Video: ' + cap.label : 'Capturing') : cap.sharing ? 'Waiting for frames' : 'No capture'}</span>
         <span className={'pill' + (c.ocrState === 'ready' ? ' on' : c.ocrState === 'loading' ? ' warn' : '')}>
           {{ idle: 'OCR not loaded', loading: 'Loading OCR…', ready: 'OCR ready', error: 'OCR failed' }[c.ocrState]}
         </span>
         <span className={'pill' + (s ? (s.paused ? ' warn' : ' on') : '')}>{!s ? 'Idle' : s.paused ? (c.autoPaused ? 'Paused (idle)' : 'Paused') : 'Tracking'}</span>
         <span className="sp" />
-        {cap.ready && cap.kind === 'screen'
+        {cap.sharing
           ? <button onClick={() => { c.stopCapture(); toast('Stopped capturing'); }} title="Stop sharing the game window (pauses a running session)">⏹ Stop capture</button>
           : <button onClick={share}>Share game window</button>}
         <button className="pri" disabled={!!s || !cap.ready || c.ocrState !== 'ready'} onClick={() => c.start()}>▶ Start session</button>

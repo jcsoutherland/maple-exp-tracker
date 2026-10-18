@@ -37,8 +37,8 @@ const LEGACY_UNKNOWN = 'Undefined';
 const newBar = (): Bar => ({ buf: [], cur: null, max: null, votes: {}, regen: 0 });
 
 /** HP/MP gauge fill (0–1) as seen ~10×/s: the last three reads, the smoothed level, a rise in progress, and since when it's unreadable. */
-interface Gauge { win: number[]; level: number | null; riseFrom: number | null; lastOk: number; badSince: number | null }
-const newGauge = (): Gauge => ({ win: [], level: null, riseFrom: null, lastOk: -Infinity, badSince: null });
+interface Gauge { win: number[]; level: number | null; riseFrom: number | null; lastOk: number; badSince: number | null; dropAt: number }
+const newGauge = (): Gauge => ({ win: [], level: null, riseFrom: null, lastOk: -Infinity, badSince: null, dropAt: -Infinity });
 /**
  * The game flashes a gauge for ~0.5 s whenever it changes (a potion, a hit), and the flashing frames don't read as a
  * gauge. Up to this long, the level from before is kept, so a potion is the step from before the flash to after it;
@@ -237,9 +237,13 @@ export class Tracker {
     if (g.level == null) { g.level = m; return; }
     if (m > g.level) { g.riseFrom ??= g.level; g.level = m; return; }
     if (g.riseFrom != null) this.gaugeRise(kind, g.riseFrom, g.level);
+    if (m < g.level) g.dropAt = now;
     g.riseFrom = null;
     g.level = m;
   }
+
+  /** When the HP / MP gauge last went down (damage taken / MP spent on a skill). */
+  lastDrop(kind: 'hp' | 'mp') { return this.gauge[kind].dropAt; }
 
   private gaugeRise(kind: 'hp' | 'mp', from: number, to: number) {
     if (from < GAUGE_DEAD) return; // respawn

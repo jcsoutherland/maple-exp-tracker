@@ -7,7 +7,11 @@ export class Capture {
   kind: 'screen' | 'file' | null = null;
   label = '';
   private stream: MediaStream | null = null;
+  /** every stream this page ever opened: Stop must end them all, or the browser keeps showing "sharing" */
+  private streams = new Set<MediaStream>();
   onEnded: (() => void) | null = null;
+  /** sharing started/ended or frames arrived (for the UI) */
+  onChange: (() => void) | null = null;
 
   constructor() {
     const v = document.createElement('video');
@@ -16,22 +20,32 @@ export class Capture {
     // must stay "rendered" (not display:none) for frames to keep updating
     Object.assign(v.style, { position: 'fixed', left: '-10px', top: '-10px', width: '2px', height: '2px', opacity: '0', pointerEvents: 'none' });
     document.body.append(v);
+    for (const ev of ['loadedmetadata', 'resize', 'emptied']) v.addEventListener(ev, () => this.onChange?.());
     this.video = v;
   }
 
   get ready() { return this.kind !== null && this.video.videoWidth > 0; }
+  /** The browser is sharing a window with us right now (frames or not). */
+  get sharing() { return this.kind === 'screen' && !!this.stream?.getVideoTracks().some(t => t.readyState === 'live'); }
 
   /** Throws DOMException NotAllowedError when the user cancels the picker. */
   async startScreen() {
     const st = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 30 } }, audio: false });
     this.stop();
+    this.streams.add(st);
     this.stream = st;
     this.kind = 'screen';
     this.label = st.getVideoTracks()[0]?.label || 'window';
     this.video.removeAttribute('src');
     this.video.srcObject = st;
-    st.getVideoTracks()[0]?.addEventListener('ended', () => { this.kind = null; this.onEnded?.(); });
+    st.getVideoTracks()[0]?.addEventListener('ended', () => {
+      this.streams.delete(st);
+      if (this.stream !== st) return; // an older share, already replaced
+      this.stream = null; this.kind = null; this.video.srcObject = null;
+      this.onEnded?.(); this.onChange?.();
+    });
     this.video.play().catch(() => undefined); // a rejected play() doesn't stop frames from arriving
+    this.onChange?.();
     return this.waitFrame();
   }
 
@@ -39,7 +53,6 @@ export class Capture {
     this.stop();
     this.kind = 'file';
     this.label = file.name;
-    this.video.srcObject = null;
     this.video.src = URL.createObjectURL(file);
     this.video.playbackRate = rate;
     this.video.onended = () => this.onEnded?.();
@@ -47,11 +60,17 @@ export class Capture {
     return this.waitFrame();
   }
 
+  /** End any capture: every track of every stream, and whatever the video element still holds. */
   stop() {
-    this.stream?.getTracks().forEach(t => t.stop());
+    const held = this.video.srcObject instanceof MediaStream ? [this.video.srcObject] : [];
+    for (const s of [...this.streams, ...held]) s.getTracks().forEach(t => t.stop());
+    this.streams.clear();
     this.stream = null;
+    this.video.srcObject = null;
     if (this.video.src.startsWith('blob:')) URL.revokeObjectURL(this.video.src);
+    this.video.removeAttribute('src');
     this.kind = null;
+    this.onChange?.();
   }
 
   waitFrame(ms = 5000): Promise<boolean> {

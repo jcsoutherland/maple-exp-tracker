@@ -91,7 +91,11 @@ export class Controller {
       this.tracker = this.makeTracker(act);
       this.tracker.event('info', 'Recovered unfinished session (paused)');
     }
-    this.capture.onEnded = () => { if (this.sess && !this.sess.paused) this.togglePause(); this.notify(); };
+    this.capture.onEnded = () => {
+      if (this.sess && !this.sess.paused) { this.togglePause(); this.tracker?.event('info', 'Window sharing ended: share it again and press Resume'); }
+      this.notify();
+    };
+    this.capture.onChange = () => this.notify();
     loadOsms().then(() => this.notify());
     this.loadLook();
   }
@@ -112,7 +116,6 @@ export class Controller {
   stopCapture() {
     if (this.sess && !this.sess.paused) this.togglePause();
     this.capture.stop();
-    this.capture.video.srcObject = null;
     this.notify();
   }
   async shareScreen() { const ok = await this.capture.startScreen(); this.initOcr(); this.notify(); return ok; }
@@ -507,7 +510,15 @@ export class Controller {
       this.notify();
     } catch (e) { console.error(e); } finally { this.busyIdle = false; }
   }
-  get fighting() { return Date.now() - this.lastActive < 4000; }
+  /**
+   * Attacking: EXP or loot came in within the last EXP read or so (EXP is read every 5 s, so a shorter window would
+   * flicker back to idle between reads), or MP was just spent on a skill (seen on the gauge 10×/s).
+   */
+  get fighting() {
+    const now = Date.now();
+    return !!this.sess && !this.sess.paused
+      && (now - this.lastActive < this.settings.schedule.expMs + 2000 || now - (this.tracker?.lastDrop('mp') ?? -Infinity) < 3000);
+  }
   /** The pixel-art explorer for the current job (idle / attack loops). */
   /** Real Maple sprite frames for the character's saved look (pixel art shows until they're in). */
   readonly sprites = new SpriteLoader();
