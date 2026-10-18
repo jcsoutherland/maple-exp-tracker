@@ -24,14 +24,15 @@ export function SetupTab() {
     const x = el.getContext('2d')!;
     x.fillStyle = '#000'; x.fillRect(0, 0, el.width, el.height);
     if (frame) x.drawImage(frame, 0, 0, el.width, el.height);
-    else { x.fillStyle = '#9097a8'; x.font = '16px system-ui'; x.fillText('Share the game window (or load a video), then click "Grab frame"', 20, 30); }
+    else { x.fillStyle = '#9097a8'; x.font = `${Math.round(el.width / 40)}px system-ui`; x.fillText('Share the game window (or load a video), then click "Grab frame"', el.width / 40, el.width / 20); }
+    const u = el.width / 960; // drawing units: labels and lines stay readable at the full-width size
     for (const k of Object.keys(REGION_DEFS) as RegionKey[]) {
       const r = c.regions[k], d = REGION_DEFS[k];
-      x.strokeStyle = d.color; x.lineWidth = k === sel ? 3 : 1.5;
+      x.strokeStyle = d.color; x.lineWidth = (k === sel ? 3 : 1.5) * u;
       x.strokeRect(r.x * el.width, r.y * el.height, r.w * el.width, r.h * el.height);
-      x.fillStyle = d.color; x.font = '11px system-ui'; x.fillText(d.label, r.x * el.width, Math.max(10, r.y * el.height - 3));
+      x.fillStyle = d.color; x.font = `${Math.round(11 * u)}px system-ui`; x.fillText(d.label, r.x * el.width, Math.max(10 * u, r.y * el.height - 3 * u));
     }
-    if (tmp) { x.setLineDash([4, 3]); x.strokeStyle = '#fff'; x.strokeRect(tmp.x * el.width, tmp.y * el.height, tmp.w * el.width, tmp.h * el.height); x.setLineDash([]); }
+    if (tmp) { x.setLineDash([4 * u, 3 * u]); x.strokeStyle = '#fff'; x.lineWidth = 1.5 * u; x.strokeRect(tmp.x * el.width, tmp.y * el.height, tmp.w * el.width, tmp.h * el.height); x.setLineDash([]); }
   };
   useEffect(() => draw());
   useEffect(() => (cv.current ? attachSelect(cv.current, r => draw(r), r => c.setRegion(sel, r)) : undefined));
@@ -65,18 +66,18 @@ export function SetupTab() {
           <li>On <b>Live</b>, check name/class/level and press <b>▶ Start session</b>. <b>⧉ Pop-out overlay</b> gives an always-on-top mini window.</li>
         </ol>
       </div>
-      <div className="grid2">
-        <div className="card">
-          <div className="row" style={{ marginBottom: 8 }}>
-            <button onClick={grab}>Grab frame</button>
-            <button onClick={test} disabled={testing}>{testing ? 'Reading…' : 'Test OCR'}</button>
-            <button onClick={saveFrame} title="Save the current frame as a PNG (useful for bug reports / tuning)">Save frame</button>
-            <span className="sp" />
-            <button className="danger" onClick={() => c.resetRegions()}>Reset regions</button>
-          </div>
-          <canvas ref={cv} id="setupCanvas" width={960} height={540} />
-          <div className="mut small" style={{ marginTop: 6 }}>Selected: <b>{REGION_DEFS[sel].label}</b>. Drag on the image to set this region.</div>
+      <div className="card">
+        <div className="row" style={{ marginBottom: 8 }}>
+          <button onClick={grab}>Grab frame</button>
+          <button onClick={test} disabled={testing}>{testing ? 'Reading…' : 'Test OCR'}</button>
+          <button onClick={saveFrame} title="Save the current frame as a PNG (useful for bug reports / tuning)">Save frame</button>
+          <span className="sp" />
+          <button className="danger" onClick={() => c.resetRegions()}>Reset regions</button>
         </div>
+        <canvas ref={cv} id="setupCanvas" width={1920} height={1080} />
+        <div className="mut small" style={{ marginTop: 6 }}>Selected: <b>{REGION_DEFS[sel].label}</b>. Drag on the image to set this region.</div>
+      </div>
+      <div className="grid2">
         <div className="card">
           <h3>Regions</h3>
           {(Object.keys(REGION_DEFS) as RegionKey[]).map(k => (
@@ -90,7 +91,9 @@ export function SetupTab() {
               </>}
             </div>
           ))}
-          <h3 style={{ marginTop: 16 }}>OCR test</h3>
+        </div>
+        <div className="card">
+          <h3>OCR test</h3>
           <div className="ocrres">
             {rows ? rows.map(r => (
               <div key={r.key} style={{ display: 'contents' }}>
