@@ -58,7 +58,9 @@ const out = await page.evaluate(async (speed, opt) => {
   const sc = c.settings.schedule, log = [], tickMs = [];
   let vt = 0, lastExp = 0, next = { bars: 0, exp: 0, map: 0, ui: 0, gauge: 0 };
   // diagnostics (DIAG=out.json): every line the OCR returned and every line counted, with video time
-  const ocrLines = [], countedLines = [];
+  const ocrLines = [], countedLines = [], skipped = [];
+  const { snapExtent } = await import('/src/core/logqueue.ts');
+  c.debug = (kind, info) => skipped.push([+vt.toFixed(2), kind, info && info.lo ? (e => (e ? e.x0.toFixed(2) + '-' + e.x1.toFixed(2) : '-'))(snapExtent(info)) : info ?? '']);
   const read0 = c.engine.read.bind(c.engine);
   c.engine.read = async (cv, kind) => { const t = await read0(cv, kind); if (kind === 'line') ocrLines.push([+vt.toFixed(2), t]); return t; };
   const lines0 = c.tracker.onLogLines.bind(c.tracker);
@@ -92,7 +94,7 @@ const out = await page.evaluate(async (speed, opt) => {
   const s = c.sess, tr = c.tracker;
   tickMs.sort((a, b) => a - b);
   return {
-    log, ocrLines, countedLines,
+    log, ocrLines, countedLines, skipped,
     summary: { exp: s.exp, expLost: s.expLost, mesos: s.mesos, maps: s.maps, drops: Object.fromEntries(Object.entries(s.drops).map(([k, d]) => [k, d.qty])),
       hp: s.hp, mp: s.mp, hpMax: tr.hp.max, mpMax: tr.mp.max },
     perf: { logChecks: c.stats.logChecks, ocrCalls: c.stats.ocrCalls, expSkipped: c.stats.expSkipped, guessSkipped: c.stats.guessSkipped, logGuesses: c.stats.logGuesses, junkSkipped: c.stats.junkSkipped, logDropped: c.stats.logDropped, logTickMedianMs: Math.round(tickMs[tickMs.length >> 1]), logTickP95Ms: Math.round(tickMs[Math.floor(tickMs.length * 0.95)]) },
@@ -102,7 +104,7 @@ const out = await page.evaluate(async (speed, opt) => {
   level: +(process.env.LEVEL || 37), cls: process.env.CLASS || 'Hunter',
 });
 console.log(out.log.join('\n'));
-if (process.env.DIAG) fs.writeFileSync(process.env.DIAG, JSON.stringify({ ocr: out.ocrLines, counted: out.countedLines }));
+if (process.env.DIAG) fs.writeFileSync(process.env.DIAG, JSON.stringify({ ocr: out.ocrLines, counted: out.countedLines, skipped: out.skipped }));
 console.log('\n' + JSON.stringify(out.summary, null, 1));
 console.log('perf', JSON.stringify(out.perf));
 await browser.close();

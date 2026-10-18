@@ -153,13 +153,15 @@ export interface LogScan {
   slots: [number, number][];
   /** per slot: the text is yellow (EXP / party-bonus lines are; meso and item lines are white) */
   yellow?: boolean[];
+  /** where this frame's newest line was detected (bottom row, -1 = none), for learning the anchor */
+  detected?: number;
 }
 
 /**
  * The pickup log is ~9px semi-transparent text over the game scene. Score each pixel as "bright, greyish and brighter
  * than its neighbourhood", then cut line slots on the log's fixed 13px (at 720p) grid counted up from the newest line.
  */
-export function logScan(src: FrameSource, r: Region, thr: number, scratch = document.createElement('canvas')): LogScan {
+export function logScan(src: FrameSource, r: Region, thr: number, scratch = document.createElement('canvas'), anchor: number | null = null): LogScan {
   const { W: W0, H: H0 } = frameSize(src), f = H0 / 720;
   const X = Math.round(r.x * W0), Y = Math.round(r.y * H0), W = Math.max(8, Math.round(r.w * W0)), H = Math.max(8, Math.round(r.h * H0));
   scratch.width = W; scratch.height = H;
@@ -182,12 +184,16 @@ export function logScan(src: FrameSource, r: Region, thr: number, scratch = docu
     const v = (L[p] - mean) * (SA[p] < 45 ? 1 : 0.3);
     if (v > 0) { sc[p] = v; if (v > 15) rows[y]++; }
   }
-  // newest line = lowest band of text rows; slots stack upward from it
+  // newest line = lowest band of text rows; slots stack upward from it. The newest line always sits at the same height
+  // (the log grows upward), so once that's learned (`anchor`) the grid stays put: a player or monster below the log
+  // can't shift it and cut every line in half
   let bottom = -1;
   for (let y = H - 1, run = 0; y >= 0; y--) {
     if (rows[y] >= 4) { if (bottom < 0) bottom = y + 1; run++; if (run >= Math.max(4, Math.round(5 * f))) break; }
     else if (bottom >= 0) { bottom = -1; run = 0; }
   }
+  const detected = bottom;
+  if (anchor != null && anchor > 0 && anchor <= H) bottom = anchor;
   const slots: [number, number][] = [];
   if (bottom > 0) {
     bottom = Math.min(H, bottom + 2);
@@ -212,7 +218,7 @@ export function logScan(src: FrameSource, r: Region, thr: number, scratch = docu
     }
     return bright >= 20 && yel > bright * 0.5;
   });
-  return { W, H, f, sc, slots, yellow };
+  return { W, H, f, sc, slots, yellow, detected };
 }
 
 /** Signature of the text pixels inside one slot: same value = same line, so its OCR result can be reused. */

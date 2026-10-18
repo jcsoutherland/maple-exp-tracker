@@ -28,9 +28,11 @@ export function snapInk(s: LineSnap): { ink: number; hash: number } {
 }
 
 /** Where a snapshot's text starts and ends across the line, as fractions of the log width (null = no text). */
+/** A column holds strong text pixels (≥ 2): faint scenery behind the log would otherwise count as text. */
+const strongCol = (s: LineSnap, x: number) => { let n = 0; for (let y = 0; y < s.h; y++) if (s.lo[y * s.W + x] > 40 && ++n >= 2) return true; return false; };
+
 export function snapExtent(s: LineSnap): { x0: number; x1: number } | null {
-  // strong text pixels only (≥ 2 per column): faint scenery behind the log would otherwise stretch every line
-  const { W, h, lo } = s, col = (x: number) => { let n = 0; for (let y = 0; y < h; y++) if (lo[y * W + x] > 40 && ++n >= 2) return true; return false; };
+  const { W } = s, col = (x: number) => strongCol(s, x);
   let x0 = 0, x1 = W - 1;
   while (x0 < W && !col(x0)) x0++;
   while (x1 > x0 && !col(x1)) x1--;
@@ -41,7 +43,8 @@ export function snapExtent(s: LineSnap): { x0: number; x1: number } | null {
  * Tells real pickup-log lines from things moving behind the log (players, monsters, scenery), which the line watcher
  * also sees as "new lines" and which used to swamp the OCR readers in a party. Log lines are right-aligned and long:
  * a snapshot must span ≥ 30% of the log's width, and once the right edge of real lines is known (learned from lines that
- * read correctly), end within 1.2% of it (every line ends on the same pixel; a monster behind the log doesn't).
+ * read correctly), have text right at that edge (every line ends on the same pixel with its ")"; a monster standing in
+ * the middle of the log doesn't). Clutter beyond the edge (a ladder, an HP bar) doesn't matter.
  */
 export class LineShapeFilter {
   private edges: number[] = [];
@@ -51,7 +54,10 @@ export class LineShapeFilter {
     const x = snapExtent(s);
     if (!x || x.x1 - x.x0 < 0.3) return true;
     const e = this.edge;
-    return e != null && Math.abs(x.x1 - e) > 0.012;
+    if (e == null) return false;
+    const a = Math.max(0, Math.floor((e - 0.025) * s.W)), b = Math.min(s.W - 1, Math.ceil((e + 0.012) * s.W));
+    for (let c = a; c <= b; c++) if (strongCol(s, c)) return false;
+    return true;
   }
   /** Remember where a line that read as a real log line ends. */
   learn(s: LineSnap) {
@@ -60,6 +66,34 @@ export class LineShapeFilter {
     this.edges.push(x.x1);
     if (this.edges.length > 30) this.edges.shift();
   }
+}
+
+/**
+ * Where the pickup log's newest line sits (its bottom row in the log region). It never moves, but per-frame detection
+ * jitters by a few pixels (letters like y, p and ")" reach lower) and is now and then fooled by something below the
+ * log. So the anchor is learned from many frames: the main cluster of detections, taken at its lower end (so letters
+ * that reach lower still fit). Learned again when the region or the capture size changes.
+ */
+export class LogAnchor {
+  private seen: number[] = [];
+  private size = '';
+  value: number | null = null;
+  add(b: number | undefined, size: string) {
+    if (size !== this.size) { this.seen = []; this.value = null; this.size = size; }
+    if (b == null || b <= 0) return;
+    this.seen.push(b);
+    if (this.seen.length > 300) this.seen.shift();
+    if (this.seen.length >= 30 && this.seen.length % 10 === 0) this.value = anchorOf(this.seen);
+  }
+}
+
+/** The anchor from a set of detections: the most common value's cluster (±6 px), at its 90th percentile. */
+export function anchorOf(v: number[]): number {
+  const count = new Map<number, number>();
+  for (const x of v) count.set(x, (count.get(x) || 0) + 1);
+  const mode = [...count].sort((a, b) => b[1] - a[1])[0][0];
+  const near = v.filter(x => Math.abs(x - mode) <= 6).sort((a, b) => a - b);
+  return near[Math.min(near.length - 1, Math.floor(near.length * 0.9))];
 }
 
 /** The OCR image of a snapshot (high-contrast version on request). */

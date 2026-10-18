@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { lineAmount, lineKind, parseExp, parsePair, cleanMap } from './parse';
 import { newSession, potCost } from './session';
+import { anchorOf, LogAnchor } from './logqueue';
 import { DEFAULT_SETTINGS } from './config';
-import { GLYPHS, TH, TW } from './potcount';
+import { GLYPHS, SlotCounter, TH, TW } from './potcount';
 import { Tracker } from './tracker';
 import { parseRecovery, potionsUsed } from './potions';
 
@@ -234,6 +235,20 @@ describe('potions', () => {
     expect(GLYPHS.length).toBe(3);
     for (const set of GLYPHS) { expect(set.length).toBe(10); for (const g of set) { expect(g.mean.length).toBe(TW * TH); expect(g.w.length).toBe(TW * TH); } }
   });
+  it('turns hotbar count reads into potions used, and never a misread jump', () => {
+    const c = new SlotCounter(), r = (value: number, score = 0.9) => ({ value, score });
+    const feed = (v: number, moved = true, n = 3) => { let used = 0; for (let k = 0; k < n; k++) used += c.feed(r(v), 0, moved).used; return used; };
+    expect(feed(69)).toBe(0);              // the starting count
+    expect(feed(68)).toBe(1);              // one drunk, the bar moved: counted
+    expect(feed(68)).toBe(0);
+    expect(c.feed(r(75), 0, true).used + c.feed(r(75), 0, true).used).toBe(0); // a misread twice: not yet accepted
+    expect(feed(75)).toBe(0);              // read three times: taken as a pickup (+7), nothing counted
+    expect(feed(67)).toBe(0);              // 75 → 67 = 8 "used": impossible, rejected (baseline moves)
+    expect(feed(66)).toBe(1);              // and normal counting goes on
+    expect(feed(65, false)).toBe(1);       // one potion counts even if the bar didn't visibly move (drunk near full)
+    expect(feed(63, false)).toBe(0);       // but two at once need the bar to agree
+    expect(c.feed(r(64, 0.3), 0, true).used).toBe(0); // a read too unsure to trust
+  });
   it('totals hotbar-counted potions per item', () => {
     const s = newSession('Flynny', 'Hunter', 38, 0);
     s.hp.counted = { 'Red Potion': 12, 'Orange Potion': 5 }; s.mp.counted = { 'Blue Potion': 8 };
@@ -255,6 +270,15 @@ describe('potions', () => {
 });
 
 describe('pickup log', () => {
+  it('learns where the newest log line sits from jittery detections, ignoring the odd wrong one', () => {
+    const v = [...Array(60).fill(179), ...Array(50).fill(177), ...Array(30).fill(176), ...Array(10).fill(195), 141, 188];
+    expect(anchorOf(v)).toBe(179);
+    const a = new LogAnchor();
+    for (const x of v) a.add(x, 'size1');
+    expect(a.value).toBe(179);
+    a.add(178, 'size2'); // capture size or region changed: learn again
+    expect(a.value).toBeNull();
+  });
   it('parses real OCR outputs from gameplay footage', () => {
     expect(lineAmount('You have gained Mesos (+45;')).toBe(45);
     expect(lineAmount('Yuu have dained MIESUE (141;')).toBe(41);

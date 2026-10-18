@@ -2,9 +2,9 @@ import { Capture } from '../core/capture';
 import { classLook, LOOK_V, randomVariant, rollLook, SpriteLoader, type CharLook } from '../core/avatar/msio';
 import { HOTBAR_COLS, HOTBAR_ROWS, REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
 import { potionByName } from '../core/potions';
-import { GLYPHS, readSlotCount } from '../core/potcount';
+import { GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { canonItem, canonMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
-import { ExpLineFilter, LineShapeFilter, snapCanvas, snapInk, snapLine, type LineSnap } from '../core/logqueue';
+import { ExpLineFilter, LineShapeFilter, LogAnchor, snapCanvas, snapInk, snapLine, type LineSnap } from '../core/logqueue';
 import { enhanceText, fixIL, frameSize, gaugeFill, logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
@@ -67,7 +67,7 @@ export class Controller {
   private lastLog: LogScan | null = null;
   private slotCache = new Map<number, string>();
   /** recently counted log lines (normalised text), for the fallback text check */
-  private counted: { n: string; t: number }[] = [];
+  private counted: { n: string; t: number; h: number }[] = [];
   /** per visible log line (bottom-up, aligned with lastLog.slots): counted yet, OCR attempts */
   /** the log lines on screen, newest first, followed as they scroll; `pre` = already there before watching started */
   private logLines: { pre: boolean; guess: boolean; item: LogItem | null }[] = [];
@@ -76,6 +76,10 @@ export class Controller {
   private reading = 0;
   private readonly expFilter = new ExpLineFilter();
   private readonly shapeFilter = new LineShapeFilter();
+  /** where the newest pickup-log line sits, learned over many frames (the slot grid stays fixed on it) */
+  private readonly logAnchor = new LogAnchor();
+  /** optional diagnostics hook (the replay harness records why log lines were skipped) */
+  debug?: (kind: string, info?: unknown) => void;
   private mapSig = 0;
   private mapExpAt = 0;
   private recent: [number, number][] = [];
@@ -316,11 +320,12 @@ export class Controller {
     const t0 = performance.now();
     try {
       const v = this.capture.video, r = this.regions.log;
-      const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'));
+      const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'), this.logAnchor.value);
+      this.logAnchor.add(lo.detected, `${v.videoWidth}x${v.videoHeight}:${r.x},${r.y},${r.w},${r.h}`);
       this.stats.logChecks++;
       const first = !this.lastLog;
       const { count, aligned } = newLineCount(this.lastLog, lo);
-      if (!aligned && !first && count) this.stats.logGuesses++;
+      if (!aligned && !first && count) { this.stats.logGuesses++; this.debug?.('guess', count); }
       this.lastLog = lo;
       const now = Date.now();
       // Follow each line as it scrolls up: new lines enter at slot 0 and push the rest up by `count`.
@@ -330,16 +335,16 @@ export class Controller {
         .slice(0, lo.slots.length);
       // snapshot new lines; a line whose read failed gets a fresh snapshot (≤4 tries, ≥250 ms apart) while still visible
       let hi: LogScan | null = null;
-      const high = () => (hi ??= logScan(v, r, r.thr, document.createElement('canvas')));
+      const high = () => (hi ??= logScan(v, r, r.thr, document.createElement('canvas'), this.logAnchor.value));
       for (let i = Math.min(LOG_WATCH_SLOTS, this.logLines.length) - 1; i >= 0; i--) { // oldest first
         const ln = this.logLines[i];
         if (ln.pre) continue;
         if (!ln.item) {
           // a yellow line is EXP / party bonus: never queued, so a party's flood of them can't push item lines out
-          if (lo.yellow?.[i]) { ln.item = { snap: snapLine(lo, null, lo.slots[i], now, true), status: 'done', tries: 1, guess: ln.guess }; this.stats.expSkipped++; this.markActive(); continue; }
+          if (lo.yellow?.[i]) { ln.item = { snap: snapLine(lo, null, lo.slots[i], now, true), status: 'done', tries: 1, guess: ln.guess }; this.stats.expSkipped++; this.debug?.('yellow', i); this.markActive(); continue; }
           const snap = snapLine(lo, high(), lo.slots[i], now);
           // not shaped like a log line (something moving behind the log): never read
-          if (this.shapeFilter.isJunk(snap)) { ln.item = { snap, status: 'done', tries: 1, guess: ln.guess }; this.stats.junkSkipped++; continue; }
+          if (this.shapeFilter.isJunk(snap)) { ln.item = { snap, status: 'done', tries: 1, guess: ln.guess }; this.stats.junkSkipped++; this.debug?.('junk', snap); continue; }
           ln.item = { snap, status: 'queued', tries: 1, guess: ln.guess }; this.logQueue.push(ln.item);
         }
         else if (ln.item.status === 'failed' && ln.item.tries < 4 && now - ln.item.snap.t >= 250) {
@@ -358,7 +363,7 @@ export class Controller {
     }
     while (this.reading < LOG_READERS && this.logQueue.length) {
       const q = this.logQueue.shift()!;
-      if (this.expFilter.isExp(q.snap)) { q.status = 'done'; this.stats.expSkipped++; this.markActive(); continue; }
+      if (this.expFilter.isExp(q.snap)) { q.status = 'done'; this.stats.expSkipped++; this.debug?.('expShape', q.snap); this.markActive(); continue; }
       this.reading++;
       this.readSnap(q).catch(e => console.error(e)).finally(() => { this.reading--; this.pumpLog(); });
     }
@@ -382,16 +387,20 @@ export class Controller {
       this.slotCache.set(hash, t);
       if (this.slotCache.size > 80) this.slotCache.delete(this.slotCache.keys().next().value!);
     }
-    if (lineQuality(t) < 2) { q.status = 'failed'; return; } // retried from a new snapshot while the line is on screen
+    if (lineQuality(t) < 2) { q.status = 'failed'; this.debug?.('unreadable', t); return; } // retried from a new snapshot while the line is on screen
     q.status = 'done';
     this.expFilter.learn(q.snap, lineKind(t) === 'exp');
     this.shapeFilter.learn(q.snap);
     q.snap = { ...q.snap, lo: new Float32Array(0), hi: null }; // read: free the pixels
     const now = Date.now();
     // a guessed alignment can re-present an old line as new: skip text that was counted moments ago
-    if (q.guess && this.counted.some(c => now - c.t < 6000 && sim(c.n, normLine(t)) >= 0.8)) { this.stats.guessSkipped++; return; }
-    this.counted = this.counted.filter(c => now - c.t < 6000);
-    this.counted.push({ n: normLine(t), t: now });
+    // (only within 2 s: a re-presented line shows up a frame or two later, while picking up the same item again takes
+    // longer; a 6 s window dropped back-to-back Tablecloths in a party)
+    // the same line image (pixel hash), not just similar text: '+14 mesos' and '+16 mesos' read about the same but are
+    // two pickups, and a party's meso lines come seconds apart
+    if (q.guess && this.counted.some(c => now - c.t < 2000 && c.h === hash)) { this.stats.guessSkipped++; this.debug?.('guessDup', t); return; }
+    this.counted = this.counted.filter(c => now - c.t < 2000);
+    this.counted.push({ n: normLine(t), t: now, h: hash });
     this.tracker?.onLogLines([t]);
     this.markActive();
     this.notify();
@@ -423,7 +432,7 @@ export class Controller {
     const out: string[] = [];
     let hi: LogScan | null = null;
     for (let i = 0; i < Math.min(count, lo.slots.length); i++)
-      out.push(await this.readSlot(lo, i, () => (hi ??= logScan(src, this.regions.log, this.regions.log.thr, document.createElement('canvas')))));
+      out.push(await this.readSlot(lo, i, () => (hi ??= logScan(src, this.regions.log, this.regions.log.thr, document.createElement('canvas'), this.logAnchor.value))));
     return out;
   }
 
@@ -444,45 +453,46 @@ export class Controller {
     if (!this.canRun) return;
     const v = this.capture.video;
     if (++this.gaugeN % 3 === 0) this.watchCounts(v); // ~3×/s
+    const now = Date.now();
     for (const k of ['hp', 'mp'] as const) {
-      const f = gaugeFill(v, this.regions[k === 'hp' ? 'hpGauge' : 'mpGauge'], k, this.scratch.gauge);
+      const f = gaugeFill(v, this.regions[k === 'hp' ? 'hpGauge' : 'mpGauge'], k, this.scratch.gauge), prev = this.gaugeLast[k];
+      // the bar moved (or flashed, which it does on every change): a potion count drop is only believed after one
+      if (f == null || prev == null || Math.abs(f - prev) >= 0.008) this.gaugeMovedAt[k] = now;
       this.gaugeLast[k] = f;
       this.tracker?.onGauge(k, f);
     }
   }
+  /** when each gauge last moved or flashed */
+  private gaugeMovedAt = { hp: 0, mp: 0 };
 
   private gaugeN = 0;
-  /** per hotbar slot holding a potion: its confirmed count, a different read waiting for confirmation, last good read */
-  private counts = new Map<number, { val: number | null; cand: number | null; at: number }>();
+  /** per hotbar slot holding a potion: its count, read and checked by a SlotCounter */
+  private counts = new Map<number, SlotCounter>();
   /**
-   * Read the count printed on every hotbar slot that holds a potion (template matching, see potcount.ts). A new value
-   * counts once two reads agree: a drop of N is N potions used, a rise is a pickup (monsters drop potions). Exact even
-   * when a potion is drunk while being hit, which the gauges can't see.
+   * Read the count printed on every hotbar slot that holds a potion (template matching, see potcount.ts). A drop of 1–3
+   * that the potion's gauge confirms is potions used; a rise is a pickup; anything else is a misread and only moves the
+   * baseline (noted in the activity log). Exact even when a potion is drunk while being hit.
    */
   private watchCounts(v: FrameSource) {
     const bar = this.settings.hotbar, now = Date.now();
     for (const k of [...this.counts.keys()]) if (!bar[k]) this.counts.delete(k);
     bar.forEach((name, i) => {
-      if (!name || !this.tracker) return;
+      const p = name ? potionByName(name) : null;
+      if (!p || !this.tracker) return;
+      const kind = p.hp || p.hpPct ? 'hp' : 'mp';
       const r = readSlotCount(v, this.regions.quickslot, i, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
-      if (!r) return; // covered (cursor, a window) or empty: keep the last value
-      const st = this.counts.get(i) ?? this.counts.set(i, { val: null, cand: null, at: 0 }).get(i)!;
-      st.at = now;
-      if (r.value === st.val) { st.cand = null; return; }
-      if (r.value !== st.cand) { st.cand = r.value; return; }
-      const used = st.val == null ? 0 : st.val - r.value;
-      st.val = r.value; st.cand = null;
-      const p = potionByName(name);
-      // a drop of more than 20 between reads is a misread (or a stack moved), not potions
-      if (p && used > 0 && used <= 20) this.tracker.creditPots(p.hp || p.hpPct ? 'hp' : 'mp', p.name, used);
+      const sc = this.counts.get(i) ?? this.counts.set(i, new SlotCounter()).get(i)!;
+      const res = sc.feed(r, now, now - this.gaugeMovedAt[kind] < 3000);
+      if (res.used) this.tracker.creditPots(kind, p.name, res.used);
+      else if (res.rejected) this.tracker.event('info', `${p.name} count ${res.from} → ${sc.val} ignored (looks like a misread)`);
     });
   }
   /** Are the hotbar counts covering this stat's potions right now (a slot for it read in the last 5 s)? */
   private potsCounted(kind: 'hp' | 'mp') {
     const now = Date.now();
-    for (const [i, st] of this.counts) {
+    for (const [i, sc] of this.counts) {
       const p = potionByName(this.settings.hotbar[i] ?? '');
-      if (p && st.val != null && now - st.at < 5000 && (kind === 'hp' ? p.hp || p.hpPct : p.mp || p.mpPct)) return true;
+      if (p && sc.val != null && now - sc.at < 5000 && (kind === 'hp' ? p.hp || p.hpPct : p.mp || p.mpPct)) return true;
     }
     return false;
   }
@@ -600,7 +610,7 @@ export class Controller {
     if (!s || !s.paused || !this.autoPaused || !this.capture.ready) return;
     const v = this.capture.video, r = this.regions.log, id = this.idle;
     try {
-      const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'));
+      const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'), this.logAnchor.value);
       const prev = id.log;
       id.log = lo;
       if (prev && newLineCount(prev, lo).count > 0) { this.resumeFromIdle('loot / EXP in the log', prev); return; }
@@ -714,7 +724,7 @@ export class Controller {
     for (const key of Object.keys(REGION_DEFS) as RegionKey[]) {
       const def = REGION_DEFS[key];
       if (key === 'log') {
-        const r = this.regions.log, lo = logScan(src, r, r.thr - 30, document.createElement('canvas'));
+        const r = this.regions.log, lo = logScan(src, r, r.thr - 30, document.createElement('canvas'), this.logAnchor.value);
         const saved = this.slotCache; this.slotCache = new Map();
         const lines = await this.readLogLines(src, lo);
         this.slotCache = saved;

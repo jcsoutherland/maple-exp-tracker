@@ -102,6 +102,38 @@ export function readCount(s: Float32Array, glyphs: Glyphs, adv: number[] = ADVAN
   return { value: +digits.join(''), score: min };
 }
 
+/** a read must match at least this well to be trusted; this many matching reads in a row accept a new count */
+const TRUST = 0.6, CONFIRM = 3;
+/** more potions than this between two accepted counts (~1 s apart) can't be drunk: it's a misread */
+export const MAX_STEP = 3;
+
+/**
+ * Turns one slot's count reads into potions used. A misread can repeat (the same wrong digit several reads in a row),
+ * so a new count needs CONFIRM matching reads, and a drop only counts when it's small (≤ MAX_STEP); a drop of 2–3 also
+ * needs the potion's stat to have moved on its gauge just before (a rise, or the flash of a change).
+ * A rise is a pickup. Anything else just moves the baseline, counting nothing.
+ */
+export class SlotCounter {
+  val: number | null = null;
+  /** when a trusted read last came in */
+  at = 0;
+  private cand: number | null = null;
+  private n = 0;
+  /** Feed one read; returns the potions used (0 when none) and, for a drop that was rejected, its size. */
+  feed(r: { value: number; score: number } | null, now: number, statMoved: boolean): { used: number; rejected?: number; from?: number } {
+    if (!r || r.score < TRUST) return { used: 0 };
+    this.at = now;
+    if (r.value === this.val) { this.cand = null; this.n = 0; return { used: 0 }; }
+    if (r.value !== this.cand) { this.cand = r.value; this.n = 1; return { used: 0 }; }
+    if (++this.n < CONFIRM) return { used: 0 };
+    const from = this.val, d = from == null ? 0 : from - r.value;
+    this.val = r.value; this.cand = null; this.n = 0;
+    // one potion is believable on its own (drunk at nearly full MP / HP the bar may not visibly move); more need the bar
+    if (d === 1 || (d >= 2 && d <= MAX_STEP && statMoved)) return { used: d };
+    return d > 0 ? { used: 0, rejected: d, from: from! } : { used: 0 };
+  }
+}
+
 /** Read the count of slot `i` of the quickslot region straight from a frame. */
 export function readSlotCount(src: FrameSource, r: Region, i: number, cols: number, rows: number, glyphs: Glyphs = GLYPHS, scratch?: HTMLCanvasElement) {
   return glyphs.length ? readCount(slotGrey(src, r, i, cols, rows, scratch), glyphs) : null;
