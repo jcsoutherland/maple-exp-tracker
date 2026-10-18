@@ -3,6 +3,7 @@ import type { OcrTestRow } from '../app/controller';
 import { REGION_DEFS, type RegionKey, type Schedule } from '../core/config';
 import { attachSelect, type FracRect } from './selectable';
 import { toast, useCtrl } from './hooks';
+import { NumberInput } from './NumberInput';
 
 export function SetupTab() {
   const c = useCtrl();
@@ -116,16 +117,16 @@ export function SetupTab() {
       <div className="card">
         <h3>Read schedule &amp; detection</h3>
         <div className="row">
-          <label>Pickup-log watch <input type="number" min={33} step={11} value={sched.logWatchMs} style={{ width: 70 }} onChange={e => setSched('logWatchMs', Math.max(33, +e.target.value))} /> ms</label>
-          <label>HP/MP numbers <input type="number" min={500} step={250} value={sched.barsMs} style={{ width: 70 }} onChange={e => setSched('barsMs', Math.max(500, +e.target.value))} /> ms</label>
-          <label title="How often the HP/MP gauges are checked for potions (pixel read, very cheap)">HP/MP gauges <input type="number" min={50} step={50} value={sched.gaugeMs} style={{ width: 70 }} onChange={e => setSched('gaugeMs', Math.max(50, +e.target.value))} /> ms</label>
-          <label>EXP bar <input type="number" min={1000} step={500} value={sched.expMs} style={{ width: 70 }} onChange={e => setSched('expMs', Math.max(1000, +e.target.value))} /> ms</label>
-          <label>Map check <input type="number" min={2000} step={1000} value={sched.mapMs} style={{ width: 70 }} onChange={e => setSched('mapMs', Math.max(2000, +e.target.value))} /> ms, and every <input type="number" min={500} step={500} value={sched.mapExpStep} style={{ width: 70 }} onChange={e => setSched('mapExpStep', Math.max(500, +e.target.value))} /> EXP</label>
+          <label>Pickup-log watch <NumberInput width={70} min={33} max={2000} step={11} value={sched.logWatchMs} onChange={v => setSched('logWatchMs', v)} /> ms</label>
+          <label>HP/MP numbers <NumberInput width={70} min={500} max={10000} step={250} value={sched.barsMs} onChange={v => setSched('barsMs', v)} /> ms</label>
+          <label title="How often the HP/MP gauges are checked for potions (pixel read, very cheap)">HP/MP gauges <NumberInput width={70} min={50} max={2000} step={50} value={sched.gaugeMs} onChange={v => setSched('gaugeMs', v)} /> ms</label>
+          <label>EXP bar <NumberInput width={70} min={1000} max={60000} step={500} value={sched.expMs} onChange={v => setSched('expMs', v)} /> ms</label>
+          <label>Map check <NumberInput width={70} min={2000} max={120000} step={1000} value={sched.mapMs} onChange={v => setSched('mapMs', v)} /> ms, and every <NumberInput width={70} min={500} max={1000000} step={500} value={sched.mapExpStep} onChange={v => setSched('mapExpStep', v)} /> EXP</label>
         </div>
         <div className="row" style={{ marginTop: 8 }}>
-          <label title="0 = never. The session resumes by itself when EXP moves again.">Auto-pause after idle (s) <input type="number" min={0} value={c.settings.idlePauseSec} style={{ width: 60 }} onChange={e => c.updateSettings({ idlePauseSec: Math.max(0, +e.target.value || 0) })} /></label>
-          <label>Min HP jump counted as pot <input type="number" min={1} value={c.settings.hpMin} style={{ width: 60 }} onChange={e => c.updateSettings({ hpMin: +e.target.value || 1 })} /></label>
-          <label>Min MP jump counted as pot <input type="number" min={1} value={c.settings.mpMin} style={{ width: 60 }} onChange={e => c.updateSettings({ mpMin: +e.target.value || 1 })} /></label>
+          <label title="0 = never. The session resumes by itself when EXP moves again.">Auto-pause after idle (s) <NumberInput width={60} min={0} max={3600} step={5} value={c.settings.idlePauseSec} onChange={v => c.updateSettings({ idlePauseSec: v })} /></label>
+          <label>Min HP jump counted as pot <NumberInput width={60} min={1} max={5000} step={5} value={c.settings.hpMin} onChange={v => c.updateSettings({ hpMin: v })} /></label>
+          <label>Min MP jump counted as pot <NumberInput width={60} min={1} max={5000} step={5} value={c.settings.mpMin} onChange={v => c.updateSettings({ mpMin: v })} /></label>
         </div>
         <div className="mut small" style={{ marginTop: 8 }}>
           The pickup log is checked for a new line at the watch rate with a cheap pixel comparison; OCR only runs when a line appears.

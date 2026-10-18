@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { lineAmount, lineKind, parseExp, parsePair, cleanMap } from './parse';
-import { newSession } from './session';
+import { newSession, potCost } from './session';
+import { DEFAULT_SETTINGS } from './config';
+import { GLYPHS, TH, TW } from './potcount';
 import { Tracker } from './tracker';
 import { parseRecovery, potionsUsed } from './potions';
 
@@ -200,17 +202,17 @@ describe('HP/MP gauges', () => {
     feed(t, 'hp', [40, 40, 40, ...Array(20).fill(_), 80, 80, 80, 80]); // 2 s unreadable
     expect(s.hp.jumps ?? []).toEqual([]);
   });
-  it('credits a potion to the hotbar item whose count just changed, and an HP+MP item only once', () => {
-    let src: string | 'dup' | null = 'Orange Potion';
-    const s = newSession('Flynny', 'Hunter', 37, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => clock, potSource: () => src });
+  it('counts hotbar potions by item, and ignores gauge rises while the hotbar counts that stat', () => {
+    let counted = true;
+    const s = newSession('Flynny', 'Hunter', 37, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => clock, potsCounted: k => counted && k === 'mp' });
     for (let i = 0; i < 3; i++) { t.onBar('hp', [1303, 1303]); t.onBar('mp', [1078, 1078]); }
-    feed(t, 'hp', [50, 50, 50, 70, 70, 70]);
-    src = null; feed(t, 'hp', [60, 60, 60, 72, 72, 72]); // no slot changed: the Active potion
-    src = 'dup'; feed(t, 'mp', [50, 50, 50, 70, 70, 70]); // the MP half of an Elixir already counted on HP
-    expect(Object.keys(s.hp.byPot ?? {})).toEqual(['Orange Potion']);
-    expect(s.hp.jumps.length).toBe(1);
+    t.creditPots('mp', 'Blue Potion', 2); t.creditPots('hp', 'Red Potion', 1);
+    feed(t, 'mp', [50, 50, 50, 70, 70, 70]); // MP from something else (a party skill): not a potion
+    feed(t, 'hp', [50, 50, 50, 70, 70, 70]); // no hotbar count for HP: the gauge still counts it
+    expect(s.mp.counted).toEqual({ 'Blue Potion': 2 });
+    expect(s.hp.counted).toEqual({ 'Red Potion': 1 });
     expect(s.mp.jumps ?? []).toEqual([]);
-    expect(s.mp.byPot).toBeUndefined();
+    expect(s.hp.jumps.length).toBe(1);
   });
   it('notes when MP is spent (the character is attacking)', () => {
     const { t } = withMax();
@@ -228,6 +230,17 @@ describe('HP/MP gauges', () => {
 });
 
 describe('potions', () => {
+  it('has digit templates for every position', () => {
+    expect(GLYPHS.length).toBe(3);
+    for (const set of GLYPHS) { expect(set.length).toBe(10); for (const g of set) { expect(g.mean.length).toBe(TW * TH); expect(g.w.length).toBe(TW * TH); } }
+  });
+  it('totals hotbar-counted potions per item', () => {
+    const s = newSession('Flynny', 'Hunter', 38, 0);
+    s.hp.counted = { 'Red Potion': 12, 'Orange Potion': 5 }; s.mp.counted = { 'Blue Potion': 8 };
+    const pc = potCost(s, DEFAULT_SETTINGS);
+    expect(pc.items.map(i => [i.name, i.count])).toEqual(expect.arrayContaining([['Red Potion', 12], ['Orange Potion', 5], ['Blue Potion', 8]]));
+    expect(pc.detail.hp?.count).toBe(17);
+  });
   it('parses recovery amounts from item descriptions', () => {
     expect(parseRecovery('Tasty-looking meat.\nRestores around 160 HP.')).toEqual({ hp: 160, mp: 0, hpPct: 0, mpPct: 0 });
     expect(parseRecovery('A very ripe watermelon.\nRestores about 800 HP and 800 MP.')).toEqual({ hp: 800, mp: 800, hpPct: 0, mpPct: 0 });

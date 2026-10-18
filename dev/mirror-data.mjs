@@ -1,0 +1,91 @@
+// Builds the data mirror published next to the app (see src/core/mirror.ts), so the fan sites see a few requests a week
+// in total instead of a download per user:
+//   node dev/mirror-data.mjs [outDir=public/data]
+//   MIRROR_BUDGET_MIN=30   stop downloading images after this many minutes (the rest come next run; default: no limit)
+//   MIRROR_FORCE_LISTS=1   refresh the lists even if they're less than a week old
+// Lists are refreshed at most weekly; images (item icons, monster images) are only downloaded when the mirror doesn't
+// have them yet, gently (~4 requests/s). The output is git-ignored: it's published, never committed.
+// Character frames are not mirrored: maplestory.io renders a new look in ~30 s but serves one it has drawn before from
+// its CDN in milliseconds, and the app's fixed pool of looks keeps everyone on the same few, so their cache does the job.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import esbuild from 'esbuild';
+
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..');
+const out = path.resolve(process.argv[2] || path.join(root, 'public/data'));
+const budgetMs = (+process.env.MIRROR_BUDGET_MIN || 0) * 60_000 || Infinity;
+const t0 = Date.now(), WEEK = 7 * 864e5, GAP_MS = 250; // one request every 250 ms at most
+const HEADERS = { 'User-Agent': 'MSClassicTrainingTracker-mirror (weekly; github.com/jcsoutherland/maple-exp-tracker)' };
+const OSMS = 'https://osmsdataexplorer.com/data/';
+
+// the app's own code: list shapes, the look pool and frame URLs, so the mirror holds exactly what the app asks for
+const bundle = await esbuild.build({
+  stdin: {
+    contents: `export { shapeItems, shapeMaps, shapeMobs } from './src/core/data/osms';
+`,
+    resolveDir: root, loader: 'ts',
+  },
+  bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'error',
+  define: { 'import.meta.env': '{"BASE_URL":"/"}' },
+});
+const tmp = path.join(os.tmpdir(), `mirror-lib-${process.pid}.mjs`);
+fs.writeFileSync(tmp, bundle.outputFiles[0].text);
+const lib = await import(pathToFileURL(tmp).href);
+fs.rmSync(tmp);
+
+const file = rel => path.join(out, rel);
+const has = rel => fs.existsSync(file(rel));
+const write = (rel, data) => { fs.mkdirSync(path.dirname(file(rel)), { recursive: true }); fs.writeFileSync(file(rel), data); };
+const manifestPath = file('manifest.json');
+const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, 'utf8')) : {};
+
+let last = 0;
+async function get(url, kind) {
+  const wait = last + GAP_MS - Date.now();
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  last = Date.now();
+  const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(60_000) });
+  if (!res.ok) throw new Error(`${res.status} ${url}`);
+  if (kind === 'image' && !(res.headers.get('content-type') || '').startsWith('image/')) throw new Error(`not an image: ${url}`);
+  return kind === 'json' ? res.json() : Buffer.from(await res.arrayBuffer());
+}
+
+// ---------- lists (at most weekly) ----------
+const listsFresh = manifest.listsAt && Date.now() - manifest.listsAt < WEEK && has('osms/items.json') && !process.env.MIRROR_FORCE_LISTS;
+if (!listsFresh) {
+  const [items, maps, mobs] = [await get(OSMS + 'current/items.json', 'json'), await get(OSMS + 'current/maps.json', 'json'), await get(OSMS + 'current/monsters.json', 'json')];
+  write('osms/items.json', JSON.stringify(lib.shapeItems(items)));
+  write('osms/maps.json', JSON.stringify(lib.shapeMaps(maps)));
+  write('osms/monsters.json', JSON.stringify(lib.shapeMobs(mobs)));
+  manifest.listsAt = Date.now();
+  console.log('lists refreshed');
+} else console.log('lists are less than a week old: kept');
+const items = JSON.parse(fs.readFileSync(file('osms/items.json'), 'utf8'));
+const mobs = JSON.parse(fs.readFileSync(file('osms/monsters.json'), 'utf8'));
+
+// ---------- images, only the missing ones: monsters, then item icons ----------
+const want = new Map(); // mirror path → source URL, in priority order
+for (const m of mobs) {
+  if (m.anim) want.set(`mobs/${m.anim}.webp`, `${OSMS}images/monsters/${m.anim}.webp`);
+  if (m.still) want.set(`mobs/${m.still}.png`, `${OSMS}images/monsters/${m.still}.png`);
+}
+for (const it of items) { const f = `${String(it.id).padStart(8, '0')}.png`; want.set(`icons/${f}`, `${OSMS}current/images/items/${f}`); }
+const missing = [...want].filter(([rel]) => !has(rel));
+console.log(`images: ${want.size} wanted, ${missing.length} missing`);
+
+let got = 0, failed = 0, stopped = false;
+for (const [rel, url] of missing) {
+  if (Date.now() - t0 > budgetMs) { stopped = true; break; }
+  try { write(rel, await get(url, 'image')); got++; }
+  catch (e) { failed++; if (failed <= 10) console.warn('  failed:', e.message); }
+  if ((got + failed) % 500 === 0) console.log(`  ${got + failed}/${missing.length}…`);
+}
+const left = missing.length - got - failed;
+Object.assign(manifest, {
+  updatedAt: Date.now(),
+  counts: { items: items.length, monsters: mobs.length, images: want.size, mirrored: want.size - left - failed },
+});
+write('manifest.json', JSON.stringify(manifest, null, 1));
+console.log(`downloaded ${got}, failed ${failed}${stopped ? `, ${left} left for the next run (time budget)` : ''} in ${Math.round((Date.now() - t0) / 1000)} s`);

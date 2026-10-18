@@ -152,13 +152,69 @@ table.drops td{vertical-align:middle}
 .hslot .ic{width:32px;height:32px}
 .hslot .hx{position:absolute;top:-6px;right:-6px;width:18px;height:18px;padding:0;border-radius:99px;font-size:12px;line-height:16px;display:none}
 .hslot:hover .hx{display:block}
-.potsum{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap}
-.potsum .pi{display:inline-flex;align-items:center;gap:4px}
-.potsum .ic{width:22px;height:22px}
-.potsum .ic-wrap{width:22px;height:22px}
 .sess.day > .sess{margin-left:6px}
-.mobcard{display:flex;align-items:center;gap:10px;margin-top:8px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;max-width:100%}
 .mobpic{width:64px;height:56px;flex:none;display:flex;align-items:flex-end;justify-content:center}
 .mobpic img{max-width:64px;max-height:56px;image-rendering:pixelated}
-.mobinfo{display:flex;flex-direction:column;min-width:0;text-align:left}
-.mobinfo b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the stats, then the potions filling the rest of the column so both columns end level */
+.sheet-right{display:flex;flex-direction:column;gap:10px;align-self:stretch;min-width:0}
+.sheet-extra{flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.sheet-extra .xpanel{display:flex;flex-direction:column;gap:8px}
+.sheet-hero .xpanel{align-self:stretch;margin-top:6px;text-align:left}
+.xpanel{background:var(--panel2);border-radius:8px;padding:10px 12px;min-width:0}
+.xhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
+.xhead .small{text-transform:none;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mobgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px}
+.mobtile{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 6px 8px;min-width:0}
+.mobtile.cur{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
+.mobtile a{font-weight:650;color:var(--tx);text-decoration:none;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mobtile a:hover{text-decoration:underline;color:var(--acc)}
+.potlines{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+@media(max-width:1100px){.potlines{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.potline{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"ic name cnt" "ic cost cnt";column-gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.potline .ic-wrap{grid-area:ic}
+.potline .pn{grid-area:name;font-weight:600}
+.potline .small{grid-area:cost}
+.potline b{grid-area:cnt;font-size:16px}
+.potline .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mobtile .mobpic{width:56px;height:48px}
+.mobtile .mobpic img{max-width:56px;max-height:48px}
+.goalin{display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0}
+.goalin input{width:52px}
+.goalbar{position:relative;height:18px;border-radius:99px;background:var(--panel);border:1px solid var(--line);overflow:hidden}
+.goalbar div{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,#199e70,#9bd34a)}
+.goalbar span{position:relative;display:block;text-align:center;font-size:11px;line-height:16px;font-weight:650;text-shadow:0 1px 2px #000}
+.goalnums{display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:6px}
+.goalnums div{display:flex;flex-direction:column;background:var(--panel);border-radius:6px;padding:5px 8px}
+.goalnums b{font-size:15px;font-variant-numeric:tabular-nums}
+.loot .lootgrid{display:grid;grid-template-columns:minmax(200px,260px) 1fr;gap:16px}
+@media(max-width:760px){.loot .lootgrid{grid-template-columns:1fr}}
+.lootsum{display:flex;flex-direction:column;gap:6px;background:var(--panel2);border-radius:8px;padding:10px 12px;align-self:start}
+.lootline{display:flex;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
+.lootnet{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--line);padding-top:6px;font-weight:650}
+.lootnet b{font-size:20px}
+.pos{color:var(--ok)}.neg{color:var(--bad)}
+.lootlist{display:flex;flex-direction:column;gap:4px;min-width:0}
+.lootrow{display:grid;grid-template-columns:30px minmax(0,1.4fr) minmax(60px,1fr) auto;align-items:center;gap:10px;font-variant-numeric:tabular-nums}
+.lootrow .ln{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lbar{height:8px;border-radius:99px;background:var(--panel2);overflow:hidden}
+.lbar i{display:block;height:100%;border-radius:99px}
+.lbar i.pos{background:var(--ok)}.lbar i.neg{background:var(--bad)}
+.coin{color:#f5c542;font-size:18px;line-height:1}
+.weak{display:flex;flex-wrap:wrap;justify-content:center;gap:3px;margin-top:2px}
+.weak .el{font-style:normal;font-size:10px;font-weight:700;border-radius:99px;padding:1px 7px;background:#4a4f5f;color:#fff}
+/* element colours: Holy yellow, Fire red, Ice blue, Lightning amber, Poison green, Dark purple */
+.weak .el-holy{background:#f2d64b;color:#2a2200}.weak .el-fire{background:#e5484d;color:#fff}.weak .el-ice{background:#3e8ef7;color:#fff}
+.weak .el-lightning{background:#f59e0b;color:#2a1a00}.weak .el-poison{background:#46c46e;color:#06210f}.weak .el-dark{background:#8b5cf6;color:#fff}
+/* loading screen over the Live dashboard: panels appear together once everything they need is in */
+.dash-wrap{position:relative}
+.dash{transition:opacity .25s}
+.dash.hidden{visibility:hidden;opacity:0}
+.dash-loading{position:absolute;inset:0;min-height:320px;display:flex;align-items:flex-start;justify-content:center;padding-top:120px;z-index:5}
+.dl-box{width:min(360px,80%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.dl-label{font-weight:600;margin-bottom:10px}
+.dl-bar{height:8px;border-radius:99px;background:var(--panel2);overflow:hidden}
+.dl-bar div{height:100%;border-radius:99px;background:var(--acc);transition:width .3s}
+/* number boxes: no spinner arrows anywhere (see NumberInput) */
+input.num{font-variant-numeric:tabular-nums;text-align:right}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
+input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}

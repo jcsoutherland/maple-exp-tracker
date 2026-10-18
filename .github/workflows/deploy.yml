@@ -3,6 +3,9 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # weekly: refresh the data mirror (lists from OSMS, any new images) and redeploy
+  schedule:
+    - cron: '17 6 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -12,11 +15,12 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,6 +29,22 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # The data mirror (dev/mirror-data.mjs) is kept between runs in the Actions cache, so only new or missing files
+      # are ever downloaded; it's published with the site and never committed.
+      - uses: actions/cache/restore@v4
+        with:
+          path: public/data
+          key: mirror-${{ github.run_id }}
+          restore-keys: mirror-
+      - run: node dev/mirror-data.mjs public/data
+        env:
+          # the first fill (~2,100 icons and monster images) takes ~10 min; a push only tops up briefly
+          MIRROR_BUDGET_MIN: ${{ github.event_name == 'push' && '5' || '30' }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: public/data
+          key: mirror-${{ github.run_id }}
       - run: npm run build
         env:
           BASE_PATH: /${{ github.event.repository.name }}/

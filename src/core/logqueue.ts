@@ -12,10 +12,12 @@ export interface LineSnap {
   hi: Float32Array | null;
   W: number; h: number; f: number;
   t: number;
+  /** yellow text: an EXP line, skipped without reading */
+  yellow?: boolean;
 }
 
-export function snapLine(lo: LogScan, hi: LogScan | null, [a, z]: [number, number], t: number): LineSnap {
-  return { lo: lo.sc.slice(a * lo.W, z * lo.W), hi: hi ? hi.sc.slice(a * hi.W, z * hi.W) : null, W: lo.W, h: z - a, f: lo.f, t };
+export function snapLine(lo: LogScan, hi: LogScan | null, [a, z]: [number, number], t: number, yellow = false): LineSnap {
+  return { lo: lo.sc.slice(a * lo.W, z * lo.W), hi: hi ? hi.sc.slice(a * hi.W, z * hi.W) : null, W: lo.W, h: z - a, f: lo.f, t, yellow };
 }
 
 /** How much text a snapshot holds (ink pixels), and a hash of its ink pattern: equal hashes read the same. */
@@ -23,6 +25,41 @@ export function snapInk(s: LineSnap): { ink: number; hash: number } {
   let ink = 0, h = 2166136261;
   for (let i = 0; i < s.lo.length; i++) { const on = s.lo[i] > 0 ? 1 : 0; ink += on; h = Math.imul(h ^ on, 16777619); }
   return { ink, hash: h >>> 0 };
+}
+
+/** Where a snapshot's text starts and ends across the line, as fractions of the log width (null = no text). */
+export function snapExtent(s: LineSnap): { x0: number; x1: number } | null {
+  // strong text pixels only (≥ 2 per column): faint scenery behind the log would otherwise stretch every line
+  const { W, h, lo } = s, col = (x: number) => { let n = 0; for (let y = 0; y < h; y++) if (lo[y * W + x] > 40 && ++n >= 2) return true; return false; };
+  let x0 = 0, x1 = W - 1;
+  while (x0 < W && !col(x0)) x0++;
+  while (x1 > x0 && !col(x1)) x1--;
+  return x0 < W ? { x0: x0 / W, x1: x1 / W } : null;
+}
+
+/**
+ * Tells real pickup-log lines from things moving behind the log (players, monsters, scenery), which the line watcher
+ * also sees as "new lines" and which used to swamp the OCR readers in a party. Log lines are right-aligned and long:
+ * a snapshot must span ≥ 30% of the log's width, and once the right edge of real lines is known (learned from lines that
+ * read correctly), end within 1.2% of it (every line ends on the same pixel; a monster behind the log doesn't).
+ */
+export class LineShapeFilter {
+  private edges: number[] = [];
+  /** the learned right edge (median of real lines' ends), once there are enough */
+  get edge() { if (this.edges.length < 5) return null; const e = [...this.edges].sort((a, b) => a - b); return e[e.length >> 1]; }
+  isJunk(s: LineSnap): boolean {
+    const x = snapExtent(s);
+    if (!x || x.x1 - x.x0 < 0.3) return true;
+    const e = this.edge;
+    return e != null && Math.abs(x.x1 - e) > 0.012;
+  }
+  /** Remember where a line that read as a real log line ends. */
+  learn(s: LineSnap) {
+    const x = snapExtent(s);
+    if (!x) return;
+    this.edges.push(x.x1);
+    if (this.edges.length > 30) this.edges.shift();
+  }
 }
 
 /** The OCR image of a snapshot (high-contrast version on request). */

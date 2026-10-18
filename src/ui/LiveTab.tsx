@@ -5,8 +5,11 @@ import { fmtDur, fmtHM, fmtK, fmtN } from '../core/util';
 import { CharacterStage } from './CharacterStage';
 import { useCtrl } from './hooks';
 import { MiniChart } from './MiniChart';
-import { MonsterCard } from './MonsterCard';
-import { PotIcon } from './PotionsTab';
+import { MonsterPanel } from './MonsterCard';
+import { PotionPanel } from './PotionPanel';
+import { GoalPanel, KillsPanel } from './GoalPanel';
+import { LootProfit } from './LootProfit';
+import { NumberInput } from './NumberInput';
 
 const EVC: Record<string, string> = { meso: '#f5c542', drop: '#c08cff', level: '#9bd34a', death: '#e5484d', map: '#ff7ab8', info: '#9097a8' };
 // chart hues: validated (dark palette, panel #1d2029) — each chart is one series, so no legend
@@ -14,7 +17,7 @@ const C_EXP = '#199e70', C_MESO = '#c98500', C_RATE = '#3987e5';
 
 export function LiveTab() {
   const c = useCtrl();
-  const s = c.sess, t = c.tracker, id = c.identity;
+  const s = c.sess, t = c.tracker, id = c.identity, loading = c.loading;
   const { el, hr, r10 } = c.rates();
   const pc = s ? potCost(s, c.settings) : null;
   const rate = r10 || hr;
@@ -44,7 +47,7 @@ export function LiveTab() {
           {CLASS_GROUPS.map(([branch, jobs]) => <optgroup key={branch} label={branch}>{jobs.map(([j, lv]) => <option key={j} value={j}>{lv >= 70 ? '  ↳ ' : ''}{j} (Lv {lv})</option>)}</optgroup>)}
         </select>
         <span className="mut">Lv</span>
-        <input className="lv" type="number" min={1} max={MAX_LEVEL} value={id.level ?? ''} onChange={e => c.setIdentity({ level: +e.target.value || null })} />
+        <NumberInput className="lv" min={1} max={MAX_LEVEL} value={id.level} onChange={v => c.setIdentity({ level: v })} />
         <span className="mut">Gender</span>
         <select value={id.gender ?? 0} title="Gender of your rolled character (changing it rolls a new look)" onChange={e => c.setIdentity({ gender: +e.target.value as 0 | 1 })}>
           <option value={0}>Male</option>
@@ -54,11 +57,21 @@ export function LiveTab() {
         <span className="sp" />
         <label className="idlecfg" title="Pause the session after this many seconds without EXP or loot (0 = never). It resumes by itself when EXP moves again, and idle time isn't counted.">
           <span className="mut">Auto-pause after</span>
-          <input className="lv" type="number" min={0} step={5} value={c.settings.idlePauseSec} onChange={e => c.updateSettings({ idlePauseSec: Math.max(0, Math.round(+e.target.value) || 0) })} />
+          <NumberInput className="lv" min={0} max={3600} step={5} value={c.settings.idlePauseSec} onChange={v => c.updateSettings({ idlePauseSec: v })} />
           <span className="mut">{c.settings.idlePauseSec ? 's idle' : 's (off)'}</span>
         </label>
       </div>
 
+      <div className="dash-wrap">
+      {loading && (
+        <div className="dash-loading" role="status" aria-live="polite">
+          <div className="dl-box">
+            <div className="dl-label">{loading.label}…</div>
+            <div className="dl-bar"><div style={{ width: loading.pct + '%' }} /></div>
+          </div>
+        </div>
+      )}
+      <div className={'dash' + (loading ? ' hidden' : '')}>
       <div className="card sheet">
         <div className="sheet-hero">
           <CharacterStage />
@@ -73,8 +86,9 @@ export function LiveTab() {
           </div>
           <div className="mut small">{toGo != null && rate ? `Level up in ~${fmtHM(toGo / rate * 3.6e6)} · ${fmtN(toGo)} EXP to go` : ' '}</div>
           <div className="mut small">📍 {t ? t.mapName : '—'}</div>
-          <MonsterCard />
+          <MonsterPanel />
         </div>
+        <div className="sheet-right">
         <div className="sheet-stats">
           <Stat k="Session" v={fmtDur(el)} s={s ? (s.paused ? 'paused' : 'since ' + new Date(s.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : ''} />
           <Stat k="EXP gained" v={fmtN(s?.exp ?? 0)} s={s?.levelUps ? `${s.levelUps} level-up${s.levelUps > 1 ? 's' : ''} 🎉` : ''} accent={C_EXP} />
@@ -89,20 +103,13 @@ export function LiveTab() {
           </div>
           <Stat k="EXP lost" v={s?.expLost ? '-' + fmtN(s.expLost) : '0'} s={s?.deaths ? `${s.deaths} death${s.deaths > 1 ? 's' : ''} · net ${fmtN(s.exp - s.expLost)}` : 'no deaths'} bad={!!s?.expLost} />
         </div>
-      </div>
-
-      {pc && pc.items.length > 0 && (
-        <div className="card slim potsum">
-          <span className="mut">Potions used</span>
-          {pc.items.map(i => (
-            <span key={i.kind + i.name} className="pi" title={`${fmtN(i.cost)} mesos`}>
-              <PotIcon p={i} /><b>{fmtN(i.count)}</b> {i.name} <span className="mut small">{fmtN(i.cost)}</span>
-            </span>
-          ))}
-          <span className="sp" />
-          <span><span className="mut">total</span> <b>{fmtN(pc.total)}</b> <span className="mut">mesos</span></span>
+        <PotionPanel />
+        <div className="sheet-extra">
+          <GoalPanel />
+          <KillsPanel />
         </div>
-      )}
+        </div>
+      </div>
 
       <div className="charts3">
         <div className="card"><MiniChart title="EXP gained" points={expPts} color={C_EXP} fmt={v => fmtN(v)} /></div>
@@ -132,6 +139,10 @@ export function LiveTab() {
           </div>
           <div className="perf">log checks {c.stats.logChecks} · OCR calls {c.stats.ocrCalls} · EXP lines skipped {c.stats.expSkipped} · log queue {c.stats.logBacklog}{c.stats.logDropped ? ` · dropped ${c.stats.logDropped}` : ''} · last log tick {c.stats.lastTickMs.toFixed(0)} ms</div>
         </div>
+      </div>
+
+      <LootProfit />
+      </div>
       </div>
     </section>
   );

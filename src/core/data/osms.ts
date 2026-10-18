@@ -1,56 +1,76 @@
 import { cached, getBlob, setBlob } from './cache';
+import { fetchFirst, MIRROR } from '../mirror';
 import { sim } from '../util';
 
 /**
- * Item / map reference data from OSMS Data Explorer (MapleStory Classic World datamine by @ohmi,
- * https://osmsdataexplorer.com). Fetched on first use and cached in IndexedDB on this device, so each file and icon
- * is downloaded once. Their data has no license, so we read it from their site rather than copying it into this repo.
+ * Item / map / monster reference data from OSMS Data Explorer (MapleStory Classic World datamine by @ohmi,
+ * https://osmsdataexplorer.com). Read from our weekly mirror next to the app (see mirror.ts), falling back to their
+ * site only for a file the mirror doesn't have, and cached in IndexedDB on this device (lists refreshed at most weekly).
+ * Nothing from their data is committed to this repository.
  */
 export const OSMS_BASE = 'https://osmsdataexplorer.com/data/current/';
+/** how long the cached item / map / monster lists are used before they're downloaded again */
+const LIST_TTL = 7 * 864e5;
 export interface ItemRec { id: number; name: string; cat: string; price: number | null; desc: string }
 export interface MapRec { id: number; name: string; street: string }
 
 /** A monster: EXP per kill, the maps it lives on, and its image hashes (animated idle + still). */
-export interface MobRec { id: number; name: string; level: number; exp: number; boss: boolean; maps: string[]; anim: string | null; still: string | null }
+export interface MobRec { id: number; name: string; level: number; exp: number; boss: boolean; maps: string[]; anim: string | null; still: string | null;
+  /** elements it's weak to (Fire, Holy, …) */
+  weak?: string[] }
 
 let items: ItemRec[] | null = null;
 let maps: MapRec[] | null = null;
 let mobs: MobRec[] = [];
+/** the monster list has loaded or failed (either way, nothing more to wait for) */
+let mobsDone = false;
 let byName = new Map<string, ItemRec>();
 let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
-interface RawItem { id: number; name: string; category?: string; stats?: { price?: number }; description?: string }
-interface RawMap { id: number; name: string; street_name?: string }
-interface RawMob { id: number; name: string; level: number; exp: number; is_boss?: boolean; maps?: { name: string }[]; gifs?: { stand?: string }; gif?: string; thumbnail?: string }
+export interface RawItem { id: number; name: string; category?: string; stats?: { price?: number }; description?: string }
+export interface RawMap { id: number; name: string; street_name?: string }
+export interface RawMob { id: number; name: string; level: number; exp: number; is_boss?: boolean; maps?: { name: string }[]; gifs?: { stand?: string }; gif?: string; thumbnail?: string; elements?: Record<string, string> }
+
+// The app's shape of each OSMS list (only the fields it uses). The mirror stores exactly this, so both read the same.
+/** items: descriptions only where they're used (recovery amounts of consumables, the monster an etc item comes from) */
+export const shapeItems = (d: { items: RawItem[] }): ItemRec[] => d.items.filter(i => i.name).map(i => ({ id: i.id, name: i.name, cat: i.category || '',
+  price: i.stats?.price ?? null, desc: i.category === 'Consumable' || i.category === 'Etc' ? i.description || '' : '' }));
+export const shapeMaps = (d: { regions: { maps: RawMap[] }[] }): MapRec[] => d.regions.flatMap(r => r.maps).map(m => ({ id: m.id, name: m.name.trim(), street: (m.street_name || '').trim() }));
+export const shapeMobs = (d: { monsters: RawMob[] }): MobRec[] => d.monsters.map(m => ({ id: m.id, name: m.name.trim(), level: m.level, exp: m.exp, boss: !!m.is_boss,
+  maps: (m.maps || []).map(x => x.name.trim()), anim: m.gifs?.stand || m.gif || null, still: m.thumbnail || null,
+  weak: Object.entries(m.elements || {}).filter(([, v]) => /weak/i.test(v)).map(([k]) => k) }));
+
+/** One list: the mirror's copy (already in the app's shape), else the original file, shaped here. */
+async function list<T, R>(file: string, shape: (raw: R) => T[]): Promise<T[]> {
+  const m = await fetchFirst([MIRROR + 'osms/' + file]);
+  if (m) return await m.json() as T[];
+  const r = await fetch(OSMS_BASE + file);
+  if (!r.ok) throw new Error(`${file}: ${r.status}`);
+  return shape(await r.json() as R);
+}
 
 export function loadOsms(): Promise<void> {
   return (loading ??= (async () => {
     // monsters are a nice-to-have: without them the app works as before
-    cached('mobs-v1', async () => {
-      const d = await (await fetch(OSMS_BASE + 'monsters.json')).json() as { monsters: RawMob[] };
-      return d.monsters.map(m => ({ id: m.id, name: m.name.trim(), level: m.level, exp: m.exp, boss: !!m.is_boss,
-        maps: (m.maps || []).map(x => x.name.trim()), anim: m.gifs?.stand || m.gif || null, still: m.thumbnail || null }));
-    }).then(m => { mobs = m; listeners.forEach(l => l()); }).catch(e => console.warn('OSMS monsters unavailable', e));
+    cached('mobs-v3', () => list('monsters.json', shapeMobs), LIST_TTL).then(m => { mobs = m; }).catch(e => console.warn('OSMS monsters unavailable', e))
+      .finally(() => { mobsDone = true; listeners.forEach(l => l()); });
     const [it, mp] = await Promise.all([
-      cached('items-v2', async () => {
-        const d = await (await fetch(OSMS_BASE + 'items.json')).json() as { items: RawItem[] };
-        return d.items.filter(i => i.name).map(i => ({ id: i.id, name: i.name, cat: i.category || '', price: i.stats?.price ?? null, desc: i.description || '' }));
-      }),
-      cached('maps-v3', async () => {
-        const d = await (await fetch(OSMS_BASE + 'maps.json')).json() as { regions: { maps: RawMap[] }[] };
-        return d.regions.flatMap(r => r.maps).map(m => ({ id: m.id, name: m.name.trim(), street: (m.street_name || '').trim() }));
-      }),
+      cached('items-v3', () => list('items.json', shapeItems), LIST_TTL),
+      cached('maps-v4', () => list('maps.json', shapeMaps), LIST_TTL),
     ]);
     items = it; maps = mp;
     // first record wins for duplicated names (e.g. two "Red Potion" ids)
     byName = new Map();
     for (const i of it) if (!byName.has(i.name.toLowerCase())) byName.set(i.name.toLowerCase(), i);
     listeners.forEach(l => l());
-  })().catch(e => { loading = null; console.warn('OSMS data unavailable', e); }));
+  })().catch(e => { loading = null; dataFailed = true; listeners.forEach(l => l()); console.warn('OSMS data unavailable', e); }));
 }
 
 export const osmsReady = () => items !== null;
+let dataFailed = false;
+/** the item / map lists have loaded or failed */
+export const osmsSettled = () => items !== null || dataFailed;
 
 export const mapsReady = () => maps !== null && maps.length > 0;
 export const onOsmsLoaded = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
@@ -99,6 +119,7 @@ export function canonMap(raw: string): string | null {
 // ---------- monsters ----------
 
 export const mobsReady = () => mobs.length > 0;
+export const mobsSettled = () => mobsDone;
 /** Monsters that live on a map (by its canonical name). */
 export const mobsOnMap = (map: string | null) => (map ? mobs.filter(m => m.maps.includes(map)) : []);
 /** Most EXP one kill can give on this map, or null when the map's monsters aren't known. */
@@ -130,8 +151,8 @@ export function mobImage(m: MobRec): Promise<string | null> {
       const key = 'mob:' + hash;
       let blob = await getBlob(key);
       if (!blob) {
-        const res = await fetch(`https://osmsdataexplorer.com/data/images/monsters/${hash}.${ext}`);
-        if (!res.ok) return null;
+        const res = await fetchFirst([`${MIRROR}mobs/${hash}.${ext}`, `https://osmsdataexplorer.com/data/images/monsters/${hash}.${ext}`]);
+        if (!res) return null;
         blob = await res.blob();
         await setBlob(key, blob);
       }
@@ -151,8 +172,9 @@ export function itemIcon(id: number): Promise<string | null> {
       const key = 'icon:' + id;
       let blob = await getBlob(key);
       if (!blob) {
-        const res = await fetch(`${OSMS_BASE}images/items/${String(id).padStart(8, '0')}.png`);
-        if (!res.ok) return null;
+        const file = `${String(id).padStart(8, '0')}.png`;
+        const res = await fetchFirst([`${MIRROR}icons/${file}`, `${OSMS_BASE}images/items/${file}`]);
+        if (!res) return null;
         blob = await res.blob();
         await setBlob(key, blob);
       }

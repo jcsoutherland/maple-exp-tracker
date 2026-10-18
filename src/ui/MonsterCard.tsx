@@ -3,45 +3,54 @@ import { mobByName, mobImage, mobsOnMap, mobsReady, type MobRec } from '../core/
 import { fmtN } from '../core/util';
 import { useCtrl } from './hooks';
 
+/** meowdb's monster pages use the same ids as the OSMS data */
+const meowdbMob = (m: MobRec) => `https://meowdb.com/msclassic/monsters/${m.id}`;
+
 /** Object URL of a monster's animated idle image (fetched once, then from this device). */
-function useMobImage(m: MobRec | null) {
+function useMobImage(m: MobRec) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     setUrl(null);
-    if (m) mobImage(m).then(u => { if (live) setUrl(u); });
+    mobImage(m).then(u => { if (live) setUrl(u); });
     return () => { live = false; };
-  }, [m?.id]);
+  }, [m.id]);
   return url;
 }
 
 /**
- * What you're training on: the monster whose etc drops came in most recently this session (with how many), or before
- * any drops, the monsters that live on the current map.
+ * Monsters here: every monster on the current map plus any whose etc drops came in this session, as small tiles.
+ * The one whose drop came in last is marked as what you're training on; names link to their meowdb page.
  */
-export function MonsterCard() {
+export function MonsterPanel() {
   const c = useCtrl();
-  const s = c.sess, map = c.tracker?.mapCur ?? null;
-  if (!s || !mobsReady()) return null;
-  const fought = Object.entries(s.mobs ?? {}).sort((a, b) => b[1].last - a[1].last)
-    .map(([n, v]) => ({ m: mobByName(n), n: v.n })).filter((x): x is { m: MobRec; n: number } => !!x.m);
-  const list = fought.length ? fought : mobsOnMap(map).filter(m => !m.boss).sort((a, b) => b.exp - a.exp).map(m => ({ m, n: 0 }));
-  if (!list.length) return null;
-  const [main, ...rest] = list;
+  const s = c.sess ?? c.lastFinished, map = c.tracker?.mapCur ?? null;
+  if (!mobsReady()) return null;
+  const fought = new Map(Object.entries(s?.mobs ?? {}));
+  const latest = [...fought].sort((a, b) => b[1].last - a[1].last)[0]?.[0] ?? null;
+  const list: MobRec[] = [];
+  for (const n of [...fought.keys()].sort((a, b) => fought.get(b)!.last - fought.get(a)!.last)) { const m = mobByName(n); if (m) list.push(m); }
+  for (const m of mobsOnMap(map).sort((a, b) => a.level - b.level)) if (!list.some(x => x.id === m.id)) list.push(m);
   return (
-    <div className="mobcard" title={fought.length ? 'From your etc drops this session' : 'Monsters on this map'}>
-      <MobPic m={main.m} />
-      <div className="mobinfo">
-        <span className="mut small">{fought.length ? 'Training on' : 'On this map'}</span>
-        <b>{main.m.name}</b>
-        <span className="mut small">Lv {main.m.level} · {fmtN(main.m.exp)} EXP{main.n ? ` · ${fmtN(main.n)} drop${main.n > 1 ? 's' : ''}` : ''}</span>
-        {rest.length > 0 && <span className="mut small">also {rest.slice(0, 3).map(r => r.m.name + (r.n ? ` (${fmtN(r.n)})` : '')).join(', ')}</span>}
-      </div>
+    <div className="xpanel">
+      <div className="xhead"><span>Monsters</span><span className="mut small">{map ?? 'map unknown'}</span></div>
+      {list.length ? (
+        <div className="mobgrid">
+          {list.map(m => <MobTile key={m.id} m={m} cur={m.name === latest} />)}
+        </div>
+      ) : <div className="mut small">No monster data for this map.</div>}
     </div>
   );
 }
 
-function MobPic({ m }: { m: MobRec }) {
+function MobTile({ m, cur }: { m: MobRec; cur: boolean }) {
   const url = useMobImage(m);
-  return <div className="mobpic">{url && <img src={url} alt="" />}</div>;
+  return (
+    <div className={'mobtile' + (cur ? ' cur' : '')} title={cur ? 'Training on this (latest etc drop)' : undefined}>
+      <div className="mobpic">{url && <img src={url} alt="" />}</div>
+      <a href={meowdbMob(m)} target="_blank" rel="noopener" title="Open on meowdb">{m.name}</a>
+      <span className="mut small">Lv {m.level} · {fmtN(m.exp)} EXP{m.boss ? ' · boss' : ''}</span>
+      {m.weak?.length ? <span className="weak">{m.weak.map(w => <i key={w} className={'el el-' + w.toLowerCase()}>{w}</i>)}</span> : null}
+    </div>
+  );
 }

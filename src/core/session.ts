@@ -7,10 +7,10 @@ export interface SessionEvent { t: number; type: EventType; text: string }
 export interface Drop { qty: number; cat: string; id?: number }
 
 /**
- * HP or MP flow: total lost, total recovered by pot-sized jumps, and each jump's size (to count potions). `jumps` are
- * potions we couldn't tie to a hotbar slot (counted as the Active potion); `byPot` are the ones we could, by item name.
+ * HP or MP flow: total lost, total recovered by pot-sized jumps, and each jump's size. `jumps` are potions seen on the
+ * gauge (counted as the Active potion); `counted` are potions read off the hotbar counts, by item name (exact).
  */
-export interface Flow { used: number; rec: number; jumps: number[]; byPot?: Record<string, number[]>; max: number | null }
+export interface Flow { used: number; rec: number; jumps: number[]; counted?: Record<string, number>; byPot?: Record<string, number[]>; max: number | null }
 
 export interface Session {
   id: number;
@@ -88,7 +88,8 @@ export function potCost(s: Pick<Session, 'hp' | 'mp'>, set: Settings) {
       // sessions saved before jump tracking only have the recovered total
       add(active.name, f.jumps ? potionsUsed(f.jumps, r) : r ? Math.ceil(f.rec / r) : 0);
     }
-    for (const [name, j] of Object.entries(f.byPot ?? {})) {
+    for (const [name, n] of Object.entries(f.counted ?? {})) add(name, n);
+    for (const [name, j] of Object.entries(f.byPot ?? {})) { // sessions from the short-lived slot-change version
       const p = potionByName(name);
       if (p) add(name, potionsUsed(j, restoreOf(p, k, f.max)));
     }

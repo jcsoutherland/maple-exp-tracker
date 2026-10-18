@@ -23,7 +23,7 @@ export const REGION_DEFS: Record<RegionKey, RegionDef> = {
   // pixel-read gauges (no OCR): a thin strip through the middle of the red / blue bar
   hpGauge: { label: 'HP gauge', color: '#ff8a8a', engine: 'num', mode: 'luma', px: 0, gauge: true },
   mpGauge: { label: 'MP gauge', color: '#8ab8ff', engine: 'num', mode: 'luma', px: 0, gauge: true },
-  // the 4×3 quickslot: each slot's count digits are watched for a change (no OCR) to tell which potion was used
+  // the 4×3 quickslot: the counts on the slots holding potions are read (template matching, no OCR)
   quickslot: { label: 'Quickslot (4×3)', color: '#7ee0c3', engine: 'num', mode: 'luma', px: 0, gauge: true },
   log: { label: 'Pickup log', color: '#b06fd8', engine: 'text', mode: 'luma', px: 0 },
 };
@@ -41,8 +41,8 @@ export const DEFAULT_REGIONS: Record<RegionKey, Region> = {
   exp: { x: 0.5469, y: 0.9569, w: 0.068, h: 0.0181, thr: 140 },
   hpGauge: { x: 0.3688, y: 0.9833, w: 0.075, h: 0.0042, thr: 140 },
   mpGauge: { x: 0.4477, y: 0.9833, w: 0.0758, h: 0.0042, thr: 140 },
-  // a guess (the quickslot was closed in the reference recording): drag it onto yours in Setup
-  quickslot: { x: 0.8852, y: 0.8, w: 0.1055, h: 0.1389, thr: 140 },
+  // the expanded quickslot, right above the SHORT CUT button (measured on a 1080p recording)
+  quickslot: { x: 0.6875, y: 0.7769, w: 0.1042, h: 0.1315, thr: 140 },
   log: { x: 0.8364, y: 0.6407, w: 0.1636, h: 0.1806, thr: 140 },
 };
 

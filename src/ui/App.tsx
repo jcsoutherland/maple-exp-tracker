@@ -25,7 +25,7 @@ export function App() {
   return (
     <>
       <header>
-        <h1><img className="logo" src={import.meta.env.BASE_URL + 'favicon.svg'} alt="" /> Maple EXP Tracker</h1>
+        <h1><img className="logo" src={import.meta.env.BASE_URL + 'favicon.svg'} alt="" /> MS Classic Training Tracker</h1>
         <span className={'pill' + (cap.ready ? ' on' : cap.sharing ? ' warn' : '')}>{cap.ready ? (cap.kind === 'file' ? 'Video: ' + cap.label : 'Capturing') : cap.sharing ? 'Waiting for frames' : 'No capture'}</span>
         <span className={'pill' + (c.ocrState === 'ready' ? ' on' : c.ocrState === 'loading' ? ' warn' : '')}>
           {{ idle: 'OCR not loaded', loading: 'Loading OCR…', ready: 'OCR ready', error: 'OCR failed' }[c.ocrState]}
@@ -50,7 +50,7 @@ export function App() {
         {tab === 'hist' && <HistoryTab />}
         {tab === 'setup' && <SetupTab />}
         <div className="credit-line">
-          Item and map data from <a href="https://osmsdataexplorer.com" target="_blank" rel="noopener">OSMS Data Explorer</a> by @ohmi; character sprites from <a href="https://maplestory.io" target="_blank" rel="noopener">maplestory.io</a>. Both cached on this device.
+          Item and map data from <a href="https://osmsdataexplorer.com" target="_blank" rel="noopener">OSMS Data Explorer</a> by @ohmi; character sprites from <a href="https://maplestory.io" target="_blank" rel="noopener">maplestory.io</a>. Mirrored weekly with this site and cached on your device, so these sites aren't asked again per visit.
         </div>
       </main>
       {pip.win && <MiniOverlay win={pip.win} />}

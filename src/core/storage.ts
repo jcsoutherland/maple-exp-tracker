@@ -20,7 +20,12 @@ export const loadSettings = (): Settings => {
 };
 export const saveSettings = (s: Settings) => write(K.settings, s);
 
-export const loadRegions = (): Record<RegionKey, Region> => ({ ...structuredClone(DEFAULT_REGIONS), ...read(K.regions, {}) });
+export const loadRegions = (): Record<RegionKey, Region> => {
+  const saved = read<Partial<Record<RegionKey, Region>>>(K.regions, {});
+  // the first quickslot default was a guess in the wrong place: a box still sitting there follows the measured default
+  if (saved.quickslot && saved.quickslot.x === 0.8852 && saved.quickslot.y === 0.8) delete saved.quickslot;
+  return { ...structuredClone(DEFAULT_REGIONS), ...saved };
+};
 export const saveRegions = (r: Record<RegionKey, Region>) => write(K.regions, r);
 
 export const loadSessions = () => read<SavedSession[]>(K.sessions, []);
@@ -32,6 +37,8 @@ export interface CharInfo {
   look?: CharLook;
   /** small still of that look for History */
   thumb?: string;
+  /** target level for the Live tab's level goal */
+  goal?: number;
 }
 /** pictures earlier versions captured from the screen; no longer used, and they take up storage */
 const LEGACY_CHAR_KEYS = ['snap', 'sprite', 'pixel', 'facing', 'pixelV'];

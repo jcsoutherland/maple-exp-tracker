@@ -16,8 +16,8 @@ export interface TrackerDeps {
   mapsKnown?: () => boolean;
   /** most EXP one kill gives on this map (null = monsters unknown): caps believable EXP gains */
   maxMobExp?: (map: string | null) => number | null;
-  /** the hotbar potion just used for this stat (null = unknown, 'dup' = already counted by the other stat) */
-  potSource?: (kind: 'hp' | 'mp') => string | 'dup' | null;
+  /** true while the hotbar's potion counts for this stat are being read: then they, not the gauge, count potions */
+  potsCounted?: (kind: 'hp' | 'mp') => boolean;
   /** the monster an etc drop comes from (null = not known) */
   mobForDrop?: (item: string, map: string | null) => string | null;
   now?: () => number;
@@ -322,6 +322,13 @@ export class Tracker {
     g.level = m;
   }
 
+  /** Potions used, read off the hotbar: a slot's count went down by `n`. */
+  creditPots(kind: 'hp' | 'mp', name: string, n: number) {
+    const f = this.sess[kind];
+    (f.counted ??= {})[name] = (f.counted[name] || 0) + n;
+    this.event('info', `${name} ×${n} used`);
+  }
+
   /** When the HP / MP gauge last went down (damage taken / MP spent on a skill). */
   lastDrop(kind: 'hp' | 'mp') { return this.gauge[kind].dropAt; }
 
@@ -332,13 +339,10 @@ export class Tracker {
     // with the max known the rise is in HP/MP; until then, a rise of a few percent of the bar
     const amt = max ? Math.round((to - from) * max) : 0;
     if (max ? amt < min : to - from < 0.04) { if (max) this[kind].regen += amt; return; }
-    // which hotbar potion it was (its slot's count just changed); 'dup' = an item restoring HP and MP whose use the
-    // other gauge already counted
-    const src = this.deps.potSource?.(kind) ?? null;
-    if (src === 'dup') return;
     s.rec += amt;
-    if (src) ((s.byPot ??= {})[src] ??= []).push(amt);
-    else (s.jumps ??= []).push(amt);
+    // the hotbar's counts are exact: a rise they don't explain is other recovery (a party skill, a buff), not a potion
+    if (this.deps.potsCounted?.(kind)) return;
+    (s.jumps ??= []).push(amt);
   }
 
   /**

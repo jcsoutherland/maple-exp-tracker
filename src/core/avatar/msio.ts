@@ -3,16 +3,21 @@ import { FACE, GEAR, HAIR, WEAPONS, type LadderRow, type WeaponRow } from './cat
 
 /**
  * Real MapleStory character sprites from maplestory.io (the same renderer meowdb's character builder uses).
- * A look is made instantly from a built-in lookup table (catalog.ts: best gear per job/level); its idle and weapon-attack
- * frames are then requested one at a time, gently, and kept in IndexedDB on this device forever, so each is fetched
- * only once. Sprites are game assets: they are fetched at runtime and never copied into this repository.
+ * A look is one of a fixed pool of skin / hair / face combinations per gender, wearing the best gear for the job at the
+ * current level (catalog.ts). maplestory.io renders a combination it hasn't drawn before in ~30 s but serves one it has
+ * drawn from its CDN in milliseconds; with everyone on the same small pool, nearly every request is such a cache hit.
+ * Frames are then kept in IndexedDB on this device forever. Sprites are game assets: never copied into this repository.
  */
 const API = 'https://maplestory.io/api';
 /** bump when the look format or rules change, so older saved looks are re-rolled */
-export const LOOK_V = 4;
+export const LOOK_V = 5;
+/** looks per gender: a small fixed pool shared by everyone, so the renderer's cache already has nearly every frame */
+export const LOOK_POOL = 10;
 
 export interface CharLook {
   v: number;
+  /** which look of the pool (skin / hair / face) */
+  variant: number;
   branch: Branch;
   gender: 0 | 1;
   skin: number;
@@ -84,14 +89,23 @@ const ATTACKS: Record<string, string[]> = {
 };
 const SHOT: Record<string, CharLook['shot']> = { Bow: 'arrow', Crossbow: 'arrow', Claw: 'star', Wand: 'orb', Staff: 'orb' };
 
-const rand = <T,>(a: T[]): T | undefined => a[Math.floor(Math.random() * a.length)];
+/** Skin, hair and face of look `variant` of the pool, spread across the catalog's hair and face lists. */
+export function poolLook(gender: 0 | 1, variant: number) {
+  const g = gender ? 'f' : 'm', v = ((variant % LOOK_POOL) + LOOK_POOL) % LOOK_POOL, H = HAIR[g], F = FACE[g];
+  return { skin: v % 5, hair: H[Math.floor(v * H.length / LOOK_POOL)] ?? 30030, face: F[Math.floor(((v * 7) % LOOK_POOL) * F.length / LOOK_POOL)] ?? 20000 };
+}
+/** A random look of the pool, different from `not` when given. */
+export const randomVariant = (not?: number) => {
+  const r = Math.floor(Math.random() * (not == null ? LOOK_POOL : LOOK_POOL - 1));
+  return not == null || r < not ? r : r + 1;
+};
 
 /**
  * Make a look for a job, level and gender, instantly (no network) and consistently: every equipped item is the best
  * one for the job at that level (the catalog's upgrade ladders, scored on the job's main stat), the weapon is the
- * job's strongest weapon type allowed at that level; only skin, hair and face are random.
+ * job's strongest weapon type allowed at that level; skin, hair and face are look `variant` of the pool.
  */
-export function rollLook(cls: string, level: number | null, gender: 0 | 1 = 0): CharLook {
+export function rollLook(cls: string, level: number | null, gender: 0 | 1 = 0, variant = randomVariant()): CharLook {
   const branch = classLook(cls), lv = level || 1, g = gender ? 'f' : 'm', table = GEAR[branch]?.[g] ?? {};
   /** the best item of a slot the level allows */
   const best = (slot: string): LadderRow | null => [...(table[slot] || [])].reverse().find(r => r[2] <= lv) ?? null;
@@ -109,7 +123,7 @@ export function rollLook(cls: string, level: number | null, gender: 0 | 1 = 0): 
   const attack = (ATTACKS[type] || ['swingO1']).find(a => acts[a]) ?? Object.keys(acts).find(a => /^(swing|stab|shoot)/.test(a)) ?? 'swingO1';
   const stand = acts.stand2 ? 'stand2' : 'stand1';
   return {
-    v: LOOK_V, branch, gender, skin: rand([0, 1, 2, 3, 4])!, hair: rand(HAIR[g]) ?? 30030, face: rand(FACE[g]) ?? 20000,
+    v: LOOK_V, variant, branch, gender, ...poolLook(gender, variant),
     items, weapon: w?.[0] ?? null, stand, standFrames: acts[stand] || 3, attack, attackFrames: acts[attack] || 3, shot: SHOT[type] ?? null,
   };
 }

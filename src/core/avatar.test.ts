@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classLook, rollLook } from './avatar/msio';
+import { classLook, LOOK_POOL, poolLook, randomVariant, rollLook } from './avatar/msio';
 import { fixIL } from './imaging';
 import type { OcrChar } from './ocr/engine';
 
@@ -36,5 +36,15 @@ describe('character looks', () => {
     expect(rollLook('Hunter', 37, 0).items).toEqual(rollLook('Hunter', 37, 0).items);
     expect(rollLook('Hunter', 50, 0).items).not.toEqual(rollLook('Hunter', 37, 0).items);
     expect(rollLook('Fighter', 30, 0).stand).toBe('stand2'); // two-handed sword stance
+  });
+  it('uses a fixed pool of looks the mirror can pre-render, and keeps the look while the gear levels up', () => {
+    for (const g of [0, 1] as const) {
+      const looks = new Set(Array.from({ length: LOOK_POOL }, (_, v) => JSON.stringify(poolLook(g, v))));
+      expect(looks.size).toBe(LOOK_POOL);
+    }
+    const a = rollLook('Hunter', 37, 0, 3), b = rollLook('Hunter', 60, 0, 3);
+    expect([a.skin, a.hair, a.face]).toEqual([b.skin, b.hair, b.face]);
+    expect(a.items).not.toEqual(b.items);
+    for (let k = 0; k < 20; k++) expect(randomVariant(4)).not.toBe(4);
   });
 });

@@ -1,10 +1,11 @@
 import { Capture } from '../core/capture';
-import { classLook, LOOK_V, rollLook, SpriteLoader, type CharLook } from '../core/avatar/msio';
+import { classLook, LOOK_V, randomVariant, rollLook, SpriteLoader, type CharLook } from '../core/avatar/msio';
 import { HOTBAR_COLS, HOTBAR_ROWS, REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
 import { potionByName } from '../core/potions';
-import { canonItem, canonMap, loadOsms, mapsReady, maxMobExp, mobForItem, osmsReady } from '../core/data/osms';
-import { ExpLineFilter, snapCanvas, snapInk, snapLine, type LineSnap } from '../core/logqueue';
-import { enhanceText, fixIL, frameSize, gaugeFill, slotCountMasks, logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
+import { GLYPHS, readSlotCount } from '../core/potcount';
+import { canonItem, canonMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
+import { ExpLineFilter, LineShapeFilter, snapCanvas, snapInk, snapLine, type LineSnap } from '../core/logqueue';
+import { enhanceText, fixIL, frameSize, gaugeFill, logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
 import { cleanMap, cleanName, lineAmount, lineKind, lineQuality, matchClass, parseExp, parseLevel, parsePair } from '../core/parse';
@@ -18,6 +19,8 @@ import { median, normLine, sim } from '../core/util';
 interface LogItem { snap: LineSnap; status: 'queued' | 'reading' | 'done' | 'failed'; tries: number; guess: boolean }
 /** snapshots older than this are dropped unread, and the queue never holds more than LOG_QUEUE_MAX */
 const LOG_MAX_AGE_MS = 30_000, LOG_QUEUE_MAX = 60, LOG_READERS = 2, LOG_WATCH_SLOTS = 8; // ≤60 × ~22 KB
+/** the loading screen never waits longer than this on page load / session start */
+const BOOT_MAX_MS = 12_000, START_MAX_MS = 8_000;
 
 export interface Identity {
   name: string; cls: string; level: number | null;
@@ -55,7 +58,7 @@ export class Controller {
   lastFinished: SavedSession | null = null;
   historyVersion = 0;
   /** reads/sec of the pickup-log watcher and OCR calls, for the performance readout */
-  stats = { logChecks: 0, ocrCalls: 0, lastTickMs: 0, expSkipped: 0, logDropped: 0, logBacklog: 0 };
+  stats = { logChecks: 0, ocrCalls: 0, lastTickMs: 0, expSkipped: 0, logDropped: 0, logBacklog: 0, guessSkipped: 0, logGuesses: 0, junkSkipped: 0 };
 
   private ticker = new Ticker();
   private listeners = new Set<() => void>();
@@ -72,6 +75,7 @@ export class Controller {
   private logQueue: LogItem[] = [];
   private reading = 0;
   private readonly expFilter = new ExpLineFilter();
+  private readonly shapeFilter = new LineShapeFilter();
   private mapSig = 0;
   private mapExpAt = 0;
   private recent: [number, number][] = [];
@@ -98,6 +102,8 @@ export class Controller {
     };
     this.capture.onChange = () => this.notify();
     loadOsms().then(() => this.notify());
+    onOsmsLoaded(() => this.notify());
+    setTimeout(() => this.notify(), BOOT_MAX_MS + 50); // let the loading screen time out even if nothing else changes
     this.loadLook();
   }
 
@@ -136,6 +142,7 @@ export class Controller {
     if (this.identity.name !== before.name || classLook(this.identity.cls) !== classLook(before.cls)) {
       if (this.sess) this.ensureLook(); else this.loadLook();
     } else if ((this.identity.gender ?? 0) !== (before.gender ?? 0) && (this.sess || this.sprites.look)) this.ensureLook(); // new look in that gender
+    else if (this.identity.level !== before.level && this.sprites.look) this.ensureLook(); // gear for the new level
     if (this.sess) { if (p.name) this.sess.char = p.name; if (p.cls !== undefined) this.sess.cls = p.cls; if (p.level) { this.sess.level = p.level; this.sess.levelStart ??= p.level; } }
     this.notify();
   }
@@ -143,7 +150,7 @@ export class Controller {
   private makeTracker(s: Session) {
     return new Tracker(s, {
       hpMin: () => this.settings.hpMin, mpMin: () => this.settings.mpMin,
-      canonItem: raw => canonItem(raw), canonMap: raw => canonMap(raw), itemsKnown: osmsReady, mapsKnown: mapsReady, maxMobExp, potSource: k => this.potSource(k), mobForDrop: (item, map) => mobForItem(item, map)?.name ?? null,
+      canonItem: raw => canonItem(raw), canonMap: raw => canonMap(raw), itemsKnown: osmsReady, mapsKnown: mapsReady, maxMobExp, potsCounted: k => this.potsCounted(k), mobForDrop: (item, map) => mobForItem(item, map)?.name ?? null,
     });
   }
   private get canRun() { return !!this.sess && !this.sess.paused && this.capture.ready && this.ocrState === 'ready'; }
@@ -210,12 +217,39 @@ export class Controller {
     return best && best[1] >= 2 ? { level: best[0], votes: best[1] } : null;
   }
 
+  // ---------- loading screen ----------
+  private bootAt = Date.now();
+  private booted = false;
+  /** what a starting session is doing (shown on the loading screen), and since when */
+  private starting: { label: string; at: number } | null = null;
+  /**
+   * What the Live dashboard is still waiting for, so it can show a loading screen instead of panels popping in one by
+   * one: on page load the item / map and monster data, on session start the name / level read. The character isn't
+   * waited for (its sprites can take a while from the renderer): its box is there at once and the character appears
+   * in it when ready. Never longer than a few seconds: a slow site doesn't keep the dashboard hidden.
+   */
+  get loading(): { label: string; pct: number } | null {
+    const now = Date.now();
+    if (this.starting) {
+      if (now - this.starting.at > START_MAX_MS) { this.starting = null; return null; }
+      return { label: this.starting.label, pct: 50 };
+    }
+    if (this.booted) return null;
+    const steps: [string, boolean][] = [['Loading item & map data', osmsSettled()], ['Loading monster data', mobsSettled()]];
+    const left = steps.filter(s => !s[1]);
+    if (!left.length || now - this.bootAt > BOOT_MAX_MS) { this.booted = true; return null; }
+    return { label: left[0][0], pct: Math.round(100 * (steps.length - left.length) / steps.length) };
+  }
+
   // ---------- session ----------
   async start() {
-    await this.identify(); // name / class / level once per session
+    this.starting = { label: 'Reading name, class and level', at: Date.now() }; this.notify();
+    setTimeout(() => this.notify(), START_MAX_MS + 50);
+    await this.identify().catch(e => console.error(e)); // name / class / level once per session
     const { name, cls, level } = this.identity;
     this.sess = newSession(name, cls, level);
     this.tracker = this.makeTracker(this.sess);
+    this.starting = null;
     this.ensureLook();
     this.tracker.event('info', 'Session started');
     this.resetWatchers();
@@ -224,7 +258,7 @@ export class Controller {
     this.tickExp(); this.tickMap(true);
   }
   private resetWatchers() {
-    this.slots.clear(); this.lastLog = null; this.slotCache.clear(); this.counted = []; this.logLines = []; this.mapSig = 0; this.mapExpAt = 0; this.recent = []; this.lastTimeline = 0;
+    this.lastLog = null; this.slotCache.clear(); this.counted = []; this.logLines = []; this.mapSig = 0; this.mapExpAt = 0; this.recent = []; this.lastTimeline = 0;
   }
   togglePause() {
     const s = this.sess;
@@ -286,6 +320,7 @@ export class Controller {
       this.stats.logChecks++;
       const first = !this.lastLog;
       const { count, aligned } = newLineCount(this.lastLog, lo);
+      if (!aligned && !first && count) this.stats.logGuesses++;
       this.lastLog = lo;
       const now = Date.now();
       // Follow each line as it scrolls up: new lines enter at slot 0 and push the rest up by `count`.
@@ -299,9 +334,16 @@ export class Controller {
       for (let i = Math.min(LOG_WATCH_SLOTS, this.logLines.length) - 1; i >= 0; i--) { // oldest first
         const ln = this.logLines[i];
         if (ln.pre) continue;
-        if (!ln.item) { ln.item = { snap: snapLine(lo, high(), lo.slots[i], now), status: 'queued', tries: 1, guess: ln.guess }; this.logQueue.push(ln.item); }
+        if (!ln.item) {
+          // a yellow line is EXP / party bonus: never queued, so a party's flood of them can't push item lines out
+          if (lo.yellow?.[i]) { ln.item = { snap: snapLine(lo, null, lo.slots[i], now, true), status: 'done', tries: 1, guess: ln.guess }; this.stats.expSkipped++; this.markActive(); continue; }
+          const snap = snapLine(lo, high(), lo.slots[i], now);
+          // not shaped like a log line (something moving behind the log): never read
+          if (this.shapeFilter.isJunk(snap)) { ln.item = { snap, status: 'done', tries: 1, guess: ln.guess }; this.stats.junkSkipped++; continue; }
+          ln.item = { snap, status: 'queued', tries: 1, guess: ln.guess }; this.logQueue.push(ln.item);
+        }
         else if (ln.item.status === 'failed' && ln.item.tries < 4 && now - ln.item.snap.t >= 250) {
-          ln.item.snap = snapLine(lo, high(), lo.slots[i], now); ln.item.tries++; ln.item.status = 'queued'; this.logQueue.push(ln.item);
+          ln.item.snap = snapLine(lo, high(), lo.slots[i], now, lo.yellow?.[i]); ln.item.tries++; ln.item.status = 'queued'; this.logQueue.push(ln.item);
         }
       }
       this.pumpLog();
@@ -343,10 +385,11 @@ export class Controller {
     if (lineQuality(t) < 2) { q.status = 'failed'; return; } // retried from a new snapshot while the line is on screen
     q.status = 'done';
     this.expFilter.learn(q.snap, lineKind(t) === 'exp');
+    this.shapeFilter.learn(q.snap);
     q.snap = { ...q.snap, lo: new Float32Array(0), hi: null }; // read: free the pixels
     const now = Date.now();
     // a guessed alignment can re-present an old line as new: skip text that was counted moments ago
-    if (q.guess && this.counted.some(c => now - c.t < 6000 && sim(c.n, normLine(t)) >= 0.8)) return;
+    if (q.guess && this.counted.some(c => now - c.t < 6000 && sim(c.n, normLine(t)) >= 0.8)) { this.stats.guessSkipped++; return; }
     this.counted = this.counted.filter(c => now - c.t < 6000);
     this.counted.push({ n: normLine(t), t: now });
     this.tracker?.onLogLines([t]);
@@ -400,7 +443,7 @@ export class Controller {
   private tickGauge() {
     if (!this.canRun) return;
     const v = this.capture.video;
-    this.watchSlots(v); // before the gauges, so a potion's count change is known when its rise is
+    if (++this.gaugeN % 3 === 0) this.watchCounts(v); // ~3×/s
     for (const k of ['hp', 'mp'] as const) {
       const f = gaugeFill(v, this.regions[k === 'hp' ? 'hpGauge' : 'mpGauge'], k, this.scratch.gauge);
       this.gaugeLast[k] = f;
@@ -408,41 +451,43 @@ export class Controller {
     }
   }
 
-  /** per hotbar slot: its count digits' mask, a different mask waiting for a second look, and when it last changed */
-  private slots = new Map<number, { mask: Uint8Array; cand: Uint8Array | null; changedAt: number; usedAt: number }>();
+  private gaugeN = 0;
+  /** per hotbar slot holding a potion: its confirmed count, a different read waiting for confirmation, last good read */
+  private counts = new Map<number, { val: number | null; cand: number | null; at: number }>();
   /**
-   * Watch the count digits of the hotbar slots that hold a potion. A change (≥ 6 pixels, seen on two reads in a row
-   * so video noise doesn't count) means the count went down (used) or up (picked up); which of the two is decided by
-   * the gauge: only a slot that changed right before an HP / MP rise is credited with a potion.
+   * Read the count printed on every hotbar slot that holds a potion (template matching, see potcount.ts). A new value
+   * counts once two reads agree: a drop of N is N potions used, a rise is a pickup (monsters drop potions). Exact even
+   * when a potion is drunk while being hit, which the gauges can't see.
    */
-  private watchSlots(v: FrameSource) {
-    const cells = this.settings.hotbar.flatMap((n, i) => (n ? [i] : []));
-    if (!cells.length) { this.slots.clear(); return; }
-    const masks = slotCountMasks(v, this.regions.quickslot, HOTBAR_COLS, HOTBAR_ROWS, cells, this.scratch.slots);
-    const now = Date.now(), diff = (a: Uint8Array, b: Uint8Array) => { let n = 0; for (let i = 0; i < a.length; i++) n += a[i] ^ b[i]; return a.length === b.length ? n : Infinity; };
-    for (const [i, m] of masks) {
-      const st = this.slots.get(i);
-      if (!st) { this.slots.set(i, { mask: m, cand: null, changedAt: 0, usedAt: 0 }); continue; }
-      if (diff(st.mask, m) < 6) { st.cand = null; continue; }
-      if (st.cand && diff(st.cand, m) < 6) { st.mask = m; st.cand = null; st.changedAt = now; }
-      else st.cand = m;
-    }
+  private watchCounts(v: FrameSource) {
+    const bar = this.settings.hotbar, now = Date.now();
+    for (const k of [...this.counts.keys()]) if (!bar[k]) this.counts.delete(k);
+    bar.forEach((name, i) => {
+      if (!name || !this.tracker) return;
+      const r = readSlotCount(v, this.regions.quickslot, i, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
+      if (!r) return; // covered (cursor, a window) or empty: keep the last value
+      const st = this.counts.get(i) ?? this.counts.set(i, { val: null, cand: null, at: 0 }).get(i)!;
+      st.at = now;
+      if (r.value === st.val) { st.cand = null; return; }
+      if (r.value !== st.cand) { st.cand = r.value; return; }
+      const used = st.val == null ? 0 : st.val - r.value;
+      st.val = r.value; st.cand = null;
+      const p = potionByName(name);
+      // a drop of more than 20 between reads is a misread (or a stack moved), not potions
+      if (p && used > 0 && used <= 20) this.tracker.creditPots(p.hp || p.hpPct ? 'hp' : 'mp', p.name, used);
+    });
   }
-  /** The hotbar potion for `kind` whose count changed in the last 2 s (newest first); each change is used once. */
-  private potSource(kind: 'hp' | 'mp'): string | 'dup' | null {
+  /** Are the hotbar counts covering this stat's potions right now (a slot for it read in the last 5 s)? */
+  private potsCounted(kind: 'hp' | 'mp') {
     const now = Date.now();
-    let best: { i: number; at: number; name: string } | null = null;
-    for (const [i, st] of this.slots) {
-      const name = this.settings.hotbar[i], p = name ? potionByName(name) : null;
-      if (!p || !(kind === 'hp' ? p.hp || p.hpPct : p.mp || p.mpPct) || now - st.changedAt > 2000) continue;
-      if (!best || st.changedAt > best.at) best = { i, at: st.changedAt, name: p.name };
+    for (const [i, st] of this.counts) {
+      const p = potionByName(this.settings.hotbar[i] ?? '');
+      if (p && st.val != null && now - st.at < 5000 && (kind === 'hp' ? p.hp || p.hpPct : p.mp || p.mpPct)) return true;
     }
-    if (!best) return null;
-    const st = this.slots.get(best.i)!;
-    if (st.usedAt === st.changedAt) return 'dup'; // e.g. an Elixir: its HP rise already counted this use
-    st.usedAt = st.changedAt;
-    return best.name;
+    return false;
   }
+  /** The confirmed count on a hotbar slot (null until read). */
+  slotCount(i: number) { return this.counts.get(i)?.val ?? null; }
 
   private async tickExp() {
     if (!this.canRun || this.busy.exp) return;
@@ -454,7 +499,7 @@ export class Controller {
       const before = s.exp;
       const res = t.onExp(r);
       if (s.exp > before) this.markActive();
-      if (res === 'level') this.identity.level = s.level;
+      if (res === 'level') { this.identity.level = s.level; this.ensureLook(); } // new gear for the new level
       // the bar rolled over (a level-up needs the level number to confirm it), and a regular check once a minute
       if (res === 'candidate' || Date.now() - this.levelReadAt > 60_000) this.checkLevel();
       const el = elapsed(s);
@@ -620,21 +665,33 @@ export class Controller {
     if (look && !this.lookFits(look)) { this.ensureLook(); return; }
     this.sprites.load(look ?? null, () => this.onSpriteFrame());
   }
-  /** Does a saved look still suit the character (current format, job branch and gender)? */
-  private lookFits(l: CharLook) { return l.v === LOOK_V && l.branch === classLook(this.identity.cls) && l.gender === (this.identity.gender ?? 0); }
-  /** A session starts with a look: roll a random one if the character has none that fits (job branch, gender). */
-  private ensureLook(force = false) {
-    const { name, cls, level } = this.identity;
+  /**
+   * Does a saved look still suit the character: current format, job branch and gender, and the gear for the current
+   * level (gear upgrades as you level; the face, hair and skin stay)?
+   */
+  private lookFits(l: CharLook) {
+    const { cls, level, gender = 0 } = this.identity;
+    return l.v === LOOK_V && l.branch === classLook(cls) && l.gender === gender
+      && JSON.stringify(l.items) === JSON.stringify(rollLook(cls, level, gender, l.variant).items);
+  }
+  /**
+   * Make sure the character has a look that fits: keep its pool look (face, hair, skin) and re-dress it for the current
+   * job and level, or pick a random pool look when there's none yet; `reroll` picks a different pool look.
+   */
+  private ensureLook(reroll = false) {
+    const { name, cls, level, gender = 0 } = this.identity;
     if (!name || name === 'Unknown') return;
     const cur = store.loadChars()[name]?.look;
-    if (!force && cur && this.lookFits(cur)) { if (JSON.stringify(this.sprites.look) !== JSON.stringify(cur)) this.loadLook(); return; }
+    if (!reroll && cur && this.lookFits(cur)) { if (JSON.stringify(this.sprites.look) !== JSON.stringify(cur)) this.loadLook(); return; }
+    const keep = cur?.v === LOOK_V && cur.gender === gender ? cur.variant : undefined;
+    const variant = reroll ? randomVariant(keep) : keep ?? randomVariant();
     const ch = store.loadChars();
-    ch[name] = { ...ch[name], look: rollLook(cls, level, this.identity.gender ?? 0), thumb: undefined };
+    ch[name] = { ...ch[name], look: rollLook(cls, level, gender, variant), thumb: undefined };
     store.saveChars(ch);
-    this.tracker?.event('info', 'New character look rolled');
+    if (reroll || keep == null) this.tracker?.event('info', 'New character look rolled');
     this.loadLook();
   }
-  /** Roll a different random look for the character (the dice button). */
+  /** A different look from the pool for the character (the dice button). */
   rerollLook() { this.ensureLook(true); }
   /** Keep a small still of the character for History once the first idle frame is in. */
   private onSpriteFrame() {
@@ -672,9 +729,9 @@ export class Controller {
         g.strokeStyle = def.color; g.lineWidth = 1;
         for (let i = 1; i < HOTBAR_COLS; i++) { g.beginPath(); g.moveTo(i * c.width / HOTBAR_COLS, 0); g.lineTo(i * c.width / HOTBAR_COLS, c.height); g.stroke(); }
         for (let j = 1; j < HOTBAR_ROWS; j++) { g.beginPath(); g.moveTo(0, j * c.height / HOTBAR_ROWS); g.lineTo(c.width, j * c.height / HOTBAR_ROWS); g.stroke(); }
-        const on = this.settings.hotbar.filter(Boolean).length;
-        rows.push({ key, label: def.label, color: def.color, img: c.toDataURL(), raw: 'pixel watch, no OCR',
-          parsed: `${on ? `${on} potion slot${on > 1 ? 's' : ''} watched` : 'no potions placed yet (Potions tab)'}. The grid lines should sit on the slot borders.` });
+        const reads = this.settings.hotbar.flatMap((n, i) => (n ? [`${n}: ${readSlotCount(src, r, i, HOTBAR_COLS, HOTBAR_ROWS)?.value ?? '✗ unreadable'}`] : []));
+        rows.push({ key, label: def.label, color: def.color, img: c.toDataURL(), raw: 'grid lines should sit on the slot borders',
+          parsed: reads.length ? reads.join(' · ') : 'no potions placed yet (Potions tab)' });
         continue;
       }
       if (def.gauge) { // pixel colour, no OCR: show the strip that's read and how full it looks
