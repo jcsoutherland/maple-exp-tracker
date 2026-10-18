@@ -259,9 +259,11 @@ export function slotDiff(a: LogScan, i: number, b: LogScan, j: number): number {
 /**
  * How many new lines arrived between two scans. New lines push the older ones up one slot each, so find the shift
  * that best lines up the previous slots with the current ones, comparing text pixels rather than OCR text
- * (pixels are stable between frames; OCR output is not).
+ * (pixels are stable between frames; OCR output is not). The cut-off (0.45) was set on party recordings with
+ * dev/bench-lines.mjs: 0.35 left a third more frames unmatched (each read again as a guess), and replays against
+ * known counts showed no double counting at 0.45.
  */
-export function newLineCount(prev: LogScan | null, cur: LogScan, maxDiff = 0.35): { count: number; aligned: boolean } {
+export function newLineCount(prev: LogScan | null, cur: LogScan, maxDiff = 0.45): { count: number; aligned: boolean } {
   const C = cur.slots.length, P = prev?.slots.length ?? 0;
   if (!C) return { count: 0, aligned: true };
   if (!prev || !P) return { count: C, aligned: false };
