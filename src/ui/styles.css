@@ -1,44 +1,60 @@
-:root{--bg:#14161c;--panel:#1d2029;--panel2:#252936;--line:#323748;--tx:#e7e9ee;--mut:#9097a8;--acc:#f5a623;--hp:#e5484d;--mp:#3e8ef7;--exp:#9bd34a;--ok:#46c46e;--bad:#e5484d}
+/* dusk purple base; --acc (purple) for controls and selection, --warm (orange) for the level badge and links */
+:root{--bg:#0f0e1c;--surface:#161429;--panel:#1a1830;--panel2:#221f3c;--line:#2f2b50;--tx:#eeecf8;--mut:#9c97b9;--acc:#8b7bff;--warm:#ffb257;
+  --hp:#ff6b78;--mp:#5aa9ff;--exp:#a6e05a;--ok:#5ccf86;--bad:#ff6b78;--shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 30px rgba(5,3,20,.35)}
 *{box-sizing:border-box}
 /* scrollbars in the theme (Firefox / Chrome 121+ use scrollbar-color; older WebKit the pseudo-elements) */
-*{scrollbar-width:thin;scrollbar-color:#3b4256 transparent}
+*{scrollbar-width:thin;scrollbar-color:#3a3566 transparent}
 ::-webkit-scrollbar{width:8px;height:8px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:#3b4256;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb{background:#3a3566;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
 ::-webkit-scrollbar-thumb:hover{background:var(--acc);background-clip:padding-box}
 ::-webkit-scrollbar-corner{background:transparent}
-body{margin:0;background:var(--bg);color:var(--tx);font:13px/1.4 system-ui,Segoe UI,sans-serif}
-button{background:var(--panel2);color:var(--tx);border:1px solid var(--line);border-radius:6px;padding:6px 11px;font:inherit;cursor:pointer}
-button:hover{border-color:var(--acc)}button:disabled{opacity:.4;cursor:default}
-button.pri{background:var(--acc);color:#1a1a1a;border-color:var(--acc);font-weight:600}
-button.danger{border-color:#7a2a2d}
-input,select{background:var(--bg);color:var(--tx);border:1px solid var(--line);border-radius:5px;padding:4px 6px;font:inherit}
-header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
-header h1{font-size:15px;margin:0 10px 0 0}
-.pill{padding:3px 9px;border-radius:99px;background:var(--panel2);color:var(--mut);font-size:12px}
-.pill.on{background:#1d3a26;color:var(--ok)}.pill.warn{background:#3a2f1d;color:var(--acc)}
+body{margin:0;color:var(--tx);font:13px/1.4 system-ui,Segoe UI,sans-serif;background:radial-gradient(1100px 380px at 50% -140px,rgba(139,123,255,.16),transparent 70%),var(--bg)}
+button{background:var(--panel2);color:var(--tx);border:1px solid var(--line);border-radius:99px;padding:6px 14px;font:inherit;font-weight:600;cursor:pointer}
+button:hover{border-color:var(--acc);background:#2a2650}button:disabled{opacity:.4;cursor:default}
+button.pri{background:var(--acc);color:#fff;border-color:var(--acc);box-shadow:0 4px 14px rgba(139,123,255,.3)}
+button.pri:hover{background:#9d8fff}
+button.danger{border-color:rgba(255,107,120,.35);color:#ff9aa3}
+input,select{background:#14132a;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit}
+input:focus,select:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(139,123,255,.2)}
+/* header: brand + pop-out; the session controls live in the Live dashboard */
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:16px 24px 0;max-width:1198px;margin:0 auto}
+header h1{font-size:16px;font-weight:700;margin:0 10px 0 0;letter-spacing:-.1px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 8px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);color:var(--mut);font-size:12px;white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:99px;background:var(--mut);opacity:.6}
+.pill.on{background:rgba(92,207,134,.12);border-color:rgba(92,207,134,.3);color:var(--ok)}.pill.on::before{background:var(--ok);opacity:1}
+.pill.warn{background:rgba(255,178,87,.12);border-color:rgba(255,178,87,.3);color:var(--warm)}.pill.warn::before{background:var(--warm);opacity:1}
 .sp{flex:1}
-nav{display:flex;gap:2px;padding:0 16px;border-bottom:1px solid var(--line);background:var(--panel)}
-nav button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:9px 14px;color:var(--mut)}
-nav button.act{color:var(--tx);border-bottom-color:var(--acc)}
-main{padding:16px;max-width:1150px;margin:0 auto}
+/* folder tabs: right-aligned, joined to the content surface below; each tab's icon has its own colour when open */
+.ftabs{max-width:1150px;margin:12px auto 0;display:flex;justify-content:flex-end;flex-wrap:wrap;gap:4px;position:relative;z-index:2}
+.ftab{display:flex;align-items:center;gap:7px;padding:9px 18px 10px;border:1px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;
+  background:#131125;color:var(--mut);position:relative;top:1px;box-shadow:none}
+.ftab svg{width:15px;height:15px;opacity:.7}
+.ftab:hover{color:var(--tx);background:var(--panel);border-color:var(--line)}
+.ftab:hover svg{color:var(--tc);opacity:.9}
+.ftab.act{background:var(--surface);color:var(--tx);padding-top:11px;margin-top:-2px}
+.ftab.act svg{color:var(--tc);opacity:1;filter:drop-shadow(0 0 6px color-mix(in srgb,var(--tc) 45%,transparent))}
+.ftab.t-live{--tc:#8b7bff}.ftab.t-pots{--tc:#ff7a9c}.ftab.t-drops{--tc:#f5c542}.ftab.t-hist{--tc:#f0a96a}.ftab.t-setup{--tc:#e8e6f2}
+main{max-width:1150px;margin:0 auto 24px;padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:16px 0 16px 16px;box-shadow:0 20px 60px rgba(5,3,20,.45)}
+@media(max-width:1180px){main{margin:0 8px 24px}.ftabs{margin:12px 8px 0}}
+@media(max-width:600px){main{padding:10px;margin:0 4px 16px}.ftabs{margin:12px 4px 0}.card{padding:10px}.ftabs{flex-wrap:nowrap;gap:3px}.ftab{flex:1 1 0;justify-content:center;gap:5px;padding:8px 4px 9px;font-size:12px;min-width:0}.ftab.act{padding-top:10px}.ftab svg{width:13px;height:13px;flex:none}}
 .tab[hidden]{display:none}
 .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
-.card h3{margin:0 0 10px;font-size:13px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.card{background:linear-gradient(180deg,#1e1c38,#1b1932 120px);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:14px;box-shadow:var(--shadow)}
+.card h3{margin:0 0 10px;font-size:12px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.07em}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
-.tile{background:var(--panel2);border-radius:8px;padding:10px 12px}
+.tile{background:var(--panel2);border:1px solid rgba(255,255,255,.04);border-radius:12px;padding:10px 12px}
 .tile .k{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
 .tile .v{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;margin-top:2px}
 .tile .s{font-size:11px;color:var(--mut)}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
-th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.06)}
 th{color:var(--mut);font-weight:500;font-size:12px}
 td.n,th.n{text-align:right}
 tr.dim td{color:var(--mut);opacity:.6}
 .mut{color:var(--mut)}.small{font-size:12px}
 .feed{max-height:240px;overflow:auto;font-size:12px}
-.feed div{padding:3px 0;border-bottom:1px dashed var(--line)}
+.feed div{padding:3px 0;border-bottom:1px dashed rgba(255,255,255,.06)}
 .feed .t{color:var(--mut);margin-right:6px;font-variant-numeric:tabular-nums}
 .ic{width:28px;height:28px;object-fit:contain;vertical-align:middle;image-rendering:pixelated}
 .charin input{width:110px}.charin input.lv{width:56px}
@@ -59,20 +75,20 @@ tr.dim td{color:var(--mut);opacity:.6}
 .snap{width:112px;height:120px;background:var(--panel2);border-radius:8px;display:flex;align-items:flex-end;overflow:hidden}
 .snap canvas{flex:none;margin-left:-44px;image-rendering:pixelated}
 .snap img.thumb{margin:auto auto 4px;image-rendering:pixelated}
-header h1{display:flex;align-items:center;gap:8px}
-.logo{width:22px;height:22px;image-rendering:pixelated}
+header h1{display:flex;align-items:center;gap:10px}
+.logo{width:30px;height:30px}
 .sess{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:10px}
 .sess summary{cursor:pointer;display:flex;gap:12px;flex-wrap:wrap;align-items:baseline}
 .sess summary b{font-size:14px}
 .modal{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:9;padding:16px}
 .modal[hidden]{display:none}
 .modal .card{max-width:1000px;width:100%;max-height:95vh;overflow:auto}
-#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:10}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:8px 16px;border-radius:99px;box-shadow:var(--shadow);opacity:0;transition:opacity .2s;pointer-events:none;z-index:10}
 #toast.show{opacity:1}
 canvas.spark{width:100%;height:70px;display:block}
 .bar{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:var(--exp)}
 /* mini overlay (PiP) */
-.mini{padding:8px 10px;font-size:12px;background:#111318ee;color:var(--tx);height:100vh}
+.mini{padding:8px 10px;font-size:12px;background:#12112aee;color:var(--tx);height:100vh}
 .mini .big{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
 .mini .r{display:flex;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
 .mini .r span:first-child{color:var(--mut)}
@@ -84,15 +100,15 @@ ol.help li{margin-bottom:4px}
 .perf{font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
 .ocrres img{image-rendering:auto}
 .credit-line{font-size:11px;color:var(--mut);margin-top:16px;text-align:center}
-.credit-line a{color:var(--acc)}
+.credit-line a{color:var(--warm)}
 /* ---- character sheet (Live) ---- */
 .card.slim{padding:8px 14px}
-.sheet{display:grid;grid-template-columns:minmax(260px,320px) 1fr;gap:18px;align-items:start}
-@media(max-width:820px){.sheet{grid-template-columns:1fr}}
+.sheet{display:grid;grid-template-columns:minmax(260px,320px) 1fr;gap:18px;align-items:stretch}
+@media(max-width:820px){.sheet{grid-template-columns:minmax(0,1fr)}}
 .sheet-hero{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
-.stage{width:100%;border-radius:10px;background:var(--panel2);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:6px 6px 0}
+.stage{width:100%;border-radius:14px;background:var(--panel2);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:6px 6px 0}
 /* showroom: a dark room, a soft spotlight beam from above and a pool of light on the floor */
-.showroom{position:relative;border-radius:8px;overflow:hidden;box-shadow:inset 0 0 30px #000;
+.showroom{position:relative;border-radius:10px;overflow:hidden;box-shadow:inset 0 0 30px #000;
   background:radial-gradient(ellipse 40% 14% at 50% 86%,#ffffff99 0%,#ffffff26 55%,#fff0 100%),
     radial-gradient(ellipse 34% 120% at 50% 62%,#d8dae09e 0%,#9a9ca638 46%,#0000 76%),
     linear-gradient(to bottom,#060607 0%,#0c0c0f 76%,#1b1c21 77%,#0f1013 100%)}
@@ -102,15 +118,25 @@ ol.help li{margin-bottom:4px}
 .stage-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;color:#e6e8ee;font-weight:600;font-size:13px;text-shadow:0 1px 3px #000}
 .stage-cap{font-size:11px;color:var(--mut);padding:4px 8px 8px}
 .nameplate{display:flex;align-items:center;gap:8px;font-size:16px}
-.lvbadge{background:var(--acc);color:#1a1a1a;font-weight:700;font-size:12px;border-radius:5px;padding:1px 7px}
-.xpbar{position:relative;width:100%;height:22px;background:var(--panel2);border-radius:11px;overflow:hidden;border:1.5px solid #fff;box-shadow:0 0 0 1px #0006}
-.xpbar-fill{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,#8fbf2f,#c8e85a)}
-.xpbar span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#10120c;text-shadow:0 0 2px #e8ffb0;font-variant-numeric:tabular-nums}
+.lvbadge{background:var(--warm);color:#2a1600;font-weight:700;font-size:12px;border-radius:99px;padding:1px 9px}
+/* EXP bar: whole-pixel frame, Maple-style glossy fill. The text is drawn twice: light over the empty track and dark
+   inside the fill (the fill clips it), so it reads at any percentage without an outline. */
+.xpbar{position:relative;width:100%;height:20px;background:#14132a;border-radius:10px;overflow:hidden;border:1px solid rgba(244,242,255,.7);box-shadow:0 0 0 1px rgba(0,0,0,.35),0 3px 10px rgba(0,0,0,.2)}
+.xpbar-fill{position:absolute;inset:0 auto 0 0;z-index:1;overflow:hidden;border-radius:0 9px 9px 0;background:linear-gradient(180deg,rgba(255,255,255,.35),rgba(255,255,255,0) 55%),linear-gradient(90deg,#86c52a,#c8ec5c)}
+.xpbar span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:600 11px/18px system-ui,Segoe UI,sans-serif;letter-spacing:.3px;color:#e9e6ff;font-variant-numeric:tabular-nums;white-space:nowrap}
+.xpbar-fill span{right:auto;color:#1d3104}
 .sheet-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
-.stat{background:var(--panel2);border-radius:8px;padding:10px 12px}
+.stat{background:var(--panel2);border:1px solid rgba(255,255,255,.04);border-radius:12px;padding:10px 12px}
 .stat .k{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;display:flex;align-items:center;gap:6px}
-.stat .key{display:inline-block;width:10px;height:3px;border-radius:2px}
-.stat .v{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;margin-top:2px}
+.stat .key{display:inline-block;width:8px;height:8px;border-radius:99px}
+.stat .v{font-size:20px;font-weight:700;letter-spacing:-.3px;font-variant-numeric:tabular-nums;margin-top:2px}
+.stat .s.replay{cursor:pointer;transition:color .15s}
+.stat .s.replay:hover,.stat .s.replay:focus-visible{color:var(--tx);text-decoration:underline dotted;text-underline-offset:3px;outline:none}
+/* session strip: status + capture/session buttons at the top of the dashboard's right column; wraps when narrow */
+.ctlbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;row-gap:8px;background:var(--panel2);border:1px solid rgba(255,255,255,.04);border-radius:12px;padding:7px 7px 7px 10px;min-width:0}
+.ctlbar .pill{font-size:11.5px;padding:2px 9px 2px 7px}
+.ctlbar .btns{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;flex:1 1 auto}
+.ctlbar .btns button{padding:7px clamp(10px,1.5vw,20px);font-size:12.5px;white-space:nowrap}
 .stat .v.sm{font-size:15px}
 .stat .s{font-size:11px;color:var(--mut);min-height:15px}
 .charts3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
@@ -120,16 +146,16 @@ ol.help li{margin-bottom:4px}
 .mchart-head b{color:var(--tx);font-size:14px;font-variant-numeric:tabular-nums}
 .mchart svg{display:block;touch-action:none}
 .mchart-axis{fill:var(--mut);font-size:10px}
-.mchart-tip{position:absolute;top:0;pointer-events:none;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-size:11px;display:flex;flex-direction:column;min-width:100px}
+.mchart-tip{position:absolute;top:0;pointer-events:none;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:3px 8px;font-size:11px;display:flex;flex-direction:column;min-width:100px}
 .mchart-tip b{font-size:13px;color:var(--tx)}.mchart-tip span{color:var(--mut)}
 /* ---- potions ---- */
 .potlist{display:flex;flex-direction:column;gap:6px}
-.potrow{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:grab}
+.potrow{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:8px 10px;cursor:grab}
 .potrow.active{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
 .potrow.over{border-style:dashed;border-color:var(--mut)}
 .grip{color:var(--mut);letter-spacing:-2px;user-select:none}
 .potname{display:flex;flex-direction:column;flex:1;min-width:0}
-.badge{background:var(--acc);color:#1a1a1a;font-size:11px;font-weight:700;border-radius:99px;padding:2px 8px}
+.badge{background:var(--warm);color:#2a1600;font-size:11px;font-weight:700;border-radius:99px;padding:2px 8px}
 button.sm{padding:2px 7px;font-size:11px}
 button.sm.x{border-color:transparent;background:none;color:var(--mut)}
 .potused{display:flex;flex-direction:column;align-items:flex-end;min-width:80px;font-variant-numeric:tabular-nums}
@@ -139,10 +165,10 @@ button.sm.x{border-color:transparent;background:none;color:var(--mut)}
 /* ---- drops ---- */
 table.drops td{vertical-align:middle}
 .drops .item{display:flex;align-items:center;gap:8px}
-.drops .qty{color:var(--acc);font-weight:700;font-variant-numeric:tabular-nums}
+.drops .qty{color:var(--warm);font-weight:700;font-variant-numeric:tabular-nums}
 .drops .links a{color:var(--mut);margin-right:10px;text-decoration:none;font-size:12px}
 .drops .links a:hover{color:var(--acc)}
-.mchart-empty{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:12px;border:1px dashed var(--line);border-radius:6px}
+.mchart-empty{display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:12px;border:1px dashed var(--line);border-radius:10px}
 .stage-cap{display:flex;gap:6px;align-items:center;justify-content:center;flex-wrap:wrap}
 .hotbar-card{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;justify-content:space-between}
 .hotbar{display:grid;gap:6px;background:linear-gradient(#3b4150,#2a2f3a);border:1px solid var(--line);border-radius:8px;padding:8px}
@@ -159,18 +185,22 @@ table.drops td{vertical-align:middle}
 .sheet-right{display:flex;flex-direction:column;gap:10px;align-self:stretch;min-width:0}
 .sheet-extra{flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
 .sheet-extra .xpanel{display:flex;flex-direction:column;gap:8px}
-.sheet-hero .xpanel{align-self:stretch;margin-top:6px;text-align:left}
-.xpanel{background:var(--panel2);border-radius:8px;padding:10px 12px;min-width:0}
+/* Monsters fills the rest of the character column; with nothing known, a centred note in a dashed well */
+.sheet-hero .xpanel{align-self:stretch;margin-top:6px;text-align:left;flex:1;display:flex;flex-direction:column}
+.xpanel{background:var(--panel2);border:1px solid rgba(255,255,255,.04);border-radius:12px;padding:10px 12px;min-width:0}
+.mob-empty{flex:1;min-height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;border:1px dashed #3a3566;border-radius:10px;padding:14px;color:var(--mut);font-size:12px}
+.mob-empty img{width:34px;height:34px;opacity:.55}
+.mob-empty b{color:var(--tx);font-size:13px}
 .xhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
 .xhead .small{text-transform:none;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mobgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px}
-.mobtile{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 6px 8px;min-width:0}
-.mobtile.cur{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
+.mobtile{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;gap:2px;background:#1b1932;border:1px solid var(--line);border-radius:10px;padding:6px 6px 8px;min-width:0}
+.mobtile.cur{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset,0 0 0 4px rgba(139,123,255,.15)}
 .mobtile a{font-weight:650;color:var(--tx);text-decoration:none;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mobtile a:hover{text-decoration:underline;color:var(--acc)}
 .potlines{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 @media(max-width:1100px){.potlines{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.potline{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"ic name cnt" "ic cost cnt";column-gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.potline{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"ic name cnt" "ic cost cnt";column-gap:8px;align-items:center;background:#1b1932;border:1px solid var(--line);border-radius:10px;padding:6px 10px}
 .potline .ic-wrap{grid-area:ic}
 .potline .pn{grid-area:name;font-weight:600}
 .potline .small{grid-area:cost}
@@ -180,15 +210,15 @@ table.drops td{vertical-align:middle}
 .mobtile .mobpic img{max-width:56px;max-height:48px}
 .goalin{display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0}
 .goalin input{width:52px}
-.goalbar{position:relative;height:18px;border-radius:99px;background:var(--panel);border:1px solid var(--line);overflow:hidden}
-.goalbar div{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,#199e70,#9bd34a)}
-.goalbar span{position:relative;display:block;text-align:center;font-size:11px;line-height:16px;font-weight:650;text-shadow:0 1px 2px #000}
+.goalbar{position:relative;height:20px;border-radius:99px;background:#14132a;border:1px solid var(--line);overflow:hidden}
+.goalbar div{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,#6d5cf0,#a99dff)}
+.goalbar span{position:relative;display:block;text-align:center;font-size:11px;line-height:18px;font-weight:650;text-shadow:0 1px 2px #000}
 .goalnums{display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:6px}
-.goalnums div{display:flex;flex-direction:column;background:var(--panel);border-radius:6px;padding:5px 8px}
+.goalnums div{display:flex;flex-direction:column;background:#1b1932;border-radius:10px;padding:5px 8px}
 .goalnums b{font-size:15px;font-variant-numeric:tabular-nums}
 .loot .lootgrid{display:grid;grid-template-columns:minmax(200px,260px) 1fr;gap:16px}
 @media(max-width:760px){.loot .lootgrid{grid-template-columns:1fr}}
-.lootsum{display:flex;flex-direction:column;gap:6px;background:var(--panel2);border-radius:8px;padding:10px 12px;align-self:start}
+.lootsum{display:flex;flex-direction:column;gap:6px;background:var(--panel2);border:1px solid rgba(255,255,255,.04);border-radius:12px;padding:10px 12px;align-self:start}
 .lootline{display:flex;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
 .lootnet{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--line);padding-top:6px;font-weight:650}
 .lootnet b{font-size:20px}
@@ -210,10 +240,26 @@ table.drops td{vertical-align:middle}
 .dash{transition:opacity .25s}
 .dash.hidden{visibility:hidden;opacity:0}
 .dash-loading{position:absolute;inset:0;min-height:320px;display:flex;align-items:flex-start;justify-content:center;padding-top:120px;z-index:5}
-.dl-box{width:min(360px,80%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.dl-box{width:min(360px,80%);background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
 .dl-label{font-weight:600;margin-bottom:10px}
 .dl-bar{height:8px;border-radius:99px;background:var(--panel2);overflow:hidden}
 .dl-bar div{height:100%;border-radius:99px;background:var(--acc);transition:width .3s}
+/* level-up show (fireworks.ts): bursts on a canvas behind the page; tiles go see-through for the show so they glow through */
+#root{position:relative;z-index:1}
+.fw-canvas{position:fixed;inset:0;width:100vw;height:100vh;z-index:0;pointer-events:none;opacity:0;transition:opacity .6s}
+.fw-canvas.on{opacity:1}
+main,.card,.stat,.xpanel,.ctlbar,.potline,.mobtile,.goalnums div{transition:background-color .6s}
+body.celebrate main,body.celebrate .ftab.act{background:rgba(22,20,41,.3)}
+body.celebrate .card{background:rgba(30,28,56,.6);backdrop-filter:blur(2px)}
+body.celebrate .stat,body.celebrate .xpanel,body.celebrate .ctlbar{background:rgba(40,36,72,.5)}
+body.celebrate .potline,body.celebrate .mobtile,body.celebrate .goalnums div{background:rgba(27,25,50,.6)}
+body.celebrate .stage{box-shadow:0 0 0 2px var(--warm),0 0 30px rgba(255,178,87,.35)}
+.stage{transition:box-shadow .5s}
+.lvup{position:absolute;left:50%;top:14px;z-index:4;transform:translate(-50%,-14px) scale(.96);opacity:0;pointer-events:none;white-space:nowrap;
+  display:flex;align-items:center;gap:10px;padding:9px 18px 9px 10px;border-radius:99px;background:#1e1c38;border:1px solid #3a3566;
+  box-shadow:0 10px 30px rgba(5,3,20,.5),0 0 0 4px rgba(245,197,66,.12);font-weight:700;font-size:15px;color:#fff;transition:all .45s cubic-bezier(.2,.9,.3,1.3)}
+.lvup.show{opacity:1;transform:translate(-50%,0) scale(1)}
+.lvup b{background:var(--warm);color:#2a1600;border-radius:99px;padding:2px 10px;font-size:13px}
 /* number boxes: no spinner arrows anywhere (see NumberInput) */
 input.num{font-variant-numeric:tabular-nums;text-align:right}
 input[type=number]{-moz-appearance:textfield;appearance:textfield}

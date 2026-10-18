@@ -1,47 +1,54 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DropsTab } from './DropsTab';
+import { celebrateLevel } from './fireworks';
 import { HistoryTab } from './HistoryTab';
 import { LiveTab } from './LiveTab';
 import { MiniOverlay, usePip } from './MiniOverlay';
 import { PotionsTab } from './PotionsTab';
 import { SetupTab } from './SetupTab';
-import { toast, useCtrl } from './hooks';
+import { useCtrl } from './hooks';
 
 const TABS = { live: 'Live', pots: 'Potions', drops: 'Drops', hist: 'History', setup: 'Setup' } as const;
 type Tab = keyof typeof TABS;
+
+/** Folder-tab icons (24×24, stroked in the tab's colour when open). */
+const ICONS: Record<Tab, JSX.Element> = {
+  live: <path d="M3 12h4l3-7 4 14 3-7h4" />,
+  pots: <><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3" /><path d="M7.5 15h9" /></>,
+  drops: <><path d="M5 8h14l-1.2 12H6.2z" /><path d="M9 8V6.5a3 3 0 0 1 6 0V8" /></>,
+  hist: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
+  setup: <><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></>,
+};
 
 export function App() {
   const c = useCtrl();
   const [tab, setTab] = useState<Tab>('live');
   const pip = usePip();
-  const s = c.sess, cap = c.capture;
+  const s = c.sess;
 
-  const share = async () => {
-    try { toast((await c.shareScreen()) ? 'Capturing ✓' : 'No frames received from the shared window yet'); }
-    catch (e) { const err = e as DOMException; toast(err.name === 'NotAllowedError' ? 'Capture cancelled' : `Capture failed: ${err.name} ${err.message}`); }
-  };
-  const stop = () => { c.stop(); toast('Session ended and saved to History'); };
+  // a level-up in the running session sets off the fireworks (not one already counted when the page loads)
+  const seen = useRef<{ id: number; ups: number } | null>(null);
+  useEffect(() => {
+    if (!s) { seen.current = null; return; }
+    const prev = seen.current;
+    if (prev?.id === s.id && s.levelUps > prev.ups && s.level) celebrateLevel(s.level - 1, s.level);
+    seen.current = { id: s.id, ups: s.levelUps };
+  }, [s, s?.levelUps]);
 
   return (
     <>
       <header>
         <h1><img className="logo" src={import.meta.env.BASE_URL + 'favicon.svg'} alt="" /> MS Classic Training Tracker</h1>
-        <span className={'pill' + (cap.ready ? ' on' : cap.sharing ? ' warn' : '')}>{cap.ready ? (cap.kind === 'file' ? 'Video: ' + cap.label : 'Capturing') : cap.sharing ? 'Waiting for frames' : 'No capture'}</span>
-        <span className={'pill' + (c.ocrState === 'ready' ? ' on' : c.ocrState === 'loading' ? ' warn' : '')}>
-          {{ idle: 'OCR not loaded', loading: 'Loading OCR…', ready: 'OCR ready', error: 'OCR failed' }[c.ocrState]}
-        </span>
-        <span className={'pill' + (s ? (s.paused ? ' warn' : ' on') : '')}>{!s ? 'Idle' : s.paused ? (c.autoPaused ? 'Paused (idle)' : 'Paused') : 'Tracking'}</span>
         <span className="sp" />
-        {cap.sharing
-          ? <button onClick={() => { c.stopCapture(); toast('Stopped capturing'); }} title="Stop sharing the game window (pauses a running session)">⏹ Stop capture</button>
-          : <button onClick={share}>Share game window</button>}
-        <button className="pri" disabled={!!s || !cap.ready || c.ocrState !== 'ready'} onClick={() => c.start()}>▶ Start session</button>
-        <button disabled={!s} onClick={() => c.togglePause()}>{s?.paused ? '▶ Resume' : '⏸ Pause'}</button>
-        <button className="danger" disabled={!s} onClick={stop} title="End this session: save it to History and clear the dashboard for a fresh start">■ End &amp; save</button>
         <button onClick={pip.toggle} title="Always-on-top mini overlay">⧉ Pop-out overlay</button>
       </header>
-      <nav>
-        {(Object.keys(TABS) as Tab[]).map(k => <button key={k} className={tab === k ? 'act' : ''} onClick={() => setTab(k)}>{TABS[k]}</button>)}
+      <nav className="ftabs">
+        {(Object.keys(TABS) as Tab[]).map(k => (
+          <button key={k} className={`ftab t-${k}` + (tab === k ? ' act' : '')} onClick={() => setTab(k)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{ICONS[k]}</svg>
+            {TABS[k]}
+          </button>
+        ))}
       </nav>
       <main>
         {tab === 'live' && <LiveTab />}

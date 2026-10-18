@@ -33,7 +33,7 @@ export function MiniOverlay({ win }: { win: Window }) {
   return createPortal(
     <div className="mini">
       <div className="r">
-        <b style={{ color: !s ? undefined : s.paused ? 'var(--acc)' : 'var(--ok)' }}>{!s ? 'Idle' : s.paused ? 'Paused' : '● Tracking'}</b>
+        <b style={{ color: !s ? undefined : s.paused ? 'var(--warm)' : 'var(--ok)' }}>{!s ? 'Idle' : s.paused ? 'Paused' : '● Tracking'}</b>
         <span>{fmtDur(el)}</span>
       </div>
       <div className="big">{hr != null ? fmtK(hr) : '—'} /hr</div>

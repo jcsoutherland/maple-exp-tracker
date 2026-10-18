@@ -38,7 +38,13 @@ export function MonsterPanel() {
         <div className="mobgrid">
           {list.map(m => <MobTile key={m.id} m={m} cur={m.name === latest} />)}
         </div>
-      ) : <div className="mut small">No monster data for this map.</div>}
+      ) : (
+        <div className="mob-empty">
+          <img src={import.meta.env.BASE_URL + 'favicon.svg'} alt="" />
+          <b>No monsters known for this map</b>
+          <span>They appear here when you're on a hunting map or an etc drop comes in.</span>
+        </div>
+      )}
     </div>
   );
 }

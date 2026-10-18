@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { onCelebrate, type Celebration } from './fireworks';
 import { useCtrl } from './hooks';
 
 /**
@@ -56,6 +57,18 @@ export function CharacterStage() {
     return () => clearInterval(id);
   }, [sp]);
 
+  // "LEVEL UP!" banner over the stage while the celebration plays
+  const [cel, setCel] = useState<Celebration | null>(null), [celOn, setCelOn] = useState(false);
+  useEffect(() => {
+    let off = 0;
+    const unsub = onCelebrate(e => {
+      setCel(e); setCelOn(false);
+      requestAnimationFrame(() => setCelOn(true));
+      clearTimeout(off); off = window.setTimeout(() => setCelOn(false), Math.max(3500, e.ms - 800));
+    });
+    return () => { unsub(); clearTimeout(off); };
+  }, []);
+
   const shown = !!sp.look && sp.frames.idle.some(Boolean);
   const placeholder = !sp.look ? "To start click the 'Start Session' button"
     : !shown ? `Rendering your character… (${sp.done}/${sp.total})${sp.failures ? ' · renderer busy, retrying' : ''}` : '';
@@ -64,6 +77,7 @@ export function CharacterStage() {
       <div className="showroom" style={{ width: W * SHOW, maxWidth: '100%', aspectRatio: `${W} / ${H}` }}>
         <canvas ref={ref} width={W * Z} height={H * Z} />
         {placeholder && <div className="stage-ph">{placeholder}</div>}
+        {cel && <div className={'lvup' + (celOn ? ' show' : '')} role="status"><b>LEVEL UP!</b> Lv {cel.from} → {cel.to}</div>}
         {sp.look && <button className="reroll" title="New random hair, face and skin (gear is always the best for your job and level)" onClick={() => c.rerollLook()}>🎲</button>}
       </div>
       <div className="stage-cap">{shown ? (fighting ? '⚔ Fighting' : 'Idle') : ' '}</div>

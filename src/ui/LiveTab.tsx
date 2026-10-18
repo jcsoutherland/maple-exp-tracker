@@ -10,9 +10,11 @@ import { PotionPanel } from './PotionPanel';
 import { GoalPanel, KillsPanel } from './GoalPanel';
 import { LootProfit } from './LootProfit';
 import { NumberInput } from './NumberInput';
+import { SessionBar } from './SessionBar';
+import { celebrateLevel } from './fireworks';
 
 const EVC: Record<string, string> = { meso: '#f5c542', drop: '#c08cff', level: '#9bd34a', death: '#e5484d', map: '#ff7ab8', info: '#9097a8' };
-// chart hues: validated (dark palette, panel #1d2029) — each chart is one series, so no legend
+// chart hues: validated on the dark panels — each chart is one series, so no legend
 const C_EXP = '#199e70', C_MESO = '#c98500', C_RATE = '#3987e5';
 
 export function LiveTab() {
@@ -23,6 +25,7 @@ export function LiveTab() {
   const rate = r10 || hr;
   const toGo = t?.total && t.exp != null ? t.total - t.exp : null;
   const mesoHr = s && el > 60000 ? s.mesos / (el / 3.6e6) : null;
+  const xpPct = Math.max(0, Math.min(100, t?.pct ?? 0)), xpText = t?.pct != null ? `EXP ${t.pct.toFixed(2)}%` : 'EXP —';
 
   // series from the 30 s timeline plus the live point
   const tl = useMemo(() => (s ? [...s.timeline, [el / 60000, s.exp, s.mesos] as [number, number, number]] : []), [s, el, s?.exp, s?.mesos]);
@@ -81,17 +84,20 @@ export function LiveTab() {
             <span className="mut">{id.cls || '—'}</span>
           </div>
           <div className="xpbar">
-            <div className="xpbar-fill" style={{ width: (t?.pct ?? 0) + '%' }} />
-            <span>{t?.pct != null ? `EXP ${t.pct.toFixed(2)}%` : 'EXP —'}</span>
+            <span>{xpText}</span>
+            {/* the dark copy is as wide as the whole bar, so it lines up with the light one underneath */}
+            {xpPct > 0 && <div className="xpbar-fill" style={{ width: xpPct + '%' }}><span style={{ width: 10000 / xpPct + '%' }}>{xpText}</span></div>}
           </div>
           <div className="mut small">{toGo != null && rate ? `Level up in ~${fmtHM(toGo / rate * 3.6e6)} · ${fmtN(toGo)} EXP to go` : ' '}</div>
           <div className="mut small">📍 {t ? t.mapName : '—'}</div>
           <MonsterPanel />
         </div>
         <div className="sheet-right">
+        <SessionBar />
         <div className="sheet-stats">
           <Stat k="Session" v={fmtDur(el)} s={s ? (s.paused ? 'paused' : 'since ' + new Date(s.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : ''} />
-          <Stat k="EXP gained" v={fmtN(s?.exp ?? 0)} s={s?.levelUps ? `${s.levelUps} level-up${s.levelUps > 1 ? 's' : ''} 🎉` : ''} accent={C_EXP} />
+          <Stat k="EXP gained" v={fmtN(s?.exp ?? 0)} s={s?.levelUps ? `${s.levelUps} level-up${s.levelUps > 1 ? 's' : ''} 🎉` : ''} accent={C_EXP}
+            onSub={s?.levelUps && s.level ? () => celebrateLevel(s.level! - 1, s.level!) : undefined} subTitle="Click to see the level-up animation again" />
           <Stat k="EXP / hr" v={hr != null ? fmtK(hr) : '—'} s={'last 10 min ' + (r10 != null ? fmtK(r10) : '—')} accent={C_RATE} />
           <Stat k="Mesos" v={fmtN(s?.mesos ?? 0)} s={(mesoHr != null ? fmtK(mesoHr) : '—') + ' / hr'} accent={C_MESO} />
           <Stat k="Potions" v={pc?.total ? '-' + fmtN(pc.total) : '0'} s={pc ? `${fmtN(pc.items.reduce((a, i) => a + i.count, 0))} used` : ''} />
@@ -148,12 +154,15 @@ export function LiveTab() {
   );
 }
 
-function Stat({ k, v, s, accent, bad }: { k: string; v: string; s: string; accent?: string; bad?: boolean }) {
+/** A stat tile; `onSub` makes the line under the value clickable (the level-up count replays the celebration). */
+function Stat({ k, v, s, accent, bad, onSub, subTitle }: { k: string; v: string; s: string; accent?: string; bad?: boolean; onSub?: () => void; subTitle?: string }) {
   return (
     <div className="stat">
       <div className="k">{accent && <i className="key" style={{ background: accent }} />}{k}</div>
       <div className="v" style={bad ? { color: 'var(--bad)' } : undefined}>{v}</div>
-      <div className="s">{s || ' '}</div>
+      {onSub
+        ? <div className="s replay" role="button" tabIndex={0} title={subTitle} onClick={onSub} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSub(); } }}>{s}</div>
+        : <div className="s">{s || ' '}</div>}
     </div>
   );
 }
