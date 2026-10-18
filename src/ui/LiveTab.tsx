@@ -5,6 +5,8 @@ import { fmtDur, fmtHM, fmtK, fmtN } from '../core/util';
 import { CharacterStage } from './CharacterStage';
 import { useCtrl } from './hooks';
 import { MiniChart } from './MiniChart';
+import { MonsterCard } from './MonsterCard';
+import { PotIcon } from './PotionsTab';
 
 const EVC: Record<string, string> = { meso: '#f5c542', drop: '#c08cff', level: '#9bd34a', death: '#e5484d', map: '#ff7ab8', info: '#9097a8' };
 // chart hues: validated (dark palette, panel #1d2029) — each chart is one series, so no legend
@@ -71,13 +73,14 @@ export function LiveTab() {
           </div>
           <div className="mut small">{toGo != null && rate ? `Level up in ~${fmtHM(toGo / rate * 3.6e6)} · ${fmtN(toGo)} EXP to go` : ' '}</div>
           <div className="mut small">📍 {t ? t.mapName : '—'}</div>
+          <MonsterCard />
         </div>
         <div className="sheet-stats">
           <Stat k="Session" v={fmtDur(el)} s={s ? (s.paused ? 'paused' : 'since ' + new Date(s.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : ''} />
           <Stat k="EXP gained" v={fmtN(s?.exp ?? 0)} s={s?.levelUps ? `${s.levelUps} level-up${s.levelUps > 1 ? 's' : ''} 🎉` : ''} accent={C_EXP} />
           <Stat k="EXP / hr" v={hr != null ? fmtK(hr) : '—'} s={'last 10 min ' + (r10 != null ? fmtK(r10) : '—')} accent={C_RATE} />
           <Stat k="Mesos" v={fmtN(s?.mesos ?? 0)} s={(mesoHr != null ? fmtK(mesoHr) : '—') + ' / hr'} accent={C_MESO} />
-          <Stat k="Potions" v={pc?.total ? '-' + fmtN(pc.total) : '0'} s={pc ? Object.values(pc.detail).map(d => `${d!.count} ${d!.name}`).join(' · ') : ''} />
+          <Stat k="Potions" v={pc?.total ? '-' + fmtN(pc.total) : '0'} s={pc ? `${fmtN(pc.items.reduce((a, i) => a + i.count, 0))} used` : ''} />
           <Stat k="Net mesos" v={s && pc ? fmtN(s.mesos - pc.total) : '0'} s="after potions" />
           <div className="stat">
             <div className="k">HP / MP</div>
@@ -87,6 +90,19 @@ export function LiveTab() {
           <Stat k="EXP lost" v={s?.expLost ? '-' + fmtN(s.expLost) : '0'} s={s?.deaths ? `${s.deaths} death${s.deaths > 1 ? 's' : ''} · net ${fmtN(s.exp - s.expLost)}` : 'no deaths'} bad={!!s?.expLost} />
         </div>
       </div>
+
+      {pc && pc.items.length > 0 && (
+        <div className="card slim potsum">
+          <span className="mut">Potions used</span>
+          {pc.items.map(i => (
+            <span key={i.kind + i.name} className="pi" title={`${fmtN(i.cost)} mesos`}>
+              <PotIcon p={i} /><b>{fmtN(i.count)}</b> {i.name} <span className="mut small">{fmtN(i.cost)}</span>
+            </span>
+          ))}
+          <span className="sp" />
+          <span><span className="mut">total</span> <b>{fmtN(pc.total)}</b> <span className="mut">mesos</span></span>
+        </div>
+      )}
 
       <div className="charts3">
         <div className="card"><MiniChart title="EXP gained" points={expPts} color={C_EXP} fmt={v => fmtN(v)} /></div>

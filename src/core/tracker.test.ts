@@ -42,9 +42,30 @@ describe('EXP bar', () => {
     t.onExp(R(216000)); t.onExp(R(216500));
     const total = 216500 / R(216500).pct * 100;
     t.onExp(R(300, 240000));
-    expect(t.onExp(R(400, 240000))).toBe(true);
+    expect(t.onExp(R(400, 240000))).toBe('candidate'); // the bar rolled over: not a level-up until the level number says so
+    expect(s.level).toBe(37);
+    t.onLevelRead(38);
+    expect(t.onExp(R(450, 240000))).toBe('level');
     expect(s.level).toBe(38);
-    expect(Math.round(s.exp)).toBe(500 + Math.round(total - 216500) + 400);
+    expect(Math.round(s.exp)).toBe(500 + Math.round(total - 216500) + 450);
+  });
+  it('confirms a level-up by the new level needing more EXP when the level number cannot be read', () => {
+    const { s, t } = make();
+    t.onExp(R(216000)); t.onExp(R(216500));
+    t.onExp(R(300, 240000)); t.onExp(R(400, 240000));
+    expect(s.level).toBe(37);
+    expect(t.onExp(R(600, 240000))).toBe('level'); // 0.25%: 600 EXP is 0.25% of 240,000 > this level's 216,600
+    expect(s.level).toBe(38);
+  });
+  it('never makes a level-up out of a bar that drops while the level number stays the same', () => {
+    let clock = 0;
+    const s = newSession('Flynny', 'Hunter', 37, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => clock });
+    t.onExp(R(216000)); t.onExp(R(216500));
+    for (let i = 0; i < 40; i++) { clock += 5000; t.onExp(R(300, 216600)); } // a lower bar, same level total, for 200 s
+    t.onLevelRead(37);
+    expect(s.level).toBe(37);
+    expect(s.levelUps).toBe(0);
+    expect(s.exp).toBe(500);
   });
   it('repairs a stray extra digit and never turns a repeated misread into a level-up', () => {
     const { s, t } = make();
@@ -58,7 +79,9 @@ describe('EXP bar', () => {
   it('never counts an extra-digit misread at a fraction of a percent (fresh level)', () => {
     const { s, t } = make();
     t.onExp(R(216000)); t.onExp(R(216500));
+    t.onLevelRead(38);
     t.onExp(R(300, 240000)); t.onExp(R(400, 240000)); // level-up → bar at 0.16%
+    expect(s.level).toBe(38);
     const before = s.exp;
     t.onExp({ exp: 1000500, pct: R(500, 240000).pct }); // "500" read with a stray 1 in front, % read right
     t.onExp({ exp: 1000500, pct: R(500, 240000).pct });
@@ -78,14 +101,28 @@ describe('EXP bar', () => {
     t.onExp(R(124551)); // the first real gain: +35
     expect(s.exp).toBe(35);
   });
-  it('starts cleanly below 0.2% and needs a huge jump read twice', () => {
+  it('starts cleanly below 0.2% and never counts an impossible jump, even read twice', () => {
     const { s, t } = make();
     t.onExp(R(100)); t.onExp(R(150)); t.onExp({ exp: 1000150, pct: 0.06 }); t.onExp(R(250));
     expect(s.exp).toBe(150);
-    t.onExp(R(30000)); // +13% of a level in one read: wait for a second read
-    expect(s.exp).toBe(150);
+    t.onExp(R(30000)); // +29,750 in one 5 s read: more than any monster gives
     t.onExp(R(30010));
-    expect(s.exp).toBe(30010 - 100);
+    expect(s.exp).toBe(150);
+    t.onExp(R(30050)); // the baseline moved there without counting; normal gains go on
+    expect(s.exp).toBe(190);
+  });
+  it('caps EXP by what the monsters on this map can give in the time between reads', () => {
+    let clock = 0;
+    const s = newSession('Flynny', 'Hunter', 37, 0);
+    const t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => clock, maxMobExp: m => (m === 'Line 2 <Area 1>' ? 66 : null) });
+    t.mapCur = 'Line 2 <Area 1>';
+    t.onExp(R(124000)); t.onExp(R(124000));
+    clock += 5000; t.onExp(R(124600)); // +600 in 5 s: fine (cap 66 × 2 kills/s × 2 × 5 s = 1,320)
+    expect(s.exp).toBe(600);
+    clock += 5000; t.onExp(R(130000)); clock += 5000; t.onExp(R(130010)); // +5,400: a misread, even twice
+    expect(s.exp).toBe(600);
+    clock += 60000; t.onExp(R(140000)); // a minute without a good read: +9,990 fits (cap 15,840)
+    expect(s.exp).toBe(600 + 9990);
   });
   it('attributes EXP to the current map', () => {
     const { s, t } = make();
@@ -162,6 +199,18 @@ describe('HP/MP gauges', () => {
     const { s, t } = withMax();
     feed(t, 'hp', [40, 40, 40, ...Array(20).fill(_), 80, 80, 80, 80]); // 2 s unreadable
     expect(s.hp.jumps ?? []).toEqual([]);
+  });
+  it('credits a potion to the hotbar item whose count just changed, and an HP+MP item only once', () => {
+    let src: string | 'dup' | null = 'Orange Potion';
+    const s = newSession('Flynny', 'Hunter', 37, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => clock, potSource: () => src });
+    for (let i = 0; i < 3; i++) { t.onBar('hp', [1303, 1303]); t.onBar('mp', [1078, 1078]); }
+    feed(t, 'hp', [50, 50, 50, 70, 70, 70]);
+    src = null; feed(t, 'hp', [60, 60, 60, 72, 72, 72]); // no slot changed: the Active potion
+    src = 'dup'; feed(t, 'mp', [50, 50, 50, 70, 70, 70]); // the MP half of an Elixir already counted on HP
+    expect(Object.keys(s.hp.byPot ?? {})).toEqual(['Orange Potion']);
+    expect(s.hp.jumps.length).toBe(1);
+    expect(s.mp.jumps ?? []).toEqual([]);
+    expect(s.mp.byPot).toBeUndefined();
   });
   it('notes when MP is spent (the character is attacking)', () => {
     const { t } = withMax();

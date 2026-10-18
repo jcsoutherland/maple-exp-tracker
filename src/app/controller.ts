@@ -1,9 +1,10 @@
 import { Capture } from '../core/capture';
 import { classLook, LOOK_V, rollLook, SpriteLoader, type CharLook } from '../core/avatar/msio';
-import { REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
-import { canonItem, canonMap, loadOsms, mapsReady, osmsReady } from '../core/data/osms';
+import { HOTBAR_COLS, HOTBAR_ROWS, REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
+import { potionByName } from '../core/potions';
+import { canonItem, canonMap, loadOsms, mapsReady, maxMobExp, mobForItem, osmsReady } from '../core/data/osms';
 import { ExpLineFilter, snapCanvas, snapInk, snapLine, type LineSnap } from '../core/logqueue';
-import { enhanceText, fixIL, frameSize, gaugeFill, logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
+import { enhanceText, fixIL, frameSize, gaugeFill, slotCountMasks, logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
 import { cleanMap, cleanName, lineAmount, lineKind, lineQuality, matchClass, parseExp, parseLevel, parsePair } from '../core/parse';
@@ -11,7 +12,7 @@ import { elapsed, finalize, newSession, type SavedSession, type Session } from '
 import * as store from '../core/storage';
 import { Ticker } from '../core/ticker';
 import { Tracker } from '../core/tracker';
-import { normLine, sim } from '../core/util';
+import { median, normLine, sim } from '../core/util';
 
 /** a pickup-log line waiting to be (or being) read */
 interface LogItem { snap: LineSnap; status: 'queued' | 'reading' | 'done' | 'failed'; tries: number; guess: boolean }
@@ -76,7 +77,7 @@ export class Controller {
   private recent: [number, number][] = [];
   private lastTimeline = 0;
   private lastSave = 0;
-  private scratch = { sig: document.createElement('canvas'), gauge: document.createElement('canvas') };
+  private scratch = { sig: document.createElement('canvas'), gauge: document.createElement('canvas'), slots: document.createElement('canvas') };
 
   constructor() {
     const ch = store.loadChars(), last = store.loadSessions().slice(-1)[0];
@@ -142,7 +143,7 @@ export class Controller {
   private makeTracker(s: Session) {
     return new Tracker(s, {
       hpMin: () => this.settings.hpMin, mpMin: () => this.settings.mpMin,
-      canonItem: raw => canonItem(raw), canonMap: raw => canonMap(raw), itemsKnown: osmsReady, mapsKnown: mapsReady,
+      canonItem: raw => canonItem(raw), canonMap: raw => canonMap(raw), itemsKnown: osmsReady, mapsKnown: mapsReady, maxMobExp, potSource: k => this.potSource(k), mobForDrop: (item, map) => mobForItem(item, map)?.name ?? null,
     });
   }
   private get canRun() { return !!this.sess && !this.sess.paused && this.capture.ready && this.ocrState === 'ready'; }
@@ -223,7 +224,7 @@ export class Controller {
     this.tickExp(); this.tickMap(true);
   }
   private resetWatchers() {
-    this.lastLog = null; this.slotCache.clear(); this.counted = []; this.logLines = []; this.mapSig = 0; this.mapExpAt = 0; this.recent = []; this.lastTimeline = 0;
+    this.slots.clear(); this.lastLog = null; this.slotCache.clear(); this.counted = []; this.logLines = []; this.mapSig = 0; this.mapExpAt = 0; this.recent = []; this.lastTimeline = 0;
   }
   togglePause() {
     const s = this.sess;
@@ -399,11 +400,48 @@ export class Controller {
   private tickGauge() {
     if (!this.canRun) return;
     const v = this.capture.video;
+    this.watchSlots(v); // before the gauges, so a potion's count change is known when its rise is
     for (const k of ['hp', 'mp'] as const) {
       const f = gaugeFill(v, this.regions[k === 'hp' ? 'hpGauge' : 'mpGauge'], k, this.scratch.gauge);
       this.gaugeLast[k] = f;
       this.tracker?.onGauge(k, f);
     }
+  }
+
+  /** per hotbar slot: its count digits' mask, a different mask waiting for a second look, and when it last changed */
+  private slots = new Map<number, { mask: Uint8Array; cand: Uint8Array | null; changedAt: number; usedAt: number }>();
+  /**
+   * Watch the count digits of the hotbar slots that hold a potion. A change (≥ 6 pixels, seen on two reads in a row
+   * so video noise doesn't count) means the count went down (used) or up (picked up); which of the two is decided by
+   * the gauge: only a slot that changed right before an HP / MP rise is credited with a potion.
+   */
+  private watchSlots(v: FrameSource) {
+    const cells = this.settings.hotbar.flatMap((n, i) => (n ? [i] : []));
+    if (!cells.length) { this.slots.clear(); return; }
+    const masks = slotCountMasks(v, this.regions.quickslot, HOTBAR_COLS, HOTBAR_ROWS, cells, this.scratch.slots);
+    const now = Date.now(), diff = (a: Uint8Array, b: Uint8Array) => { let n = 0; for (let i = 0; i < a.length; i++) n += a[i] ^ b[i]; return a.length === b.length ? n : Infinity; };
+    for (const [i, m] of masks) {
+      const st = this.slots.get(i);
+      if (!st) { this.slots.set(i, { mask: m, cand: null, changedAt: 0, usedAt: 0 }); continue; }
+      if (diff(st.mask, m) < 6) { st.cand = null; continue; }
+      if (st.cand && diff(st.cand, m) < 6) { st.mask = m; st.cand = null; st.changedAt = now; }
+      else st.cand = m;
+    }
+  }
+  /** The hotbar potion for `kind` whose count changed in the last 2 s (newest first); each change is used once. */
+  private potSource(kind: 'hp' | 'mp'): string | 'dup' | null {
+    const now = Date.now();
+    let best: { i: number; at: number; name: string } | null = null;
+    for (const [i, st] of this.slots) {
+      const name = this.settings.hotbar[i], p = name ? potionByName(name) : null;
+      if (!p || !(kind === 'hp' ? p.hp || p.hpPct : p.mp || p.mpPct) || now - st.changedAt > 2000) continue;
+      if (!best || st.changedAt > best.at) best = { i, at: st.changedAt, name: p.name };
+    }
+    if (!best) return null;
+    const st = this.slots.get(best.i)!;
+    if (st.usedAt === st.changedAt) return 'dup'; // e.g. an Elixir: its HP rise already counted this use
+    st.usedAt = st.changedAt;
+    return best.name;
   }
 
   private async tickExp() {
@@ -414,12 +452,11 @@ export class Controller {
       const s = this.sess, t = this.tracker;
       if (!r || !s || !t) return;
       const before = s.exp;
-      const leveled = t.onExp(r);
+      const res = t.onExp(r);
       if (s.exp > before) this.markActive();
-      if (leveled) { // level-up: confirm with the level digits
-        this.identity.level = s.level;
-        this.readLevel().then(r => { if (r && s.level && Math.abs(r.level - s.level) <= 1) s.level = this.identity.level = r.level; });
-      }
+      if (res === 'level') this.identity.level = s.level;
+      // the bar rolled over (a level-up needs the level number to confirm it), and a regular check once a minute
+      if (res === 'candidate' || Date.now() - this.levelReadAt > 60_000) this.checkLevel();
       const el = elapsed(s);
       this.recent.push([el, s.exp]);
       while (this.recent.length && el - this.recent[0][0] > 600000) this.recent.shift();
@@ -431,6 +468,18 @@ export class Controller {
       if (s.exp - this.mapExpAt >= this.settings.schedule.mapExpStep) this.tickMap(true);
       this.notify();
     } catch (e) { console.error(e); } finally { this.busy.exp = false; }
+  }
+
+  private levelReadAt = 0;
+  private levelBusy = false;
+  /** Read the level number (2 of 3 reads must agree) and hand it to the tracker, which uses it to confirm level-ups. */
+  private async checkLevel() {
+    if (this.levelBusy) return;
+    this.levelBusy = true; this.levelReadAt = Date.now();
+    try {
+      const r = await this.readLevel(), t = this.tracker;
+      if (r && t) t.onLevelRead(r.level);
+    } catch (e) { console.error(e); } finally { this.levelBusy = false; }
   }
 
   private lastMapRead = 0;
@@ -476,39 +525,80 @@ export class Controller {
   /** paused by the idle timer (resumes by itself when EXP moves) rather than by the user */
   autoPaused = false;
 
-  /** Idle for `idlePauseSec` (no EXP or loot): pause, without counting the idle stretch as session time. */
+  /**
+   * Idle for `idlePauseSec` (no EXP, loot or MP spent on skills): pause, without counting the idle stretch as session
+   * time. While auto-paused, three cheap watchers bring the session back the moment you fight again: a new pickup-log
+   * line (pixel check), MP going down (gauge), or the EXP bar going up.
+   */
   private checkIdle() {
     const s = this.sess, sec = this.settings.idlePauseSec;
     if (!s || s.paused || !sec) return;
-    const quietSince = Math.max(this.lastActive, s.resumeAt);
+    const quietSince = Math.max(this.lastActive, s.resumeAt, this.tracker?.lastDrop('mp') ?? 0);
     if (Date.now() - quietSince < sec * 1000) return;
     s.activeMs += quietSince - s.resumeAt;
     s.paused = true; this.autoPaused = true;
     this.tracker?.event('info', `Auto-paused (idle ${sec}s)`);
-    // keep an eye on the EXP bar only, to resume as soon as it moves
-    this.ticker.set({ ui: [1000, () => this.notify()], idle: [this.settings.schedule.expMs, () => this.watchIdle()] });
+    this.idle = { log: null, mp: [], mpBase: null, exp: null };
+    const sc = this.settings.schedule;
+    this.ticker.set({
+      ui: [1000, () => this.notify()],
+      idle: [sc.expMs, () => this.watchIdle()],
+      idleFast: [Math.max(sc.logWatchMs, sc.gaugeMs), () => this.watchIdleFast()],
+    });
     this.persist(true);
     this.notify();
   }
+  private idle: { log: LogScan | null; mp: number[]; mpBase: number | null; exp: number | null } = { log: null, mp: [], mpBase: null, exp: null };
+  /** While auto-paused: a new pickup-log line or MP spent means you're fighting again. */
+  private watchIdleFast() {
+    const s = this.sess;
+    if (!s || !s.paused || !this.autoPaused || !this.capture.ready) return;
+    const v = this.capture.video, r = this.regions.log, id = this.idle;
+    try {
+      const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'));
+      const prev = id.log;
+      id.log = lo;
+      if (prev && newLineCount(prev, lo).count > 0) { this.resumeFromIdle('loot / EXP in the log', prev); return; }
+      const f = gaugeFill(v, this.regions.mpGauge, 'mp', this.scratch.gauge);
+      if (f == null) { id.mp = []; return; }
+      id.mp.push(f); if (id.mp.length > 3) id.mp.shift();
+      if (id.mp.length < 3) return;
+      const m = median(id.mp);
+      id.mpBase ??= m;
+      if (m < id.mpBase - 0.015) this.resumeFromIdle('MP spent'); // ≥ 2px of the bar: a skill, not read noise
+      else if (m > id.mpBase) id.mpBase = m; // regen / a pot while idle
+    } catch (e) { console.error(e); }
+  }
   private busyIdle = false;
+  /** While auto-paused: the EXP bar going up (two reads in a row above the paused value) resumes too. */
   private async watchIdle() {
     const s = this.sess, t = this.tracker;
     if (!s || !t || !s.paused || !this.autoPaused || this.busyIdle || !this.capture.ready || this.ocrState !== 'ready') return;
     this.busyIdle = true;
     try {
       const r = parseExp(await this.read('exp', this.capture.video));
-      // only a real gain resumes: higher than before, and the % it implies matches the % shown (a misread digit doesn't)
-      const tot = t.total;
-      if (!r || t.exp == null || r.exp <= t.exp || (tot && Math.abs(r.exp * 100 / tot - r.pct) > 0.03)) return;
-      // EXP moved: back to work. The EXP baseline is kept, so this gain still counts.
-      s.paused = false; s.resumeAt = Date.now(); this.autoPaused = false;
-      this.resetWatchers();
-      t.event('info', 'Resumed (EXP moving again)');
-      this.markActive();
-      this.startTimers();
-      this.tickExp();
-      this.notify();
+      if (!r || t.exp == null || r.exp <= t.exp) { this.idle.exp = null; return; }
+      const prev = this.idle.exp;
+      this.idle.exp = r.exp;
+      if (prev != null && r.exp >= prev) this.resumeFromIdle('EXP moving again');
     } catch (e) { console.error(e); } finally { this.busyIdle = false; }
+  }
+  /**
+   * Back from auto-pause. The EXP baseline is kept, so EXP earned since still counts. When a log line woke us, the log
+   * watcher restarts from the frame just before it, so that line is counted too.
+   */
+  private resumeFromIdle(why: string, logBefore?: LogScan) {
+    const s = this.sess, t = this.tracker;
+    if (!s || !t || !s.paused || !this.autoPaused) return;
+    s.paused = false; s.resumeAt = Date.now(); this.autoPaused = false;
+    this.resetWatchers();
+    if (logBefore) { this.lastLog = logBefore; this.logLines = logBefore.slots.map(() => ({ pre: true, guess: false, item: null })); }
+    t.event('info', `Resumed (${why})`);
+    this.markActive();
+    this.startTimers();
+    this.tickLog();
+    this.tickExp();
+    this.notify();
   }
   /**
    * Attacking: EXP or loot came in within the last EXP read or so (EXP is read every 5 s, so a shorter window would
@@ -573,6 +663,18 @@ export class Controller {
         this.slotCache = saved;
         rows.push({ key, label: def.label, color: def.color, img: logPreviewCanvas(lo).toDataURL(), raw: lines.join(' ⏎ '),
           parsed: lines.slice().reverse().map(l => `${lineKind(l) ?? '?'}${lineAmount(l) ? ' +' + lineAmount(l) : ''}`).join(' ⏎ ') || '(no lines)' });
+        continue;
+      }
+      if (key === 'quickslot') { // the crop with its 4×3 grid: each line should sit on a slot border
+        const r = this.regions.quickslot, { W, H } = frameSize(src), z = 3, c = document.createElement('canvas');
+        c.width = Math.round(r.w * W) * z; c.height = Math.round(r.h * H) * z;
+        const g = c.getContext('2d')!; g.imageSmoothingEnabled = false; g.drawImage(src, r.x * W, r.y * H, r.w * W, r.h * H, 0, 0, c.width, c.height);
+        g.strokeStyle = def.color; g.lineWidth = 1;
+        for (let i = 1; i < HOTBAR_COLS; i++) { g.beginPath(); g.moveTo(i * c.width / HOTBAR_COLS, 0); g.lineTo(i * c.width / HOTBAR_COLS, c.height); g.stroke(); }
+        for (let j = 1; j < HOTBAR_ROWS; j++) { g.beginPath(); g.moveTo(0, j * c.height / HOTBAR_ROWS); g.lineTo(c.width, j * c.height / HOTBAR_ROWS); g.stroke(); }
+        const on = this.settings.hotbar.filter(Boolean).length;
+        rows.push({ key, label: def.label, color: def.color, img: c.toDataURL(), raw: 'pixel watch, no OCR',
+          parsed: `${on ? `${on} potion slot${on > 1 ? 's' : ''} watched` : 'no potions placed yet (Potions tab)'}. The grid lines should sit on the slot borders.` });
         continue;
       }
       if (def.gauge) { // pixel colour, no OCR: show the strip that's read and how full it looks

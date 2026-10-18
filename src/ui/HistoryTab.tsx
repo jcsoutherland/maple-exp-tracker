@@ -14,11 +14,18 @@ export function HistoryTab() {
   const { all, chars } = useMemo(() => ({ all: store.loadSessions(), chars: store.loadChars() }), [v]);
   const refresh = () => { c.historyVersion++; bump(x => x + 1); };
 
+  const [clearArmed, setClearArmed] = useState(false);
   const names = [...new Set(all.map(s => s.char))];
   if (!names.length) return <div className="card mut">No sessions yet.</div>;
   const cur = sel && names.includes(sel) ? sel : names[names.length - 1];
   const list = all.filter(s => s.char === cur).sort((a, b) => b.start - a.start), ch = chars[cur] || {};
   const totExp = list.reduce((a, s) => a + s.exp, 0), totMs = list.reduce((a, s) => a + s.activeMs, 0), totMeso = list.reduce((a, s) => a + s.mesos, 0);
+  const recent = list.filter(s => !s.archived), days = byDay(list.filter(s => s.archived));
+  const archiveAll = () => { store.saveSessions(all.map(s => (s.char === cur ? { ...s, archived: true } : s))); refresh(); toast(`Archived ${recent.length} session${recent.length > 1 ? 's' : ''}`); };
+  const clearAll = () => {
+    if (!clearArmed) { setClearArmed(true); setTimeout(() => setClearArmed(false), 4000); return; }
+    store.saveSessions(all.filter(s => s.char !== cur)); setClearArmed(false); setSel(null); refresh(); toast(`Cleared ${cur}'s history`);
+  };
 
   const exportJson = () => {
     const blob = new Blob([JSON.stringify({ sessions: all, chars }, null, 1)], { type: 'application/json' });
@@ -54,10 +61,57 @@ export function HistoryTab() {
             <div className="mut">{ch.cls || list[0].cls} · Lv {ch.level ?? list[0].level ?? '?'}</div>
             <div className="small" style={{ marginTop: 6 }}>{list.length} sessions · {fmtHM(totMs)} · {fmtN(totExp)} EXP · avg {fmtN(totMs ? totExp / (totMs / 3.6e6) : 0)} EXP/hr · {fmtN(totMeso)} mesos</div>
           </div>
+          <span className="sp" />
+          <div className="row" style={{ alignSelf: 'flex-start' }}>
+            <button disabled={!recent.length} onClick={archiveAll} title="Move these sessions into the archive, grouped by day">Archive sessions</button>
+            <button className="danger" onClick={clearAll} title={`Delete all of ${cur}'s sessions`}>{clearArmed ? 'Click again to delete all' : 'Clear history'}</button>
+          </div>
         </div>
       </div>
-      {list.map(x => <SessionCard key={x.id} x={x} onDelete={() => { store.saveSessions(all.filter(s => s.id !== x.id)); refresh(); }} />)}
+      {recent.map(x => <SessionCard key={x.id} x={x} onDelete={() => { store.saveSessions(all.filter(s => s.id !== x.id)); refresh(); }} />)}
+      {!recent.length && <div className="mut small" style={{ margin: '10px 2px' }}>No new sessions since the last archive.</div>}
+      {days.length > 0 && <>
+        <h3 style={{ margin: '18px 2px 0' }}>Archive</h3>
+        {days.map(d => <DayCard key={d.key} d={d} onDelete={id => { store.saveSessions(all.filter(s => s.id !== id)); refresh(); }} />)}
+      </>}
     </section>
+  );
+}
+
+interface Day { key: string; label: string; list: SavedSession[] }
+/** Sessions grouped by the local day they started on, newest day first. */
+function byDay(list: SavedSession[]): Day[] {
+  const m = new Map<string, SavedSession[]>();
+  for (const s of list) {
+    const d = new Date(s.start), key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    (m.get(key) ?? m.set(key, []).get(key)!).push(s);
+  }
+  return [...m].sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    .map(([key, l]) => ({ key, label: new Date(l[0].start).toLocaleDateString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' }), list: l.sort((a, b) => b.start - a.start) }));
+}
+
+/** One archived day: its totals in the summary line, the sessions inside. */
+function DayCard({ d, onDelete }: { d: Day; onDelete: (id: number) => void }) {
+  const l = d.list, ms = l.reduce((a, s) => a + s.activeMs, 0), exp = l.reduce((a, s) => a + s.exp, 0), mesos = l.reduce((a, s) => a + s.mesos, 0);
+  const pots = l.reduce((a, s) => a + s.potCost, 0), ups = l.reduce((a, s) => a + s.levelUps, 0), lost = l.reduce((a, s) => a + s.expLost, 0);
+  const lv0 = Math.min(...l.map(s => s.levelStart ?? Infinity)), lv1 = Math.max(...l.map(s => s.level ?? -Infinity));
+  const maps = new Map<string, number>();
+  for (const s of l) for (const [k, v] of Object.entries(s.maps)) maps.set(k, (maps.get(k) || 0) + v);
+  const top = [...maps].sort((a, b) => b[1] - a[1]).slice(0, 3);
+  return (
+    <details className="sess card day">
+      <summary>
+        <b>{d.label}</b>
+        <span className="mut">{l.length} session{l.length > 1 ? 's' : ''} · {fmtHM(ms)}</span>
+        <span>{isFinite(lv0) ? `Lv ${lv0}${isFinite(lv1) && lv1 !== lv0 ? '→' + lv1 : ''}` : ''}{ups ? ` (${ups} level-up${ups > 1 ? 's' : ''})` : ''}</span>
+        <span>{fmtN(exp)} EXP</span><span style={{ color: 'var(--exp)' }}>{fmtK(ms > 60000 ? exp / (ms / 3.6e6) : 0)}/hr</span>
+        <span style={{ color: '#f5c542' }}>{fmtN(mesos)} mesos</span>
+        {pots > 0 && <span className="mut">pots {fmtN(pots)}</span>}
+        {lost > 0 && <span style={{ color: 'var(--bad)' }}>-{fmtN(lost)} EXP lost</span>}
+      </summary>
+      {top.length > 0 && <div className="small mut" style={{ marginTop: 8 }}>Top maps: {top.map(([k, v]) => `${k} ${fmtN(v)}`).join(' · ')}</div>}
+      {l.map(x => <SessionCard key={x.id} x={x} onDelete={() => onDelete(x.id)} />)}
+    </details>
   );
 }
 
@@ -82,7 +136,7 @@ function SessionCard({ x, onDelete }: { x: SavedSession; onDelete: () => void })
           </table>
           <div className="small" style={{ marginTop: 8 }}>
             HP lost {fmtN(x.hp.used)} · MP spent {fmtN(x.mp.used)}<br />
-            Pots: {Object.values(x.potDetail).map(d => `${d!.count} ${d!.name}`).join(', ') || '—'} = <b>{fmtN(x.potCost)}</b> mesos · net <b>{fmtN(x.mesos - x.potCost)}</b>
+            Pots: {(x.potItems ?? Object.values(x.potDetail)).filter(d => d?.count).map(d => `${d!.count} ${d!.name}`).join(', ') || '—'} = <b>{fmtN(x.potCost)}</b> mesos · net <b>{fmtN(x.mesos - x.potCost)}</b>
             {x.deaths > 0 && <><br /><span style={{ color: 'var(--bad)' }}>EXP lost: -{fmtN(x.expLost)}</span> ({x.deaths} death{x.deaths > 1 ? 's' : ''}) · net {fmtN(x.exp - x.expLost)} EXP</>}
           </div>
         </div>

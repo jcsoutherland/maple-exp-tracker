@@ -1,7 +1,7 @@
 /** A screen region as fractions of the captured frame, plus its brightness threshold. */
 export interface Region { x: number; y: number; w: number; h: number; thr: number }
 
-export type RegionKey = 'map' | 'mapBar' | 'level' | 'cls' | 'name' | 'hp' | 'mp' | 'exp' | 'hpGauge' | 'mpGauge' | 'log';
+export type RegionKey = 'map' | 'mapBar' | 'level' | 'cls' | 'name' | 'hp' | 'mp' | 'exp' | 'hpGauge' | 'mpGauge' | 'quickslot' | 'log';
 
 /**
  * How each region is read.
@@ -23,6 +23,8 @@ export const REGION_DEFS: Record<RegionKey, RegionDef> = {
   // pixel-read gauges (no OCR): a thin strip through the middle of the red / blue bar
   hpGauge: { label: 'HP gauge', color: '#ff8a8a', engine: 'num', mode: 'luma', px: 0, gauge: true },
   mpGauge: { label: 'MP gauge', color: '#8ab8ff', engine: 'num', mode: 'luma', px: 0, gauge: true },
+  // the 4×3 quickslot: each slot's count digits are watched for a change (no OCR) to tell which potion was used
+  quickslot: { label: 'Quickslot (4×3)', color: '#7ee0c3', engine: 'num', mode: 'luma', px: 0, gauge: true },
   log: { label: 'Pickup log', color: '#b06fd8', engine: 'text', mode: 'luma', px: 0 },
 };
 
@@ -39,6 +41,8 @@ export const DEFAULT_REGIONS: Record<RegionKey, Region> = {
   exp: { x: 0.5469, y: 0.9569, w: 0.068, h: 0.0181, thr: 140 },
   hpGauge: { x: 0.3688, y: 0.9833, w: 0.075, h: 0.0042, thr: 140 },
   mpGauge: { x: 0.4477, y: 0.9833, w: 0.0758, h: 0.0042, thr: 140 },
+  // a guess (the quickslot was closed in the reference recording): drag it onto yours in Setup
+  quickslot: { x: 0.8852, y: 0.8, w: 0.1055, h: 0.1389, thr: 140 },
   log: { x: 0.8364, y: 0.6407, w: 0.1636, h: 0.1806, thr: 140 },
 };
 
@@ -55,15 +59,20 @@ export interface Settings {
   hpMin: number;
   /** pause the session after this many seconds without EXP or loot (0 = never); it resumes when EXP moves again */
   idlePauseSec: number;
+  /** settings format, for one-time migrations of changed defaults */
+  v?: number;
   mpMin: number;
   /** recovery items in the user's order; the first one is the Active potion used for counts and cost */
   hpOrder: string[];
   mpOrder: string[];
+  /** potions placed on the in-game quickslot (4×3, row by row; null = empty slot) */
+  hotbar: (string | null)[];
 }
 export const DEFAULT_SETTINGS: Settings = {
-  schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, idlePauseSec: 20,
+  v: 2, schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, idlePauseSec: 45,
   hpOrder: ['Meat', 'Red Potion', 'Orange Potion', 'White Potion'],
   mpOrder: ['Lemon', 'Blue Potion', 'Mana Elixir'],
+  hotbar: new Array(12).fill(null),
 };
 
 /**
@@ -81,3 +90,5 @@ export const CLASS_GROUPS: [string, [string, number][]][] = [
 export const CLASSES = CLASS_GROUPS.flatMap(([, jobs]) => jobs.map(([j]) => j));
 /** current level cap */
 export const MAX_LEVEL = 100;
+/** the in-game quickslot grid */
+export const HOTBAR_COLS = 4, HOTBAR_ROWS = 3;

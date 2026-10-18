@@ -14,8 +14,23 @@ export interface TrackerDeps {
   itemsKnown?: () => boolean;
   /** true once the real map list is loaded: then only names found in it are accepted */
   mapsKnown?: () => boolean;
+  /** most EXP one kill gives on this map (null = monsters unknown): caps believable EXP gains */
+  maxMobExp?: (map: string | null) => number | null;
+  /** the hotbar potion just used for this stat (null = unknown, 'dup' = already counted by the other stat) */
+  potSource?: (kind: 'hp' | 'mp') => string | 'dup' | null;
+  /** the monster an etc drop comes from (null = not known) */
+  mobForDrop?: (item: string, map: string | null) => string | null;
   now?: () => number;
 }
+
+/** What one EXP read did: a confirmed level-up, a suspected one (confirm with the level number), or nothing special. */
+export type ExpResult = 'level' | 'candidate' | null;
+/** EXP per kill assumed when the map's monsters aren't known (no monster in the game gives more outside bosses) */
+const DEFAULT_KILL_EXP = 1000;
+/** believable kill rate and party / event bonus: the EXP cap is killExp × KILLS_PER_SEC × BONUS per second */
+const KILLS_PER_SEC = 2, BONUS = 2;
+/** a suspected level-up that neither the level number nor the EXP total confirms within this long was a misread */
+const LEVEL_CONFIRM_MS = 180_000;
 
 interface Bar { buf: number[]; cur: number | null; max: number | null; votes: Record<number, number>; regen: number }
 /** below this bar % the level total (exp / %) is too imprecise to estimate (0.20% read to 2 decimals: ±2.5%) */
@@ -70,6 +85,12 @@ export class Tracker {
   /** the previous level's EXP total (to sanity-check reads right after a level-up) */
   private lastTotal: number | null = null;
   private strikes = 0;
+  /** when the EXP baseline last moved (the EXP cap grows with the time between accepted reads) */
+  private expAt = 0;
+  /** the bar rolled over: a level-up, once the level number or the new level's EXP total confirms it */
+  private lvCand: { since: number } | null = null;
+  /** the level number on screen went up to this (the next roll-over is that level-up) */
+  private lvSeen: number | null = null;
   // map
   mapCur: string | null = null;
   private mapCand: string | null = null;
@@ -94,7 +115,7 @@ export class Tracker {
 
   /** Forget bar/log baselines (after a pause) so changes while paused aren't counted. */
   rebaseline() {
-    this.exp = null; this.firsts = []; this.big = null; this.pend = null; this.drop = null; this.strikes = 0;
+    this.exp = null; this.firsts = []; this.big = null; this.pend = null; this.drop = null; this.strikes = 0; this.lvCand = null;
     this.hp.cur = this.mp.cur = null; this.hp.buf = []; this.mp.buf = []; this.logPrev = [];
     this.gauge = { hp: newGauge(), mp: newGauge() };
   }
@@ -103,30 +124,58 @@ export class Tracker {
   private setTotal(r: ExpReading) {
     if (r.pct >= MIN_TOTAL_PCT && (!this.totalPct || r.pct > this.totalPct || this.totalStale)) { this.total = r.exp * 100 / r.pct; this.totalPct = r.pct; this.totalStale = false; }
   }
+  /** Make a reading the EXP baseline. */
+  private accept(r: ExpReading, total = true) { this.exp = r.exp; this.pct = r.pct; this.expAt = this.now(); if (total) this.setTotal(r); }
 
-  /** Feed one EXP bar reading. Returns true when a level-up was detected. */
-  onExp(r: ExpReading): boolean {
+  /**
+   * The most EXP that can believably come in since the last accepted read: the best monster on this map (1,000 when
+   * the map's monsters aren't known), killed twice a second, with up to double from party / event bonuses.
+   */
+  expCap(): number {
+    const kill = Math.max(50, this.deps.maxMobExp?.(this.mapCur) ?? DEFAULT_KILL_EXP);
+    const sec = Math.max(5, (this.now() - this.expAt) / 1000);
+    return Math.round(kill * KILLS_PER_SEC * BONUS * sec);
+  }
+
+  /**
+   * Vet a gain: over the EXP cap it's a misread and never counted (if it reads the same twice the baseline moves there
+   * without counting), and a gain over 10% of a level must be read twice. 'wait' = not yet, 'skip' = moved the
+   * baseline without counting.
+   */
+  private vet(d: number, r: ExpReading, total: number): 'ok' | 'wait' | 'skip' {
+    const cap = this.expCap(), twice = d > cap || d > total * 0.1;
+    if (!twice) { this.big = null; return 'ok'; }
+    if (!(this.big && Math.abs(this.big.exp - r.exp) <= Math.max(2, total * 0.002))) { this.big = r; return 'wait'; }
+    this.big = null;
+    if (d <= cap) return 'ok';
+    this.event('info', `Ignored an impossible EXP jump (+${fmtN(d)}; at most ~${fmtN(cap)} fits): treated as a misread`);
+    this.totalStale = true;
+    return 'skip';
+  }
+
+  /** Feed one EXP bar reading. 'level' = a level-up was confirmed; 'candidate' = the bar rolled over (read the level number). */
+  onExp(r: ExpReading): ExpResult {
     if (this.exp == null) {
       // the baseline needs two reads that agree (out of the last few), so one misread can't become the starting point;
       // they must imply the same level total as closely as the % display allows (a digit misread by a few hundred
       // EXP, e.g. 124,156 for 124,516, would otherwise be counted as a gain)
       const f = this.firsts.slice().reverse().find(f => r.exp >= f.exp && r.exp - f.exp <= Math.max(2000, f.exp * 0.05) && sameTotal(f, r, 0.0005));
-      if (!f) { this.firsts = [...this.firsts.slice(-2), r]; return false; }
-      this.firsts = []; this.exp = f.exp; this.pct = f.pct; this.setTotal(f);
+      if (!f) { this.firsts = [...this.firsts.slice(-2), r]; return null; }
+      this.firsts = []; this.accept(f);
     }
+    const base = this.exp!;
     if (this.total == null) {
       // bar below 0.2% (fresh level / session start): the level total isn't known precisely yet, so check the
       // read against the previous read's implied total (and the previous level's total), never take it on trust
-      const d = r.exp - this.exp, est = this.lastTotal ? this.lastTotal * 1.2 : null;
-      const ok = d >= 0 && r.pct >= (this.pct ?? 0) - 0.01 && sameTotal({ exp: this.exp, pct: this.pct ?? 0 }, r, 0.02)
+      const d = r.exp - base, est = this.lastTotal ? this.lastTotal * 1.2 : null;
+      const ok = d >= 0 && r.pct >= (this.pct ?? 0) - 0.01 && sameTotal({ exp: base, pct: this.pct ?? 0 }, r, 0.02)
         && (!est || Math.abs(r.exp * 100 / est - r.pct) <= r.pct * 0.3 + 0.05);
-      if (!ok) return false;
-      const tot = r.pct > 0 ? r.exp * 100 / r.pct : Infinity;
-      if (d > tot * 0.1 && !(this.big && Math.abs(this.big.exp - r.exp) <= tot * 0.002)) { this.big = r; return false; }
-      this.big = null;
-      if (d > 0) this.gain(d);
-      this.exp = r.exp; this.pct = r.pct; this.setTotal(r);
-      return false;
+      if (!ok) return null;
+      const v = d > 0 ? this.vet(d, r, r.pct > 0 ? r.exp * 100 / r.pct : Infinity) : 'ok';
+      if (v === 'wait') return null;
+      if (v === 'ok' && d > 0) this.gain(d);
+      this.accept(r);
+      return null;
     }
     // a misread digit shifts exp but not %, so compare the % predicted from exp with the % read
     const total = this.total;
@@ -136,47 +185,78 @@ export class Tracker {
       for (let i = 0; i < d.length; i++) { const c = +(d.slice(0, i) + d.slice(i + 1)); if (fits(c)) fixes.add(c); }
       if (fixes.size === 1) r = { ...r, exp: [...fixes][0] };
     }
-    const consistent = total ? fits(r.exp) : r.exp >= this.exp;
-    const bigDrop = !!total && this.exp - r.exp > total * 0.12; // deaths cost ≤10%, so a bigger drop means the bar rolled over
+    const consistent = fits(r.exp);
+    const bigDrop = base - r.exp > total * 0.12; // deaths cost ≤10%, so a bigger drop means the bar rolled over
     if (consistent && !bigDrop) {
-      this.strikes = 0; this.pend = null;
-      const d = r.exp - this.exp;
-      // a huge jump between two reads (>10% of a level) must be read twice before it counts
-      if (d > total * 0.1 && !(this.big && Math.abs(this.big.exp - r.exp) <= total * 0.002)) { this.big = r; return false; }
-      this.big = null;
-      if (d > 0) { this.gain(d); this.exp = r.exp; this.pct = r.pct; this.drop = null; this.setTotal(r); }
-      else if (d < 0) {
+      this.strikes = 0; this.pend = null; this.lvCand = null;
+      const d = r.exp - base;
+      if (d > 0) {
+        const v = this.vet(d, r, total);
+        if (v === 'wait') return null;
+        if (v === 'ok') this.gain(d);
+        this.accept(r); this.drop = null;
+      } else if (d < 0) {
         // EXP went backwards (death without a safety charm): require a second matching read before logging it
-        if (this.drop && Math.abs(this.drop.exp - r.exp) <= Math.max(2, (total || 0) * 0.0002)) {
-          const lost = this.exp - r.exp;
+        if (this.drop && Math.abs(this.drop.exp - r.exp) <= Math.max(2, total * 0.0002)) {
+          const lost = base - r.exp;
           this.sess.expLost += lost; this.sess.deaths++;
           this.event('death', `EXP lost: -${fmtN(lost)} (death?)`);
-          this.exp = r.exp; this.pct = r.pct; this.drop = null;
+          this.accept(r, false); this.drop = null;
         } else this.drop = r;
       } else this.drop = null;
-      return false;
+      return null;
     }
-    // inconsistent: level-up candidate or bad read
-    if (bigDrop || (r.exp < this.exp && this.pct != null && r.pct < this.pct)) {
-      const g = Math.max(0, (total || this.exp) - this.exp) + r.exp;
-      // confirmed twice -> level up (but nobody earns half a level between two reads: that's a misread)
-      if (this.pend && r.exp >= this.pend.exp && r.pct >= this.pend.pct && (!total || g < total * 0.5)) {
-        this.gain(g);
-        const s = this.sess;
-        s.level = (s.level || 0) + 1; s.levelUps++;
-        this.event('level', `Level up! → ${s.level}`);
-        this.lastTotal = total; this.exp = r.exp; this.pct = r.pct; this.total = null; this.totalPct = 0; this.setTotal(r); this.pend = null; this.strikes = 0;
-        return true;
-      }
-      this.pend = r;
-      return false;
-    }
+    // inconsistent: a level-up (the bar rolled over) or a bad read
+    if (bigDrop || (r.exp < base && this.pct != null && r.pct < this.pct)) return this.rollover(r, total);
     // rebaseline after repeated disagreement (e.g. a drifting total estimate) only if the new reads agree with each
     // other AND imply about the same level total; a consistently misread digit on a still frame must not get in
-    if (total && r.pct >= 1 && Math.abs(r.exp * 100 / r.pct / total - 1) > 0.03) return false;
+    if (r.pct >= 1 && Math.abs(r.exp * 100 / r.pct / total - 1) > 0.03) return null;
     if (this.reb && Math.abs(this.reb.exp - r.exp) < this.reb.exp * 0.01) this.strikes++; else { this.strikes = 1; this.reb = r; }
-    if (this.strikes >= 4) { this.exp = r.exp; this.pct = r.pct; this.totalStale = true; this.setTotal(r); this.strikes = 0; this.reb = null; }
-    return false;
+    if (this.strikes >= 4) { this.accept(r, false); this.totalStale = true; this.setTotal(r); this.strikes = 0; this.reb = null; }
+    return null;
+  }
+
+  /**
+   * The bar is lower than before, twice in a row. That's a level-up only when the level number on screen went up
+   * (onLevelRead) or the new level clearly needs more EXP than the old one (exp·100/% once the bar is past 0.2%).
+   * Until then nothing is counted; unconfirmed for 3 minutes, it was a misread and the baseline moves without counting.
+   */
+  private rollover(r: ExpReading, total: number): ExpResult {
+    const s = this.sess, base = this.exp!;
+    const again = this.pend && r.exp >= this.pend.exp && r.pct >= this.pend.pct;
+    this.pend = r;
+    if (!again) return null;
+    const g = Math.max(0, total - base) + r.exp;
+    if (g >= total * 0.5) return null; // nobody earns half a level between two reads: a misread
+    const newTotal = r.pct >= MIN_TOTAL_PCT ? r.exp * 100 / r.pct : null;
+    const byTotal = newTotal != null && newTotal > total * 1.01;
+    const byLevel = this.lvSeen != null && this.lvSeen > (s.level ?? 0);
+    if (!byTotal && !byLevel) {
+      if (!this.lvCand) { this.lvCand = { since: this.now() }; return 'candidate'; }
+      if (this.now() - this.lvCand.since < LEVEL_CONFIRM_MS) return null;
+      this.event('info', 'The EXP bar dropped but the level number never changed: re-synced (nothing counted)');
+      this.lvCand = null; this.pend = null; this.lastTotal = total;
+      this.accept(r, false); this.total = null; this.totalPct = 0; this.setTotal(r);
+      return null;
+    }
+    const cap = this.expCap();
+    if (g <= cap) this.gain(g);
+    else this.event('info', `Level-up EXP of +${fmtN(g)} is more than fits (~${fmtN(cap)}): not counted`);
+    s.level = byLevel ? this.lvSeen! : (s.level || 0) + 1; s.levelUps++;
+    this.event('level', `Level up! → ${s.level}`);
+    this.lastTotal = total; this.total = null; this.totalPct = 0; this.accept(r);
+    this.pend = null; this.strikes = 0; this.lvCand = null; this.lvSeen = null;
+    return 'level';
+  }
+
+  /**
+   * The level number read from the screen (2 of 3 reads agreeing). It never goes down, and a jump of more than two
+   * levels is a misread; a higher level confirms the bar's roll-over as a level-up.
+   */
+  onLevelRead(lv: number) {
+    const s = this.sess;
+    if (s.level == null) { s.level = lv; s.levelStart ??= lv; return; }
+    if (lv > s.level && lv <= s.level + 2) this.lvSeen = lv;
   }
 
   /** Feed one HP or MP reading [cur, max]. */
@@ -252,7 +332,13 @@ export class Tracker {
     // with the max known the rise is in HP/MP; until then, a rise of a few percent of the bar
     const amt = max ? Math.round((to - from) * max) : 0;
     if (max ? amt < min : to - from < 0.04) { if (max) this[kind].regen += amt; return; }
-    s.rec += amt; (s.jumps ??= []).push(amt);
+    // which hotbar potion it was (its slot's count just changed); 'dup' = an item restoring HP and MP whose use the
+    // other gauge already counted
+    const src = this.deps.potSource?.(kind) ?? null;
+    if (src === 'dup') return;
+    s.rec += amt;
+    if (src) ((s.byPot ??= {})[src] ??= []).push(amt);
+    else (s.jumps ??= []).push(amt);
   }
 
   /**
@@ -282,6 +368,8 @@ export class Tracker {
         const d = s.drops[nm] || (s.drops[nm] = { qty: 0, cat: it.cat, id: canon?.id });
         d.qty += it.qty;
         this.event('drop', `${nm} ×${it.qty}`);
+        const mob = this.deps.mobForDrop?.(nm, this.mapCur);
+        if (mob) { const m = ((s.mobs ??= {})[mob] ??= { n: 0, last: 0 }); m.n += it.qty; m.last = elapsed(s, this.now()); }
       } else if (kind === 'meso') {
         const n = lineAmount(l);
         if (!n) continue;

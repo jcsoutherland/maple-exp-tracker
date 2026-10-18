@@ -145,6 +145,32 @@ export function gaugeFill(src: FrameSource, r: Region, kind: 'hp' | 'mp', scratc
   return fill / w;
 }
 
+/**
+ * The count digits of each quickslot slot as a bright-pixel mask (the bottom ~40% of the slot, where the count sits),
+ * for spotting a count change without reading it. `cells` picks the slots (row by row) worth computing.
+ */
+export function slotCountMasks(src: FrameSource, r: Region, cols: number, rows: number, cells: number[], scratch = document.createElement('canvas')): Map<number, Uint8Array> {
+  const { W, H } = frameSize(src);
+  const w = Math.max(cols * 4, Math.round(r.w * W)), h = Math.max(rows * 4, Math.round(r.h * H));
+  scratch.width = w; scratch.height = h;
+  const g = ctx2d(scratch);
+  g.drawImage(src, r.x * W, r.y * H, r.w * W, r.h * H, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h).data, out = new Map<number, Uint8Array>();
+  for (const i of cells) {
+    const c = i % cols, rw = Math.floor(i / cols);
+    const x0 = Math.floor(c * w / cols), x1 = Math.floor((c + 1) * w / cols);
+    const y0 = Math.floor((rw + 0.6) * h / rows), y1 = Math.floor((rw + 1) * h / rows);
+    const m = new Uint8Array((x1 - x0) * (y1 - y0));
+    let k = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++, k++) {
+      const p = (y * w + x) * 4;
+      m[k] = 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2] > 190 ? 1 : 0;
+    }
+    out.set(i, m);
+  }
+  return out;
+}
+
 export interface LogScan {
   W: number; H: number; f: number;
   /** per-pixel "text-likeness" score (0 = background) */
