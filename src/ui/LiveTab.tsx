@@ -49,6 +49,12 @@ export function LiveTab() {
           <option value={1}>Female</option>
         </select>
         <button disabled={!c.capture.ready || c.ocrState !== 'ready'} onClick={() => c.identify()}>Read from screen</button>
+        <span className="sp" />
+        <label className="idlecfg" title="Pause the session after this many seconds without EXP or loot (0 = never). It resumes by itself when EXP moves again, and idle time isn't counted.">
+          <span className="mut">Auto-pause after</span>
+          <input className="lv" type="number" min={0} step={5} value={c.settings.idlePauseSec} onChange={e => c.updateSettings({ idlePauseSec: Math.max(0, Math.round(+e.target.value) || 0) })} />
+          <span className="mut">{c.settings.idlePauseSec ? 's idle' : 's (off)'}</span>
+        </label>
       </div>
 
       <div className="card sheet">

@@ -121,6 +121,30 @@ export function regionSignature(src: FrameSource, r: Region, scratch = document.
   return h >>> 0;
 }
 
+/**
+ * How full the HP or MP gauge under the numbers is (0–1): columns that are red / blue (filled) versus grey (empty).
+ * A pure pixel read, cheap enough for ~10×/s, so a potion shows up as a sharp step. null when the strip doesn't look
+ * like a gauge (loading screen, a window over it), so no step is ever counted across it.
+ */
+export function gaugeFill(src: FrameSource, r: Region, kind: 'hp' | 'mp', scratch = document.createElement('canvas')): number | null {
+  const { W, H } = frameSize(src);
+  const w = Math.max(8, Math.round(r.w * W));
+  scratch.width = w; scratch.height = 1;
+  const g = ctx2d(scratch);
+  g.imageSmoothingEnabled = true;
+  g.drawImage(src, r.x * W, r.y * H, r.w * W, Math.max(1, r.h * H), 0, 0, w, 1); // the rows averaged into one
+  const d = g.getImageData(0, 0, w, 1).data;
+  let fill = 0, empty = 0, last = -1;
+  for (let x = 0, i = 0; x < w; x++, i += 4) {
+    const R = d[i], G = d[i + 1], B = d[i + 2], hi = Math.max(R, G, B), lo = Math.min(R, G, B);
+    const on = kind === 'hp' ? R > 110 && R - Math.max(G, B) > 70 : B > 110 && B - R > 70;
+    if (on) { fill++; last = x; } else if (hi - lo < 45 && hi > 110) empty++;
+  }
+  // a real gauge is all fill or empty, and the fill is one piece from the left
+  if (fill + empty < w * 0.85 || last >= fill + 2) return null;
+  return fill / w;
+}
+
 export interface LogScan {
   W: number; H: number; f: number;
   /** per-pixel "text-likeness" score (0 = background) */

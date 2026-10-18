@@ -3,7 +3,7 @@ import { classLook, LOOK_V, rollLook, SpriteLoader, type CharLook } from '../cor
 import { REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
 import { canonItem, canonMap, loadOsms, mapsReady, osmsReady } from '../core/data/osms';
 import { ExpLineFilter, snapCanvas, snapInk, snapLine, type LineSnap } from '../core/logqueue';
-import { enhanceText, fixIL, logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
+import { enhanceText, fixIL, frameSize, gaugeFill, logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
 import { cleanMap, cleanName, lineAmount, lineKind, lineQuality, matchClass, parseExp, parseLevel, parsePair } from '../core/parse';
@@ -76,7 +76,7 @@ export class Controller {
   private recent: [number, number][] = [];
   private lastTimeline = 0;
   private lastSave = 0;
-  private scratch = { sig: document.createElement('canvas') };
+  private scratch = { sig: document.createElement('canvas'), gauge: document.createElement('canvas') };
 
   constructor() {
     const ch = store.loadChars(), last = store.loadSessions().slice(-1)[0];
@@ -260,6 +260,7 @@ export class Controller {
     this.ticker.set({
       log: [sc.logWatchMs, () => this.tickLog()],
       bars: [sc.barsMs, () => this.tickBars()],
+      gauge: [sc.gaugeMs, () => this.tickGauge()],
       exp: [sc.expMs, () => this.tickExp()],
       map: [Math.min(sc.mapMs, 2000), () => this.tickMap(false)],
       ui: [1000, () => { this.checkIdle(); this.persist(); this.notify(); }],
@@ -388,6 +389,18 @@ export class Controller {
       this.tracker?.onBar('hp', parsePair(h));
       this.tracker?.onBar('mp', parsePair(m));
     } catch (e) { console.error(e); } finally { this.busy.bars = false; }
+  }
+
+  /** HP / MP gauge fill, by pixel colour (~10×/s, well under a millisecond): what potions are counted from. */
+  gaugeLast: { hp: number | null; mp: number | null } = { hp: null, mp: null };
+  private tickGauge() {
+    if (!this.canRun) return;
+    const v = this.capture.video;
+    for (const k of ['hp', 'mp'] as const) {
+      const f = gaugeFill(v, this.regions[k === 'hp' ? 'hpGauge' : 'mpGauge'], k, this.scratch.gauge);
+      this.gaugeLast[k] = f;
+      this.tracker?.onGauge(k, f);
+    }
   }
 
   private async tickExp() {
@@ -549,6 +562,16 @@ export class Controller {
         this.slotCache = saved;
         rows.push({ key, label: def.label, color: def.color, img: logPreviewCanvas(lo).toDataURL(), raw: lines.join(' ⏎ '),
           parsed: lines.slice().reverse().map(l => `${lineKind(l) ?? '?'}${lineAmount(l) ? ' +' + lineAmount(l) : ''}`).join(' ⏎ ') || '(no lines)' });
+        continue;
+      }
+      if (def.gauge) { // pixel colour, no OCR: show the strip that's read and how full it looks
+        const k = key === 'hpGauge' ? 'hp' : 'mp', r = this.regions[key], f = gaugeFill(src, r, k), c = document.createElement('canvas');
+        const { W, H } = frameSize(src);
+        c.width = Math.max(8, Math.round(r.w * W)) * 2; c.height = 16;
+        const g = c.getContext('2d')!; g.imageSmoothingEnabled = false; g.drawImage(src, r.x * W, r.y * H, r.w * W, Math.max(1, r.h * H), 0, 0, c.width, c.height);
+        const max = this.tracker?.[k].max;
+        rows.push({ key, label: def.label, color: def.color, img: c.toDataURL(), raw: 'pixel read, no OCR',
+          parsed: f == null ? '✗ not a gauge here (drag this box onto the middle of the bar)' : `${(f * 100).toFixed(0)}% full${max ? ` ≈ ${Math.round(f * max)} / ${max}` : ''}` });
         continue;
       }
       if (key === 'level') { // the colour-aware reader used for the level

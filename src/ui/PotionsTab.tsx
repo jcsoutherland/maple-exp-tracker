@@ -22,7 +22,8 @@ export function PotionsTab() {
         <PotionSection kind="mp" />
       </div>
       <div className="mut small" style={{ marginTop: 4 }}>
-        A potion is counted each time HP/MP jumps up by at least the regen cutoff (Setup); a jump worth two potions counts as two.
+        The HP/MP gauges are checked 10× a second: each sharp rise of at least the regen cutoff (Setup) is a potion, even while you're
+        being hit; a rise worth two potions counts as two.
         Restore amounts come from the item data; shop price is {SHOP_PRICE_FACTOR}× the item's NPC sell value.
       </div>
     </section>

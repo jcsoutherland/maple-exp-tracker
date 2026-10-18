@@ -36,6 +36,20 @@ const LEGACY_UNKNOWN = 'Undefined';
 
 const newBar = (): Bar => ({ buf: [], cur: null, max: null, votes: {}, regen: 0 });
 
+/** HP/MP gauge fill (0–1) as seen ~10×/s: the last three reads, the smoothed level, a rise in progress, and since when it's unreadable. */
+interface Gauge { win: number[]; level: number | null; riseFrom: number | null; lastOk: number; badSince: number | null }
+const newGauge = (): Gauge => ({ win: [], level: null, riseFrom: null, lastOk: -Infinity, badSince: null });
+/**
+ * The game flashes a gauge for ~0.5 s whenever it changes (a potion, a hit), and the flashing frames don't read as a
+ * gauge. Up to this long, the level from before is kept, so a potion is the step from before the flash to after it;
+ * anything longer (loading screen, a window over the bar) starts over.
+ */
+const GAUGE_GAP_MS = 1500;
+/** gauge reads are trusted for potion counting while one came in this recently (else the OCR'd numbers are used) */
+const GAUGE_LIVE_MS = 3000;
+/** below this fill the character is (nearly) dead: a rise from there is a respawn, not a potion */
+const GAUGE_DEAD = 0.02;
+
 /**
  * Turns validated screen readings into session totals. Holds no DOM state, so it is unit-testable and shared by
  * the web app and a future desktop shell.
@@ -63,6 +77,7 @@ export class Tracker {
   // bars
   hp = newBar();
   mp = newBar();
+  private gauge = { hp: newGauge(), mp: newGauge() };
   // pickup log
   private logPrev: string[] = [];
   private mesoAmts: number[] = [];
@@ -81,6 +96,7 @@ export class Tracker {
   rebaseline() {
     this.exp = null; this.firsts = []; this.big = null; this.pend = null; this.drop = null; this.strikes = 0;
     this.hp.cur = this.mp.cur = null; this.hp.buf = []; this.mp.buf = []; this.logPrev = [];
+    this.gauge = { hp: newGauge(), mp: newGauge() };
   }
 
   private gain(d: number) { const s = this.sess; s.exp += d; const m = this.mapName; s.maps[m] = (s.maps[m] || 0) + d; }
@@ -189,9 +205,50 @@ export class Tracker {
     const d = cur - b.cur, min = kind === 'hp' ? this.deps.hpMin() : this.deps.mpMin();
     s.max = b.max;
     if (d < 0) s.used += -d;
-    else if (d >= min) { s.rec += d; (s.jumps ??= []).push(d); } // a potion (or two between reads)
+    // potions come from the gauge while it's readable; the 1/s numbers are only a fallback (they see the net change,
+    // so a potion taken while being hit is easily lost)
+    else if (d >= min && !this.gaugeLive(kind)) { s.rec += d; (s.jumps ??= []).push(d); }
     else if (d > 0) b.regen += d;
     b.cur = cur;
+  }
+
+  private gaugeLive(kind: 'hp' | 'mp') { return this.now() - this.gauge[kind].lastOk < GAUGE_LIVE_MS; }
+
+  /**
+   * Feed one HP or MP gauge read (fill 0–1, null = not readable). Read ~10×/s, a potion is a sharp rise: each rise
+   * of at least the regen cutoff counts as one potion (a rise worth two counts as two), even while taking damage,
+   * because damage and the potion rarely land in the same tenth of a second. A median of three reads filters
+   * single-frame noise, and consecutive rising reads (an animated bar) are one rise.
+   */
+  onGauge(kind: 'hp' | 'mp', fill: number | null) {
+    const g = this.gauge[kind], now = this.now();
+    if (fill == null) {
+      g.win = [];
+      g.badSince ??= now;
+      if (now - g.badSince > GAUGE_GAP_MS) { g.level = null; g.riseFrom = null; }
+      return;
+    }
+    g.badSince = null;
+    g.lastOk = now;
+    g.win.push(fill);
+    if (g.win.length > 3) g.win.shift();
+    if (g.win.length < 3) return;
+    const m = median(g.win);
+    if (g.level == null) { g.level = m; return; }
+    if (m > g.level) { g.riseFrom ??= g.level; g.level = m; return; }
+    if (g.riseFrom != null) this.gaugeRise(kind, g.riseFrom, g.level);
+    g.riseFrom = null;
+    g.level = m;
+  }
+
+  private gaugeRise(kind: 'hp' | 'mp', from: number, to: number) {
+    if (from < GAUGE_DEAD) return; // respawn
+    const max = this[kind].max, s = this.sess[kind];
+    const min = kind === 'hp' ? this.deps.hpMin() : this.deps.mpMin();
+    // with the max known the rise is in HP/MP; until then, a rise of a few percent of the bar
+    const amt = max ? Math.round((to - from) * max) : 0;
+    if (max ? amt < min : to - from < 0.04) { if (max) this[kind].regen += amt; return; }
+    s.rec += amt; (s.jumps ??= []).push(amt);
   }
 
   /**

@@ -122,6 +122,55 @@ describe('HP/MP bars', () => {
   });
 });
 
+describe('HP/MP gauges', () => {
+  const W = 96, px = (n: number) => n / W; // a 96px gauge read 10x/s
+  let clock = 0;
+  const feed = (t: Tracker, kind: 'hp' | 'mp', cols: (number | null)[]) => cols.forEach(c => { clock += 100; t.onGauge(kind, c == null ? null : px(c)); });
+  const withMax = () => {
+    const s = newSession('Flynny', 'Hunter', 37, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => clock });
+    for (let i = 0; i < 3; i++) t.onBar('hp', [1303, 1303]);
+    return { s, t };
+  };
+  const _ = null; // a flashing (unreadable) frame
+
+  it('counts a potion across the flash the game shows when the bar changes', () => {
+    const { s, t } = withMax();
+    feed(t, 'hp', [60, 60, 60, _, _, _, _, _, 72, 72, 72, 72]);
+    expect(s.hp.jumps!.length).toBe(1);
+  });
+
+  it('counts each potion as a sharp rise, even while taking damage', () => {
+    const { s, t } = withMax();
+    // full, hit down, pot (+12px ~ 160 HP), hit, hit, pot, hit, pot
+    feed(t, 'hp', [90, 90, 90, 80, 80, 80, 70, 70, 70, 82, 82, 82, 76, 76, 76, 68, 68, 68, 80, 80, 80, 74, 74, 74, 86, 86, 86]);
+    expect(s.hp.jumps!.length).toBe(3);
+    expect(s.hp.jumps!.every(j => j >= 140 && j <= 170)).toBe(true);
+    expect(potionsUsed(s.hp.jumps!, 160)).toBe(3);
+  });
+  it('treats an animated rise over several frames as one potion', () => {
+    const { s, t } = withMax();
+    feed(t, 'hp', [50, 50, 50, 54, 58, 62, 62, 62, 62]);
+    expect(s.hp.jumps!.length).toBe(1);
+  });
+  it('ignores one-frame noise, regen ticks and respawns', () => {
+    const { s, t } = withMax();
+    feed(t, 'hp', [50, 50, 50, 70, 50, 50, 51, 51, 51]); // a one-frame blip and a 1px (~14 HP) regen tick
+    feed(t, 'hp', [0, 0, 0, 48, 48, 48]); // respawn
+    expect(s.hp.jumps ?? []).toEqual([]);
+  });
+  it('never counts a rise across an unreadable gauge (loading screen)', () => {
+    const { s, t } = withMax();
+    feed(t, 'hp', [40, 40, 40, ...Array(20).fill(_), 80, 80, 80, 80]); // 2 s unreadable
+    expect(s.hp.jumps ?? []).toEqual([]);
+  });
+  it('ignores the OCR numbers for potions while the gauge is readable', () => {
+    const { s, t } = withMax();
+    feed(t, 'hp', [90, 90, 90]);
+    ([[1000, 1303], [1000, 1303], [1000, 1303], [1160, 1303], [1160, 1303], [1160, 1303]] as [number, number][]).forEach(p => t.onBar('hp', p));
+    expect(s.hp.jumps ?? []).toEqual([]);
+  });
+});
+
 describe('potions', () => {
   it('parses recovery amounts from item descriptions', () => {
     expect(parseRecovery('Tasty-looking meat.\nRestores around 160 HP.')).toEqual({ hp: 160, mp: 0, hpPct: 0, mpPct: 0 });
@@ -132,7 +181,7 @@ describe('potions', () => {
   it('counts potions consumed from recovery jumps', () => {
     expect(potionsUsed([160, 150, 320], 160)).toBe(4); // the 320 jump is two meats between reads
     expect(potionsUsed([90], 160)).toBe(1); // a jump is at least one potion (topped off near max)
-    expect(potionsUsed([45, 60], 160)).toBe(0); // under half a potion: regen burst / read noise
+    expect(potionsUsed([45, 60], 160)).toBe(2); // jumps are already above the regen cutoff: a partly-shown pot is still one
   });
 });
 

@@ -63,11 +63,10 @@ export const restoreOf = (p: Potion, kind: 'hp' | 'mp', max: number | null) =>
   kind === 'hp' ? p.hp || Math.round(p.hpPct * (max || 0)) : p.mp || Math.round(p.mpPct * (max || 0));
 
 /**
- * Potions actually consumed: each recovery jump is at least one potion (a jump can be two quaffed between reads).
- * `jumps` are the sizes of the pot-sized increases the tracker saw.
+ * Potions actually consumed: each recovery jump is one potion, or more when it's worth several (quaffed together).
+ * `jumps` are the sizes of the increases the tracker saw, already above the regen cutoff. A jump much smaller than
+ * the Active potion still counts: a potion near max HP, or one taken while being hit, shows only part of its value.
  */
 export function potionsUsed(jumps: number[], restore: number): number {
-  if (restore <= 0) return 0;
-  // jumps under half a potion are regen bursts or read noise, not a potion (a pot near max still restores ≥ half)
-  return jumps.reduce((n, j) => n + (j < restore * 0.5 ? 0 : Math.max(1, Math.round(j / restore))), 0);
+  return jumps.reduce((n, j) => n + (restore > 0 ? Math.max(1, Math.round(j / restore)) : 1), 0);
 }

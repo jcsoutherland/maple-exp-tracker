@@ -82,9 +82,11 @@ export function SetupTab() {
             <div key={k} className={'reg' + (k === sel ? ' sel' : '')} onClick={() => setSel(k)}>
               <span className="sw" style={{ background: REGION_DEFS[k].color }} />
               <span className="nm">{REGION_DEFS[k].label}</span>
-              <span className="mut small">thr</span>
-              <input type="range" min={60} max={240} value={c.regions[k].thr} onClick={e => e.stopPropagation()} onChange={e => c.setRegion(k, { thr: +e.target.value })} />
-              <span className="mut small" style={{ width: 28 }}>{c.regions[k].thr}</span>
+              {REGION_DEFS[k].gauge ? <span className="mut small">read by colour</span> : <>
+                <span className="mut small">thr</span>
+                <input type="range" min={60} max={240} value={c.regions[k].thr} onClick={e => e.stopPropagation()} onChange={e => c.setRegion(k, { thr: +e.target.value })} />
+                <span className="mut small" style={{ width: 28 }}>{c.regions[k].thr}</span>
+              </>}
             </div>
           ))}
           <h3 style={{ marginTop: 16 }}>OCR test</h3>
@@ -115,7 +117,8 @@ export function SetupTab() {
         <h3>Read schedule &amp; detection</h3>
         <div className="row">
           <label>Pickup-log watch <input type="number" min={33} step={11} value={sched.logWatchMs} style={{ width: 70 }} onChange={e => setSched('logWatchMs', Math.max(33, +e.target.value))} /> ms</label>
-          <label>HP/MP <input type="number" min={500} step={250} value={sched.barsMs} style={{ width: 70 }} onChange={e => setSched('barsMs', Math.max(500, +e.target.value))} /> ms</label>
+          <label>HP/MP numbers <input type="number" min={500} step={250} value={sched.barsMs} style={{ width: 70 }} onChange={e => setSched('barsMs', Math.max(500, +e.target.value))} /> ms</label>
+          <label title="How often the HP/MP gauges are checked for potions (pixel read, very cheap)">HP/MP gauges <input type="number" min={50} step={50} value={sched.gaugeMs} style={{ width: 70 }} onChange={e => setSched('gaugeMs', Math.max(50, +e.target.value))} /> ms</label>
           <label>EXP bar <input type="number" min={1000} step={500} value={sched.expMs} style={{ width: 70 }} onChange={e => setSched('expMs', Math.max(1000, +e.target.value))} /> ms</label>
           <label>Map check <input type="number" min={2000} step={1000} value={sched.mapMs} style={{ width: 70 }} onChange={e => setSched('mapMs', Math.max(2000, +e.target.value))} /> ms, and every <input type="number" min={500} step={500} value={sched.mapExpStep} style={{ width: 70 }} onChange={e => setSched('mapExpStep', Math.max(500, +e.target.value))} /> EXP</label>
         </div>

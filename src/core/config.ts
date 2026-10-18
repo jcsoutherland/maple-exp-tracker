@@ -1,7 +1,7 @@
 /** A screen region as fractions of the captured frame, plus its brightness threshold. */
 export interface Region { x: number; y: number; w: number; h: number; thr: number }
 
-export type RegionKey = 'map' | 'mapBar' | 'level' | 'cls' | 'name' | 'hp' | 'mp' | 'exp' | 'log';
+export type RegionKey = 'map' | 'mapBar' | 'level' | 'cls' | 'name' | 'hp' | 'mp' | 'exp' | 'hpGauge' | 'mpGauge' | 'log';
 
 /**
  * How each region is read.
@@ -9,7 +9,7 @@ export type RegionKey = 'map' | 'mapBar' | 'level' | 'cls' | 'name' | 'hp' | 'mp
  * - px: height in pixels the crop is upscaled to before OCR
  * - engine: which OCR model reads it (digits-only or general text)
  */
-export interface RegionDef { label: string; color: string; engine: 'num' | 'text'; mode: 'luma' | 'white'; px: number }
+export interface RegionDef { label: string; color: string; engine: 'num' | 'text'; mode: 'luma' | 'white'; px: number; /** read by pixel colour, not OCR (no threshold) */ gauge?: true }
 
 export const REGION_DEFS: Record<RegionKey, RegionDef> = {
   map: { label: 'Map name', color: '#ff7ab8', engine: 'text', mode: 'luma', px: 45 },
@@ -20,6 +20,9 @@ export const REGION_DEFS: Record<RegionKey, RegionDef> = {
   hp: { label: 'HP numbers', color: '#e5484d', engine: 'num', mode: 'luma', px: 30 },
   mp: { label: 'MP numbers', color: '#3e8ef7', engine: 'num', mode: 'luma', px: 30 },
   exp: { label: 'EXP numbers', color: '#e8e84a', engine: 'num', mode: 'luma', px: 30 },
+  // pixel-read gauges (no OCR): a thin strip through the middle of the red / blue bar
+  hpGauge: { label: 'HP gauge', color: '#ff8a8a', engine: 'num', mode: 'luma', px: 0, gauge: true },
+  mpGauge: { label: 'MP gauge', color: '#8ab8ff', engine: 'num', mode: 'luma', px: 0, gauge: true },
   log: { label: 'Pickup log', color: '#b06fd8', engine: 'text', mode: 'luma', px: 0 },
 };
 
@@ -34,6 +37,8 @@ export const DEFAULT_REGIONS: Record<RegionKey, Region> = {
   hp: { x: 0.3781, y: 0.9569, w: 0.0492, h: 0.0181, thr: 140 },
   mp: { x: 0.4594, y: 0.9569, w: 0.0453, h: 0.0181, thr: 140 },
   exp: { x: 0.5469, y: 0.9569, w: 0.068, h: 0.0181, thr: 140 },
+  hpGauge: { x: 0.3688, y: 0.9833, w: 0.075, h: 0.0042, thr: 140 },
+  mpGauge: { x: 0.4477, y: 0.9833, w: 0.0758, h: 0.0042, thr: 140 },
   log: { x: 0.8364, y: 0.6407, w: 0.1636, h: 0.1806, thr: 140 },
 };
 
@@ -41,8 +46,8 @@ export const DEFAULT_REGIONS: Record<RegionKey, Region> = {
  * Read cadence per task (ms). The pickup log is change-detected at a high rate and only OCR'd when a new line
  * appears; everything else is sampled on a timer. Map is also re-read every `mapExpStep` EXP.
  */
-export interface Schedule { logWatchMs: number; logForceMs: number; barsMs: number; expMs: number; mapMs: number; mapExpStep: number }
-export const DEFAULT_SCHEDULE: Schedule = { logWatchMs: 66, logForceMs: 1500, barsMs: 1000, expMs: 5000, mapMs: 10000, mapExpStep: 5000 };
+export interface Schedule { logWatchMs: number; logForceMs: number; barsMs: number; gaugeMs: number; expMs: number; mapMs: number; mapExpStep: number }
+export const DEFAULT_SCHEDULE: Schedule = { logWatchMs: 66, logForceMs: 1500, barsMs: 1000, gaugeMs: 100, expMs: 5000, mapMs: 10000, mapExpStep: 5000 };
 
 export interface Settings {
   schedule: Schedule;

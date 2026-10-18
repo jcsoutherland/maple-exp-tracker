@@ -42,6 +42,7 @@ tr.dim td{color:var(--mut);opacity:.6}
 .feed .t{color:var(--mut);margin-right:6px;font-variant-numeric:tabular-nums}
 .ic{width:28px;height:28px;object-fit:contain;vertical-align:middle;image-rendering:pixelated}
 .charin input{width:110px}.charin input.lv{width:56px}
+.idlecfg{display:flex;align-items:center;gap:6px;white-space:nowrap}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:800px){.grid2{grid-template-columns:1fr}}
 #setupCanvas{width:100%;border:1px solid var(--line);border-radius:6px;cursor:crosshair;touch-action:none;background:#000}
