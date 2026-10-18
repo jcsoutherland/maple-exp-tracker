@@ -14,10 +14,30 @@ export interface LineSnap {
   t: number;
   /** yellow text: an EXP line, skipped without reading */
   yellow?: boolean;
+  /** the line's raw RGBA pixels (W × rgbH, with a small margin above and below), which the neural reader reads best */
+  rgb?: Uint8ClampedArray | null;
+  rgbH?: number;
 }
 
 export function snapLine(lo: LogScan, hi: LogScan | null, [a, z]: [number, number], t: number, yellow = false): LineSnap {
-  return { lo: lo.sc.slice(a * lo.W, z * lo.W), hi: hi ? hi.sc.slice(a * hi.W, z * hi.W) : null, W: lo.W, h: z - a, f: lo.f, t, yellow };
+  // the raw pixels keep ~2px (at 720p) of margin above and below: the neural reader likes a little room around the text
+  const m = Math.round(2 * lo.f), ra = Math.max(0, a - m), rz = Math.min(lo.H, z + m);
+  return { lo: lo.sc.slice(a * lo.W, z * lo.W), hi: hi ? hi.sc.slice(a * hi.W, z * hi.W) : null, W: lo.W, h: z - a, f: lo.f, t, yellow,
+    rgb: yellow || !lo.rgba ? null : lo.rgba.slice(ra * lo.W * 4, rz * lo.W * 4), rgbH: rz - ra };
+}
+
+/** The snapshot's original pixels as a canvas, optionally only columns x0..x1 (fractions of its width). */
+export function snapRaw(s: LineSnap, x0 = 0, x1 = 1): HTMLCanvasElement | null {
+  const h = s.rgbH ?? s.h;
+  if (!s.rgb || !h) return null;
+  const full = document.createElement('canvas');
+  full.width = s.W; full.height = h;
+  full.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(s.rgb), s.W, h), 0, 0);
+  if (x0 <= 0 && x1 >= 1) return full;
+  const a = Math.floor(x0 * s.W), b = Math.max(a + 4, Math.ceil(x1 * s.W)), c = document.createElement('canvas');
+  c.width = b - a; c.height = h;
+  c.getContext('2d')!.drawImage(full, a, 0, b - a, h, 0, 0, b - a, h);
+  return c;
 }
 
 /** How much text a snapshot holds (ink pixels), and a hash of its ink pattern: equal hashes read the same. */
@@ -48,7 +68,7 @@ export function snapExtent(s: LineSnap): { x0: number; x1: number } | null {
  */
 export class LineShapeFilter {
   private edges: number[] = [];
-  /** the learned right edge (median of real lines' ends), once there are enough */
+  /** the learned right edge (median of real lines' ends, a fraction of the width), once there are enough */
   get edge() { if (this.edges.length < 5) return null; const e = [...this.edges].sort((a, b) => a - b); return e[e.length >> 1]; }
   isJunk(s: LineSnap): boolean {
     const x = snapExtent(s);

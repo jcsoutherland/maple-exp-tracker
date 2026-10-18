@@ -40,7 +40,7 @@ prototype/     the original single-file version, kept for reference
 
 | What | When | How |
 |---|---|---|
-| Pickup log | Change check every 66 ms (never waits on OCR) | Each pixel is scored as "bright, greyish, brighter than its surroundings" and lines are cut on the log's fixed 13px (720p) grid; new lines are found by correlating line slots with the previous frame. A new line is copied out at once into a short queue (≤60 lines, ≤30 s) that two OCR workers read. Yellow lines (EXP / party bonus) are skipped when spotted, and so is anything not shaped like a log line (players or monsters behind the log): a real line ends on the learned right edge and spans ≥ 30% of the width. A line that doesn't parse is re-snapshotted while still on screen (≤4 tries) and counted once |
+| Pickup log | Change check every 66 ms (never waits on OCR) | Each pixel is scored as "bright, greyish, brighter than its surroundings" and lines are cut on the log's fixed 13px (720p) grid; new lines are found by correlating line slots with the previous frame. A new line is copied out at once (its original pixels too) into a short queue (≤60 lines, ≤30 s) and read by **PaddleOCR** (`src/core/ocr/paddle.ts`: the PP-OCRv5 English line recogniser, Apache-2.0, run with onnxruntime-web; the model is in the data mirror), which reads the original colour image far better than Tesseract over busy scenery. Tesseract stays for the status bar, name and level, and the log falls back to it if the model can't load. Yellow lines (EXP / party bonus) are skipped when spotted, and so is anything not shaped like a log line (players or monsters behind the log): a real line ends on the learned right edge and spans ≥ 30% of the width. A line that doesn't parse is re-snapshotted while still on screen (≤4 tries) and counted once |
 | HP / MP numbers | Every 1 s | Digits OCR, max value by decaying vote, 5-read median (for the display) |
 | HP / MP gauges | Every 100 ms | Pixel colour: how much of the bar is red / blue. A rise above the regen cutoff is a potion when the hotbar doesn't count that stat. The game flashes a bar for ~0.5 s when it changes, so the level from before the flash is compared with the level after |
 | Quickslot counts | ~3×/s, only slots holding a potion | Each digit matched against templates of the game's font (`src/core/potcount.ts`, per digit position, on the brightest colour channel so the potion picture behind doesn't matter); a new count needs two matching reads. A drop of N is N potions used, a rise is a pickup |
@@ -61,7 +61,7 @@ Item, map and monster data comes from [OSMS Data Explorer](https://osmsdataexplo
 
 To keep traffic to those community sites tiny, the app doesn't download from them per user. The deploy workflow runs `dev/mirror-data.mjs` (weekly, on push and on demand), which:
 - refreshes the three OSMS lists (trimmed to the fields the app uses) at most once a week,
-- downloads item icons and monster images only if the mirror doesn't have them yet, gently (~4 requests/s, within a time budget per run),
+- downloads the PaddleOCR model once, and item icons and monster images only if the mirror doesn't have them yet, gently (~4 requests/s, within a time budget per run),
 - publishes them with the site at `/data/` (kept between runs in the Actions cache; never committed).
 
 The app reads `/data/` first and only asks the original site for a file the mirror doesn't have yet (`src/core/mirror.ts`); each device also keeps what it loaded in IndexedDB.

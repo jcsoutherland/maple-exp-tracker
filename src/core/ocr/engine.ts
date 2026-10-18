@@ -8,6 +8,8 @@ export interface OcrChar { c: string; x0: number; y0: number; x1: number; y1: nu
 
 export interface OcrEngine {
   readonly name: string;
+  /** reads the original (colour) image better than a thresholded one */
+  readonly prefersRaw?: boolean;
   init(): Promise<void>;
   /** Recognise a single line of text in a prepared (dark-on-light) canvas. */
   read(canvas: HTMLCanvasElement, kind: OcrKind): Promise<string>;

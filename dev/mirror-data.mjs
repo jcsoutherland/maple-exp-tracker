@@ -65,6 +65,16 @@ if (!listsFresh) {
 const items = JSON.parse(fs.readFileSync(file('osms/items.json'), 'utf8'));
 const mobs = JSON.parse(fs.readFileSync(file('osms/monsters.json'), 'utf8'));
 
+// ---------- the PaddleOCR English line recogniser (Apache-2.0), once ----------
+const HF = 'https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/english/';
+for (const [rel, url] of [['models/en_rec.onnx', HF + 'rec.onnx'], ['models/en_dict.txt', HF + 'dict.txt']]) {
+  if (has(rel)) continue;
+  const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(300_000) });
+  if (!res.ok) { console.warn('  model failed:', res.status, url); continue; }
+  write(rel, Buffer.from(await res.arrayBuffer()));
+  console.log('  model', rel);
+}
+
 // ---------- images, only the missing ones: monsters, then item icons ----------
 const want = new Map(); // mirror path → source URL, in priority order
 for (const m of mobs) {

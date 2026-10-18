@@ -155,6 +155,8 @@ export interface LogScan {
   yellow?: boolean[];
   /** where this frame's newest line was detected (bottom row, -1 = none), for learning the anchor */
   detected?: number;
+  /** the region's raw RGBA pixels (W×H), for reading lines from the original image */
+  rgba?: Uint8ClampedArray;
 }
 
 /**
@@ -218,7 +220,7 @@ export function logScan(src: FrameSource, r: Region, thr: number, scratch = docu
     }
     return bright >= 20 && yel > bright * 0.5;
   });
-  return { W, H, f, sc, slots, yellow, detected };
+  return { W, H, f, sc, slots, yellow, detected, rgba: d };
 }
 
 /** Signature of the text pixels inside one slot: same value = same line, so its OCR result can be reused. */

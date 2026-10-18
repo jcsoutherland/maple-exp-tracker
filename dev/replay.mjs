@@ -63,6 +63,8 @@ const out = await page.evaluate(async (speed, opt) => {
   c.debug = (kind, info) => skipped.push([+vt.toFixed(2), kind, info && info.lo ? (e => (e ? e.x0.toFixed(2) + '-' + e.x1.toFixed(2) : '-'))(snapExtent(info)) : info ?? '']);
   const read0 = c.engine.read.bind(c.engine);
   c.engine.read = async (cv, kind) => { const t = await read0(cv, kind); if (kind === 'line') ocrLines.push([+vt.toFixed(2), t]); return t; };
+  if (c.logEngine !== c.engine) { const lr0 = c.logEngine.read.bind(c.logEngine); c.logEngine.read = async (cv, kind) => { const t = await lr0(cv, kind); ocrLines.push([+vt.toFixed(2), t]); return t; }; }
+  if (opt.logOcr === 'tesseract') c.logEngine = c.engine; // LOG_OCR=tesseract: compare with the old reader
   const lines0 = c.tracker.onLogLines.bind(c.tracker);
   c.tracker.onLogLines = ls => { ls.forEach(l => countedLines.push([+vt.toFixed(2), l])); lines0(ls); };
   const orig = c.tracker.event.bind(c.tracker);
@@ -101,7 +103,7 @@ const out = await page.evaluate(async (speed, opt) => {
   };
 }, +(process.env.SPEED || 1), {
   logHz: +(process.env.LOG_HZ || 4), hotbar: JSON.parse(process.env.HOTBAR || '{}'), regions: JSON.parse(process.env.REGIONS || '{}'),
-  level: +(process.env.LEVEL || 37), cls: process.env.CLASS || 'Hunter',
+  level: +(process.env.LEVEL || 37), cls: process.env.CLASS || 'Hunter', logOcr: process.env.LOG_OCR || 'paddle',
 });
 console.log(out.log.join('\n'));
 if (process.env.DIAG) fs.writeFileSync(process.env.DIAG, JSON.stringify({ ocr: out.ocrLines, counted: out.countedLines, skipped: out.skipped }));

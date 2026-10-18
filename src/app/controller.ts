@@ -4,10 +4,12 @@ import { HOTBAR_COLS, HOTBAR_ROWS, REGION_DEFS, type Region, type RegionKey, typ
 import { potionByName } from '../core/potions';
 import { GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { canonItem, canonMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
-import { ExpLineFilter, LineShapeFilter, LogAnchor, snapCanvas, snapInk, snapLine, type LineSnap } from '../core/logqueue';
-import { enhanceText, fixIL, frameSize, gaugeFill, logLineCanvas, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
+import { ExpLineFilter, LineShapeFilter, LogAnchor, snapInk, snapLine, type LineSnap } from '../core/logqueue';
+import { readLogSnap } from '../core/logread';
+import { enhanceText, fixIL, frameSize, gaugeFill, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
+import { PaddleEngine } from '../core/ocr/paddle';
 import { cleanMap, cleanName, lineAmount, lineKind, lineQuality, matchClass, parseExp, parseLevel, parsePair } from '../core/parse';
 import { elapsed, finalize, newSession, type SavedSession, type Session } from '../core/session';
 import * as store from '../core/storage';
@@ -49,6 +51,11 @@ const mapText = (raw: string) => {
 export class Controller {
   readonly capture = new Capture();
   engine: OcrEngine = new TesseractEngine();
+  /**
+   * The pickup log's reader: PaddleOCR (a neural line recogniser, far better than Tesseract on small text over busy
+   * scenery and effects), falling back to Tesseract if its model can't be loaded.
+   */
+  logEngine: OcrEngine = new PaddleEngine();
   ocrState: 'idle' | 'loading' | 'ready' | 'error' = 'idle';
   settings: Settings = store.loadSettings();
   regions: Record<RegionKey, Region> = store.loadRegions();
@@ -120,7 +127,8 @@ export class Controller {
   async initOcr() {
     if (this.ocrState === 'ready' || this.ocrState === 'loading') return;
     this.ocrState = 'loading'; this.notify();
-    try { await this.engine.init(); this.ocrState = 'ready'; } catch (e) { console.error(e); this.ocrState = 'error'; }
+    const log = this.logEngine.init().catch(e => { console.warn('PaddleOCR unavailable, the log uses Tesseract', e); this.logEngine = this.engine; });
+    try { await Promise.all([this.engine.init(), log]); this.ocrState = 'ready'; } catch (e) { console.error(e); this.ocrState = 'error'; }
     this.notify();
   }
   /** Stop sharing the game window (pauses a running session). */
@@ -335,7 +343,8 @@ export class Controller {
         .slice(0, lo.slots.length);
       // snapshot new lines; a line whose read failed gets a fresh snapshot (≤4 tries, ≥250 ms apart) while still visible
       let hi: LogScan | null = null;
-      const high = () => (hi ??= logScan(v, r, r.thr, document.createElement('canvas'), this.logAnchor.value));
+      // the high-contrast scan only serves Tesseract's second try; PaddleOCR reads the original pixels
+      const high = () => (this.logEngine.prefersRaw ? null : (hi ??= logScan(v, r, r.thr, document.createElement('canvas'), this.logAnchor.value)));
       for (let i = Math.min(LOG_WATCH_SLOTS, this.logLines.length) - 1; i >= 0; i--) { // oldest first
         const ln = this.logLines[i];
         if (ln.pre) continue;
@@ -376,14 +385,7 @@ export class Controller {
     if (ink < 25 * q.snap.f * q.snap.f) { q.status = 'failed'; return; } // (almost) no text in the slot yet
     let t = this.slotCache.get(hash); // an identical line image reads the same: never OCR it twice
     if (t === undefined) {
-      this.stats.ocrCalls++;
-      t = await this.engine.read(snapCanvas(q.snap), 'line');
-      // text over dark scenery reads best with the normal cut-off, over bright walls with the high-contrast one
-      if (lineQuality(t) < 2 && q.snap.hi) {
-        this.stats.ocrCalls++;
-        const t2 = await this.engine.read(snapCanvas(q.snap, true), 'line');
-        if (lineQuality(t2) > lineQuality(t)) t = t2;
-      }
+      t = await readLogSnap(this.logEngine, q.snap, this.shapeFilter.edge, () => this.stats.ocrCalls++);
       this.slotCache.set(hash, t);
       if (this.slotCache.size > 80) this.slotCache.delete(this.slotCache.keys().next().value!);
     }
@@ -391,7 +393,7 @@ export class Controller {
     q.status = 'done';
     this.expFilter.learn(q.snap, lineKind(t) === 'exp');
     this.shapeFilter.learn(q.snap);
-    q.snap = { ...q.snap, lo: new Float32Array(0), hi: null }; // read: free the pixels
+    q.snap = { ...q.snap, lo: new Float32Array(0), hi: null, rgb: null }; // read: free the pixels
     const now = Date.now();
     // a guessed alignment can re-present an old line as new: skip text that was counted moments ago
     // (only within 2 s: a re-presented line shows up a frame or two later, while picking up the same item again takes
@@ -415,13 +417,8 @@ export class Controller {
     const slot = lo.slots[i], sig = slotSignature(lo, slot);
     const hit = this.slotCache.get(sig);
     if (hit !== undefined) return hit;
-    this.stats.ocrCalls++;
-    let t = await this.engine.read(logLineCanvas(lo, slot), 'line');
-    if (lineQuality(t) < 2) {
-      this.stats.ocrCalls++;
-      const t2 = await this.engine.read(logLineCanvas(high(), slot), 'line');
-      if (lineQuality(t2) > lineQuality(t)) t = t2;
-    }
+    const eng = this.logEngine;
+    const t = await readLogSnap(eng, snapLine(lo, eng.prefersRaw ? null : high(), slot, 0), this.shapeFilter.edge, () => this.stats.ocrCalls++);
     this.slotCache.set(sig, t);
     if (this.slotCache.size > 60) this.slotCache.delete(this.slotCache.keys().next().value!);
     return t;
