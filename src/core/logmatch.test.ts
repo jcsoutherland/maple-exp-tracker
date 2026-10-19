@@ -80,3 +80,17 @@ describe('pickup-log template matcher', () => {
     expect(matchLine(drawLine(''), names)).toBeNull();
   });
 });
+
+describe('item names', () => {
+  it('prefers the right-width item over an expected name that only ends like it', () => {
+    const n = { likely: ['Iron Arrows for Bows'], all: ['Arrows for Bows', 'Iron Arrows for Bows'] };
+    expect(read('Arrows for Bows x27 earned. (Use)', {}, n)).toBe('Arrows for Bows x27 earned. (Use)');
+  });
+});
+describe('item names next to a window border', () => {
+  it('a border left of the line does not make it a longer name', () => {
+    const n = { likely: ['Iron Arrows for Bows'], all: ['Arrows for Bows', 'Iron Arrows for Bows'] };
+    const border = (x: number): [number, number, number] => (x >= 46 && x <= 47 ? [230, 230, 230] : [40, 44, 52]);
+    expect(read('Arrows for Bows x27 earned. (Use)', { bg: border }, n)).toBe('Arrows for Bows x27 earned. (Use)');
+  });
+});

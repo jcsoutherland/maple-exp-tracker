@@ -119,6 +119,8 @@ const TABS = ['Etc', 'Use', 'Setup', 'Equip', 'Cash'];
 export const MATCH_MIN = { fixed: 0.35, near: 0.6, digit: 0.55, digitLead: 0.12, name: 0.6, nameLead: 0.1 };
 /** the fixed characters either side of the digits that must show (a player or effect may hide the rest of the line) */
 const NEAR = 8;
+/** head start of an expected name (the map's drops) over other items */
+const LIKELY_BONUS = 0.05;
 
 /**
  * Read one log line from its native strip. `edge` is where the lines' ")" ends (native x in the strip), when known;
@@ -176,9 +178,11 @@ export function parenScore(s: NativeStrip, xr: number, rows: number[]): number {
 
 /** the item name whose glyphs, ending at pen `end`, best explain the mask */
 function readName(s: NativeStrip, names: NameLists, end: number, y: number): string | null {
-  // the line's leftmost ink (for the width filter over all items)
+  // where the name starts (for the width filter over all items): walking left from its end, the last ink before a gap
+  // wider than a word space (a window border or scenery further left isn't part of the line)
+  const inkCol = (x: number) => { for (let r = 0; r < ROWS; r++) { const Y = y + ROW0 + r; if (Y >= 0 && Y < s.h && s.M[Y * s.w + x]) return true; } return false; };
   let left = -1;
-  for (let x = 0; x < end && left < 0; x++) for (let r = 0; r < ROWS; r++) { const Y = y + ROW0 + r; if (Y >= 0 && Y < s.h && s.M[Y * s.w + x]) { left = x; break; } }
+  for (let x = end - 1, gap = 0; x >= 0; x--) { if (inkCol(x)) { left = x; gap = 0; } else if (++gap > 5) break; }
   const width = (t: string) => [...t].reduce((a, c) => a + GLYPHS.get(c)!.adv, 0);
   const rank = (list: string[]) => list.filter(knownText).map(t => {
     const pens: number[] = []; let pen = end;
@@ -186,10 +190,11 @@ function readName(s: NativeStrip, names: NameLists, end: number, y: number): str
     return { t, v: score(fixedScore(s, t, pens, y, () => false)) };
   }).sort((a, b) => b.v - a.v);
   const pick = (r: { t: string; v: number }[]) => (r.length && r[0].v >= MATCH_MIN.name && r[0].v - (r[1]?.v ?? 0) >= MATCH_MIN.nameLead ? r[0].t : null);
-  const likely = pick(rank([...new Set(names.likely)]));
-  if (likely) return likely;
-  if (left < 0) return null; // can't tell the name's width: only the expected names are tried
-  return pick(rank([...new Set(names.all)].filter(t => knownText(t) && Math.abs(end - width(t) - left) <= 3)));
+  // the expected names (this map's drops) whatever the line's width, plus any item of the right width (when the line's
+  // left end shows): all compete, the expected ones with a small head start. (A drop list can hold a longer name ending
+  // in the real one, "Iron Arrows for Bows" for "Arrows for Bows", which would win if only expected names were tried.)
+  const likely = new Set(names.likely), wide = left < 0 ? [] : names.all.filter(t => !likely.has(t) && knownText(t) && Math.abs(end - width(t) - left) <= 3);
+  return pick(rank([...likely, ...new Set(wide)]).map(r => ({ ...r, v: r.v + (likely.has(r.t) ? LIKELY_BONUS : 0) })).sort((a, b) => b.v - a.v));
 }
 
 /**
