@@ -1,4 +1,4 @@
-import type { Region, RegionDef } from './config';
+import { hudScale, NATIVE_H, type Region, type RegionDef, type UiRatio } from './config';
 import type { OcrChar } from './ocr/engine';
 
 /** Anything we can crop from: the live <video>, a canvas, or an ImageBitmap. */
@@ -162,9 +162,10 @@ export interface LogScan {
 /**
  * The pickup log is ~9px semi-transparent text over the game scene. Score each pixel as "bright, greyish and brighter
  * than its neighbourhood", then cut line slots on the log's fixed 13px (at 720p) grid counted up from the newest line.
+ * The text is as big as the HUD: it grows with the window in the default UI ratio, not in the ideal one.
  */
-export function logScan(src: FrameSource, r: Region, thr: number, scratch = document.createElement('canvas'), anchor: number | null = null): LogScan {
-  const { W: W0, H: H0 } = frameSize(src), f = H0 / 720;
+export function logScan(src: FrameSource, r: Region, thr: number, scratch = document.createElement('canvas'), anchor: number | null = null, ratio: UiRatio = 'default'): LogScan {
+  const { W: W0, H: H0 } = frameSize(src), f = hudScale(ratio, H0) * NATIVE_H / 720;
   const X = Math.round(r.x * W0), Y = Math.round(r.y * H0), W = Math.max(8, Math.round(r.w * W0)), H = Math.max(8, Math.round(r.h * H0));
   scratch.width = W; scratch.height = H;
   const g = ctx2d(scratch);

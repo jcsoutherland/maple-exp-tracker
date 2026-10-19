@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { lineAmount, lineKind, parseExp, parsePair, cleanMap } from './parse';
 import { newSession, potCost } from './session';
 import { anchorOf, LogAnchor } from './logqueue';
-import { DEFAULT_SETTINGS } from './config';
+import { DEFAULT_REGIONS, DEFAULT_SETTINGS, hudScale, presetRegions } from './config';
 import { GLYPHS, SlotCounter, TH, TW } from './potcount';
 import { changedPixels, SlotWatch } from './slotwatch';
 import { Tracker } from './tracker';
@@ -360,5 +360,28 @@ describe('status-bar parsers', () => {
   it('rejects minimap noise as a map name', () => {
     expect(cleanMap('l- - I')).toBeNull();
     expect(cleanMap('Kerning City Construction Site]')).toBe('Kerning City Construction Site');
+  });
+});
+
+describe('UI ratio presets', () => {
+  const px = (r: { x: number; y: number; w: number; h: number }, W: number, H: number) => [r.x * W, r.y * H, r.w * W, r.h * H].map(v => Math.round(v));
+  it('keeps the measured boxes for the default ratio', () => {
+    expect(presetRegions('default', 2560, 1440)).toEqual(DEFAULT_REGIONS);
+  });
+  it('matches the default ratio in a native-size window', () => {
+    const ideal = presetRegions('ideal', 1366, 768);
+    for (const [k, r] of Object.entries(DEFAULT_REGIONS)) expect(px(ideal[k as keyof typeof ideal], 1366, 768)).toEqual(px(r, 1366, 768));
+  });
+  it('keeps the HUD at native size, pinned to its corner, in a bigger window', () => {
+    // measured on a 1080p Ideal-ratio screenshot: the level digits at x≈606, the quickslot's slots 35 px apart (the screenshot was 1919×1079)
+    const r = presetRegions('ideal', 1920, 1080);
+    expect(px(r.level, 1920, 1080)).toEqual([604, 1053, 28, 16]);
+    expect(px(r.quickslot, 1920, 1080)).toEqual([1216, 909, 142, 101]);
+    expect(px(r.map, 1920, 1080).slice(0, 2)).toEqual([47, 41]);
+    expect(Math.round((r.log.x + r.log.w) * 1920)).toBe(1920);
+  });
+  it('scales the HUD with the window only in the default ratio', () => {
+    expect(hudScale('default', 1080)).toBeCloseTo(1.406, 3);
+    expect(hudScale('ideal', 1080)).toBe(1);
   });
 });

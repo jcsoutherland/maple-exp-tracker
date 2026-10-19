@@ -1,5 +1,5 @@
 import type { CharLook } from './avatar/msio';
-import { DEFAULT_REGIONS, DEFAULT_SETTINGS, type Region, type RegionKey, type Settings } from './config';
+import { DEFAULT_SETTINGS, presetRegions, type Region, type RegionKey, type Settings, type UiRatio } from './config';
 import type { SavedSession, Session } from './session';
 
 /** localStorage helpers; every access is guarded (private windows and blocked storage throw). */
@@ -20,13 +20,18 @@ export const loadSettings = (): Settings => {
 };
 export const saveSettings = (s: Settings) => write(K.settings, s);
 
-export const loadRegions = (): Record<RegionKey, Region> => {
-  const saved = read<Partial<Record<RegionKey, Region>>>(K.regions, {});
+/** each UI ratio keeps its own regions (the default ratio's under the original key) */
+const regionsKey = (ratio: UiRatio) => (ratio === 'default' ? K.regions : `${K.regions}.${ratio}`);
+/** The saved regions for a UI ratio over its presets for a W×H capture. */
+export const loadRegions = (ratio: UiRatio = 'default', W?: number, H?: number): Record<RegionKey, Region> => {
+  const saved = read<Partial<Record<RegionKey, Region>>>(regionsKey(ratio), {});
   // the first quickslot default was a guess in the wrong place: a box still sitting there follows the measured default
   if (saved.quickslot && saved.quickslot.x === 0.8852 && saved.quickslot.y === 0.8) delete saved.quickslot;
-  return { ...structuredClone(DEFAULT_REGIONS), ...saved };
+  return { ...presetRegions(ratio, W, H), ...saved };
 };
-export const saveRegions = (r: Record<RegionKey, Region>) => write(K.regions, r);
+export const saveRegions = (r: Record<RegionKey, Region>, ratio: UiRatio = 'default') => write(regionsKey(ratio), r);
+export const clearRegions = (ratio: UiRatio) => { try { localStorage.removeItem(regionsKey(ratio)); } catch { /* blocked storage */ } };
+export const hasSavedRegions = (ratio: UiRatio) => read<unknown>(regionsKey(ratio), null) != null;
 
 export const loadSessions = () => read<SavedSession[]>(K.sessions, []);
 export const saveSessions = (s: SavedSession[]) => write(K.sessions, s);

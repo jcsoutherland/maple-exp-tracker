@@ -1,6 +1,6 @@
 import { Capture } from '../core/capture';
 import { classLook, LOOK_V, randomVariant, rollLook, SpriteLoader, type CharLook } from '../core/avatar/msio';
-import { HOTBAR_COLS, HOTBAR_ROWS, REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
+import { HOTBAR_COLS, HOTBAR_ROWS, REGION_DEFS, type Region, type RegionKey, type Settings, type UiRatio } from '../core/config';
 import { potionByName } from '../core/potions';
 import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { SlotWatch, slotStrip } from '../core/slotwatch';
@@ -59,7 +59,7 @@ export class Controller {
   logEngine: OcrEngine = new PaddleEngine();
   ocrState: 'idle' | 'loading' | 'ready' | 'error' = 'idle';
   settings: Settings = store.loadSettings();
-  regions: Record<RegionKey, Region> = store.loadRegions();
+  regions: Record<RegionKey, Region> = store.loadRegions(this.settings.uiRatio);
   identity: Identity = { name: '', cls: '', level: null };
   sess: Session | null = null;
   tracker: Tracker | null = null;
@@ -138,10 +138,17 @@ export class Controller {
     this.capture.stop();
     this.notify();
   }
-  async shareScreen() { const ok = await this.capture.startScreen(); this.initOcr(); this.notify(); return ok; }
-  async useVideo(file: File, rate: number) { const ok = await this.capture.useFile(file, rate); this.initOcr(); this.notify(); return ok; }
-  setRegion(k: RegionKey, r: Partial<Region>) { this.regions = { ...this.regions, [k]: { ...this.regions[k], ...r } }; store.saveRegions(this.regions); this.notify(); }
-  resetRegions() { localStorage.removeItem('met.regions'); this.regions = store.loadRegions(); this.notify(); }
+  async shareScreen() { const ok = await this.capture.startScreen(); this.reloadRegions(); this.initOcr(); this.notify(); return ok; }
+  async useVideo(file: File, rate: number) { const ok = await this.capture.useFile(file, rate); this.reloadRegions(); this.initOcr(); this.notify(); return ok; }
+  setRegion(k: RegionKey, r: Partial<Region>) { this.regions = { ...this.regions, [k]: { ...this.regions[k], ...r } }; store.saveRegions(this.regions, this.settings.uiRatio); this.notify(); }
+  resetRegions() { store.clearRegions(this.settings.uiRatio); this.reloadRegions(); this.notify(); }
+  /** Switch to the regions of the game's other UI ratio (each keeps its own). */
+  setUiRatio(ratio: UiRatio) { if (ratio !== this.settings.uiRatio) { this.updateSettings({ uiRatio: ratio }); this.reloadRegions(); this.notify(); } }
+  /** the Ideal ratio's presets depend on the capture size, so they're laid out again once it's known */
+  private reloadRegions() {
+    const v = this.capture.video, ok = this.capture.ready;
+    this.regions = store.loadRegions(this.settings.uiRatio, ok ? v.videoWidth : undefined, ok ? v.videoHeight : undefined);
+  }
   updateSettings(p: Partial<Settings>) {
     this.settings = { ...this.settings, ...p };
     store.saveSettings(this.settings);
@@ -329,7 +336,7 @@ export class Controller {
     const t0 = performance.now();
     try {
       const v = this.capture.video, r = this.regions.log;
-      const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'), this.logAnchor.value);
+      const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'), this.logAnchor.value, this.settings.uiRatio);
       this.logAnchor.add(lo.detected, `${v.videoWidth}x${v.videoHeight}:${r.x},${r.y},${r.w},${r.h}`);
       this.stats.logChecks++;
       const first = !this.lastLog;
@@ -345,7 +352,7 @@ export class Controller {
       // snapshot new lines; a line whose read failed gets a fresh snapshot (≤4 tries, ≥250 ms apart) while still visible
       let hi: LogScan | null = null;
       // the high-contrast scan only serves Tesseract's second try; PaddleOCR reads the original pixels
-      const high = () => (this.logEngine.prefersRaw ? null : (hi ??= logScan(v, r, r.thr, document.createElement('canvas'), this.logAnchor.value)));
+      const high = () => (this.logEngine.prefersRaw ? null : (hi ??= logScan(v, r, r.thr, document.createElement('canvas'), this.logAnchor.value, this.settings.uiRatio)));
       for (let i = Math.min(LOG_WATCH_SLOTS, this.logLines.length) - 1; i >= 0; i--) { // oldest first
         const ln = this.logLines[i];
         if (ln.pre) continue;
@@ -430,7 +437,7 @@ export class Controller {
     const out: string[] = [];
     let hi: LogScan | null = null;
     for (let i = 0; i < Math.min(count, lo.slots.length); i++)
-      out.push(await this.readSlot(lo, i, () => (hi ??= logScan(src, this.regions.log, this.regions.log.thr, document.createElement('canvas'), this.logAnchor.value))));
+      out.push(await this.readSlot(lo, i, () => (hi ??= logScan(src, this.regions.log, this.regions.log.thr, document.createElement('canvas'), this.logAnchor.value, this.settings.uiRatio))));
     return out;
   }
 
@@ -638,7 +645,7 @@ export class Controller {
     if (!s || !s.paused || !this.autoPaused || !this.capture.ready) return;
     const v = this.capture.video, r = this.regions.log, id = this.idle;
     try {
-      const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'), this.logAnchor.value);
+      const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'), this.logAnchor.value, this.settings.uiRatio);
       const prev = id.log;
       id.log = lo;
       if (prev && newLineCount(prev, lo).count > 0) { this.resumeFromIdle('loot / EXP in the log', prev); return; }
@@ -752,7 +759,7 @@ export class Controller {
     for (const key of Object.keys(REGION_DEFS) as RegionKey[]) {
       const def = REGION_DEFS[key];
       if (key === 'log') {
-        const r = this.regions.log, lo = logScan(src, r, r.thr - 30, document.createElement('canvas'), this.logAnchor.value);
+        const r = this.regions.log, lo = logScan(src, r, r.thr - 30, document.createElement('canvas'), this.logAnchor.value, this.settings.uiRatio);
         const saved = this.slotCache; this.slotCache = new Map();
         const lines = await this.readLogLines(src, lo);
         this.slotCache = saved;

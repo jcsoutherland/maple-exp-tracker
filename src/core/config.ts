@@ -47,6 +47,35 @@ export const DEFAULT_REGIONS: Record<RegionKey, Region> = {
 };
 
 /**
+ * The game's UI ratio setting. 'default' scales the HUD with the window (what DEFAULT_REGIONS were measured on);
+ * 'ideal' draws it at its native size (as in a 1366×768 window) whatever the window size, pinned to the screen edges.
+ */
+export type UiRatio = 'default' | 'ideal';
+/** the window size the HUD is laid out for: at this size both ratios look the same */
+export const NATIVE_W = 1366, NATIVE_H = 768;
+/** screen pixels per native HUD pixel */
+export const hudScale = (ratio: UiRatio, H: number) => (ratio === 'ideal' ? 1 : H / NATIVE_H);
+/** what each region stays pinned to when the HUD doesn't scale: the minimap top-left, the status bar (with the quickslot
+ *  above it) bottom-centre, the pickup log bottom-right */
+const ANCHOR: Record<RegionKey, 'tl' | 'bc' | 'br'> = {
+  map: 'tl', mapBar: 'tl', level: 'bc', cls: 'bc', name: 'bc', hp: 'bc', mp: 'bc', exp: 'bc', hpGauge: 'bc', mpGauge: 'bc', quickslot: 'bc', log: 'br',
+};
+
+/** The default regions for a UI ratio and a W×H capture (as fractions of it). */
+export function presetRegions(ratio: UiRatio, W = 1920, H = 1080): Record<RegionKey, Region> {
+  const out = structuredClone(DEFAULT_REGIONS);
+  if (ratio === 'default') return out;
+  // the defaults scale with the window: lay them out on a native window, then keep each at that pixel size and distance
+  // from its anchor on the real one
+  for (const k of Object.keys(out) as RegionKey[]) {
+    const r = out[k], a = ANCHOR[k], x = r.x * NATIVE_W, y = r.y * NATIVE_H;
+    const px = a === 'tl' ? x : a === 'bc' ? W / 2 + x - NATIVE_W / 2 : W - NATIVE_W + x, py = a === 'tl' ? y : H - NATIVE_H + y;
+    out[k] = { ...r, x: px / W, y: py / H, w: r.w * NATIVE_W / W, h: r.h * NATIVE_H / H };
+  }
+  return out;
+}
+
+/**
  * Read cadence per task (ms). The pickup log is change-detected at a high rate and only OCR'd when a new line
  * appears; everything else is sampled on a timer. Map is also re-read every `mapExpStep` EXP.
  */
@@ -67,9 +96,11 @@ export interface Settings {
   mpOrder: string[];
   /** potions placed on the in-game quickslot (4×3, row by row; null = empty slot) */
   hotbar: (string | null)[];
+  /** the game's UI ratio setting; each ratio keeps its own regions */
+  uiRatio: UiRatio;
 }
 export const DEFAULT_SETTINGS: Settings = {
-  v: 2, schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, idlePauseSec: 45,
+  v: 2, schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, idlePauseSec: 45, uiRatio: 'default',
   hpOrder: ['Meat', 'Red Potion', 'Orange Potion', 'White Potion'],
   mpOrder: ['Lemon', 'Blue Potion', 'Mana Elixir'],
   hotbar: new Array(12).fill(null),

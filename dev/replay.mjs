@@ -5,6 +5,7 @@
 //   LOG_HZ=15          log-watch rate in video time (default 4; the live app runs ~15)
 //   HOTBAR='{"5":"Orange Potion","6":"Red Potion","10":"Blue Potion"}'   potions on the quickslot (slot index row by row)
 //   REGIONS='{"quickslot":{"x":0.6885,"y":0.7778,"w":0.1021,"h":0.1296,"thr":140}}'   region overrides
+//   UI_RATIO=ideal     the game's UI ratio setting (default: default); REGIONS then overrides that ratio's boxes
 //   LEVEL=38 CLASS=Hunter PORT=5174   the character at the start, dev server port
 import fs from 'node:fs';
 import puppeteer from 'puppeteer-core';
@@ -49,6 +50,7 @@ const out = await page.evaluate(async (speed, opt) => {
   await v.play(); v.pause();
   c.capture.kind = 'file';
   await c.initOcr();
+  c.setUiRatio(opt.uiRatio);
   for (const [k, r] of Object.entries(opt.regions)) c.setRegion(k, r);
   if (Object.keys(opt.hotbar).length) c.updateSettings({ hotbar: Array.from({ length: 12 }, (_, i) => opt.hotbar[i] ?? null) });
   c.setIdentity({ name: 'Flynny', cls: opt.cls, level: opt.level });
@@ -102,7 +104,7 @@ const out = await page.evaluate(async (speed, opt) => {
     perf: { logChecks: c.stats.logChecks, ocrCalls: c.stats.ocrCalls, expSkipped: c.stats.expSkipped, guessSkipped: c.stats.guessSkipped, logGuesses: c.stats.logGuesses, junkSkipped: c.stats.junkSkipped, logDropped: c.stats.logDropped, logTickMedianMs: Math.round(tickMs[tickMs.length >> 1]), logTickP95Ms: Math.round(tickMs[Math.floor(tickMs.length * 0.95)]) },
   };
 }, +(process.env.SPEED || 1), {
-  logHz: +(process.env.LOG_HZ || 4), hotbar: JSON.parse(process.env.HOTBAR || '{}'), regions: JSON.parse(process.env.REGIONS || '{}'),
+  logHz: +(process.env.LOG_HZ || 4), hotbar: JSON.parse(process.env.HOTBAR || '{}'), regions: JSON.parse(process.env.REGIONS || '{}'), uiRatio: process.env.UI_RATIO || 'default',
   level: +(process.env.LEVEL || 37), cls: process.env.CLASS || 'Hunter', logOcr: process.env.LOG_OCR || 'paddle',
 });
 console.log(out.log.join('\n'));
