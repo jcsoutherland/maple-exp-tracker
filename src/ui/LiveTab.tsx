@@ -143,7 +143,7 @@ export function LiveTab() {
               <div key={i}><span className="t">{fmtDur(e.t)}</span><span style={{ color: EVC[e.type] }}>{e.text}</span></div>
             ))}
           </div>
-          <div className="perf">log checks {c.stats.logChecks} · OCR calls {c.stats.ocrCalls} · EXP lines skipped {c.stats.expSkipped} · log queue {c.stats.logBacklog}{c.stats.logDropped ? ` · dropped ${c.stats.logDropped}` : ''} · last log tick {c.stats.lastTickMs.toFixed(0)} ms</div>
+          <div className="perf">log checks {c.stats.logChecks} · read by font {c.stats.logMatched} · OCR calls {c.stats.ocrCalls} · EXP lines skipped {c.stats.expSkipped} · log queue {c.stats.logBacklog}{c.stats.logDropped ? ` · dropped ${c.stats.logDropped}` : ''} · last log tick {c.stats.lastTickMs.toFixed(0)} ms</div>
         </div>
       </div>
 

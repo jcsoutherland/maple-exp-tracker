@@ -54,6 +54,7 @@ export function loadOsms(): Promise<void> {
   return (loading ??= (async () => {
     // monsters are a nice-to-have: without them the app works as before
     loadMeowdbIndex(); // links only: without it they fall back to copy-and-open
+    loadDrops(); // the log matcher's item names: without them it tries every item
     cached('mobs-v3', () => list('monsters.json', shapeMobs), LIST_TTL).then(m => { mobs = m; }).catch(e => console.warn('OSMS monsters unavailable', e))
       .finally(() => { mobsDone = true; listeners.forEach(l => l()); });
     const [it, mp] = await Promise.all([
@@ -207,6 +208,22 @@ export function loadMeowdbIndex(): Promise<void> {
 }
 /** The item's own meowdb page, or null when the index doesn't know it (then copy the name and open the list). */
 export const meowdbItemUrl = (name: string) => { const n = meowIndex[name.toLowerCase()]; return n ? `https://meowdb.com/msclassic/item-db/${n}` : null; };
+/**
+ * What each monster drops (monster name → item names), from meowdb's monster pages. Built weekly by the mirror
+ * (dev/mirror-data.mjs) and only ever read from the mirror. The pickup-log matcher tries these names first.
+ */
+let drops: Record<string, string[]> = {};
+let dropsLoading: Promise<void> | null = null;
+export function loadDrops(): Promise<void> {
+  return (dropsLoading ??= cached('drops-v1', async () => {
+    const r = await fetchFirst([MIRROR + 'drops.json']);
+    if (!r) throw new Error('no drop tables on the mirror'); // not cached: try again next visit
+    return await r.json() as Record<string, string[]>;
+  }, LIST_TTL).then(d => { drops = d; }).catch(() => undefined));
+}
+/** Items the monsters on this map drop (empty when the map or its monsters' drops aren't known). */
+export const dropsOnMap = (map: string | null) => [...new Set(mobsOnMap(map).flatMap(m => drops[m.name] ?? []))];
+
 export const MESO_WATCH_URL = 'https://meso.watch/';
 /** Copy an item name for pasting into a fan site's search, with a toast saying where. */
 export const copyItemName = (name: string, site: string, toast: (m: string) => void) =>

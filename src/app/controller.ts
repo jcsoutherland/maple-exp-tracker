@@ -4,9 +4,10 @@ import { HOTBAR_COLS, HOTBAR_ROWS, REGION_DEFS, type Region, type RegionKey, typ
 import { potionByName } from '../core/potions';
 import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { SlotWatch, slotStrip } from '../core/slotwatch';
-import { canonItem, canonMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
+import { allItems, canonItem, canonMap, dropsOnMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
 import { ExpLineFilter, LineShapeFilter, LogAnchor, snapInk, snapLine, type LineSnap } from '../core/logqueue';
 import { readLogSnap } from '../core/logread';
+import { matchSnap, type NameLists } from '../core/logmatch';
 import { enhanceText, fixIL, frameSize, gaugeFill, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
@@ -66,7 +67,7 @@ export class Controller {
   lastFinished: SavedSession | null = null;
   historyVersion = 0;
   /** reads/sec of the pickup-log watcher and OCR calls, for the performance readout */
-  stats = { logChecks: 0, ocrCalls: 0, lastTickMs: 0, expSkipped: 0, logDropped: 0, logBacklog: 0, guessSkipped: 0, logGuesses: 0, junkSkipped: 0 };
+  stats = { logChecks: 0, ocrCalls: 0, logMatched: 0, lastTickMs: 0, expSkipped: 0, logDropped: 0, logBacklog: 0, guessSkipped: 0, logGuesses: 0, junkSkipped: 0 };
 
   private ticker = new Ticker();
   private listeners = new Set<() => void>();
@@ -360,12 +361,16 @@ export class Controller {
           // a yellow line is EXP / party bonus: never queued, so a party's flood of them can't push item lines out
           if (lo.yellow?.[i]) { ln.item = { snap: snapLine(lo, null, lo.slots[i], now, true), status: 'done', tries: 1, guess: ln.guess }; this.stats.expSkipped++; this.debug?.('yellow', i); this.markActive(); continue; }
           const snap = snapLine(lo, high(), lo.slots[i], now);
+          ln.item = { snap, status: 'queued', tries: 1, guess: ln.guess };
+          // read in the game's own font first: no queue, no OCR (and a line half hidden by a player still reads)
+          if (this.matchLog(ln.item)) continue;
           // not shaped like a log line (something moving behind the log): never read
-          if (this.shapeFilter.isJunk(snap)) { ln.item = { snap, status: 'done', tries: 1, guess: ln.guess }; this.stats.junkSkipped++; this.debug?.('junk', snap); continue; }
-          ln.item = { snap, status: 'queued', tries: 1, guess: ln.guess }; this.logQueue.push(ln.item);
+          if (this.shapeFilter.isJunk(snap)) { ln.item.status = 'done'; this.stats.junkSkipped++; this.debug?.('junk', snap); continue; }
+          this.logQueue.push(ln.item);
         }
         else if (ln.item.status === 'failed' && ln.item.tries < 4 && now - ln.item.snap.t >= 250) {
-          ln.item.snap = snapLine(lo, high(), lo.slots[i], now, lo.yellow?.[i]); ln.item.tries++; ln.item.status = 'queued'; this.logQueue.push(ln.item);
+          ln.item.snap = snapLine(lo, high(), lo.slots[i], now, lo.yellow?.[i]); ln.item.tries++;
+          if (!this.matchLog(ln.item)) { ln.item.status = 'queued'; this.logQueue.push(ln.item); }
         }
       }
       this.pumpLog();
@@ -398,6 +403,39 @@ export class Controller {
       if (this.slotCache.size > 80) this.slotCache.delete(this.slotCache.keys().next().value!);
     }
     if (lineQuality(t) < 2) { q.status = 'failed'; this.debug?.('unreadable', t); return; } // retried from a new snapshot while the line is on screen
+    this.countLine(q, t, hash);
+  }
+
+  /** item names the log matcher tries: the current map's monsters' drops first, then every item (by width) */
+  private allItemNames: { from: unknown; names: string[] } = { from: null, names: [] };
+  private logNames(): NameLists {
+    const all = allItems();
+    if (this.allItemNames.from !== all) this.allItemNames = { from: all, names: all.map(i => i.name) };
+    return { likely: dropsOnMap(this.tracker?.mapCur ?? null), all: this.allItemNames.names };
+  }
+
+  /**
+   * Read a snapshot by matching the game's font (see logmatch.ts). True when it did: the line is then done, counted or
+   * (an EXP line) skipped. False leaves it to OCR.
+   */
+  private matchLog(q: LogItem): boolean {
+    const m = matchSnap(q.snap, this.logNames(), this.shapeFilter.edge);
+    if (!m) return false;
+    this.stats.logMatched++;
+    this.debug?.('match', m.text);
+    if (m.kind === 'exp') {
+      q.status = 'done'; this.stats.expSkipped++;
+      this.expFilter.learn(q.snap, true); this.shapeFilter.learn(q.snap);
+      q.snap = { ...q.snap, lo: new Float32Array(0), hi: null, rgb: null };
+      this.markActive();
+      return true;
+    }
+    this.countLine(q, m.text, snapInk(q.snap).hash);
+    return true;
+  }
+
+  /** A line has been read (text `t`, pixel hash `hash`): count it unless it's a re-presented old line. */
+  private countLine(q: LogItem, t: string, hash: number) {
     q.status = 'done';
     this.expFilter.learn(q.snap, lineKind(t) === 'exp');
     this.shapeFilter.learn(q.snap);

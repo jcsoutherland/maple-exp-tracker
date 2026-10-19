@@ -17,13 +17,16 @@ export interface LineSnap {
   /** the line's raw RGBA pixels (W × rgbH, with a small margin above and below), which the neural reader reads best */
   rgb?: Uint8ClampedArray | null;
   rgbH?: number;
+  /** the raw pixels' top-left on the screen, and screen pixels per native HUD pixel */
+  ox?: number; oy?: number; k?: number;
 }
 
 export function snapLine(lo: LogScan, hi: LogScan | null, [a, z]: [number, number], t: number, yellow = false): LineSnap {
   // the raw pixels keep ~2px (at 720p) of margin above and below: the neural reader likes a little room around the text
   const m = Math.round(2 * lo.f), ra = Math.max(0, a - m), rz = Math.min(lo.H, z + m);
   return { lo: lo.sc.slice(a * lo.W, z * lo.W), hi: hi ? hi.sc.slice(a * hi.W, z * hi.W) : null, W: lo.W, h: z - a, f: lo.f, t, yellow,
-    rgb: yellow || !lo.rgba ? null : lo.rgba.slice(ra * lo.W * 4, rz * lo.W * 4), rgbH: rz - ra };
+    rgb: yellow || !lo.rgba ? null : lo.rgba.slice(ra * lo.W * 4, rz * lo.W * 4), rgbH: rz - ra,
+    ox: lo.X, oy: lo.Y == null ? undefined : lo.Y + ra, k: lo.k };
 }
 
 /** The snapshot's original pixels as a canvas, optionally only columns x0..x1 (fractions of its width). */

@@ -85,6 +85,40 @@ if (!meowFresh || process.env.MEOWDB_FILE) {
   } catch (e) { console.warn('meowdb index failed (links fall back to copy-and-open):', e.message); }
 } else console.log('meowdb index is less than a week old: kept');
 
+// ---------- monster drop tables from meowdb (at most weekly, one page per monster) ----------
+// Each meowdb monster page lists what it drops ("MSEA reference drops", server-rendered). The pickup-log matcher
+// (src/core/logmatch.ts) tries the current map's monsters' drops first when it reads an item name. MEOWDB_DIR=<folder>
+// parses saved copies (monsters.html, monster-<n>.html) instead of downloading.
+const dropsFresh = manifest.dropsAt && Date.now() - manifest.dropsAt < WEEK && has('drops.json') && !process.env.MIRROR_FORCE_LISTS;
+if (!dropsFresh || process.env.MEOWDB_DIR) {
+  try {
+    const dir = process.env.MEOWDB_DIR, ent = s => s.replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    const page = async (rel, saved) => (dir ? fs.readFileSync(path.join(dir, saved), 'utf8') : (await get(`https://meowdb.com/msclassic/${rel}`)).toString());
+    // the monster list: one table row per monster, with its page link and its sprite's alt text (the name)
+    const list = await page('monsters', 'monsters.html'), pages = new Map();
+    for (const row of list.split('<tr').slice(1)) {
+      const n = (row.match(/href="\/msclassic\/monsters\/(\d+)"/) || [])[1], name = (row.match(/alt="([^"]+)"/) || [])[1];
+      if (n && name && !pages.has(ent(name))) pages.set(ent(name), +n);
+    }
+    const drops = {};
+    for (const m of mobs) {
+      const n = pages.get(m.name);
+      if (!n) continue;
+      try {
+        const html = await page(`monsters/${n}`, `monster-${n}.html`), a = html.indexOf('MSEA reference drops');
+        if (a < 0) continue;
+        const b = html.indexOf('OSMLIB Reference', a), sec = html.slice(a, b < 0 ? undefined : b);
+        const names = [...sec.matchAll(/href="\/msclassic\/item-db\/\d+"[^>]*>([\s\S]*?)<\/a>/g)]
+          .map(x => ent(x[1].replace(/<[^>]+>/g, '|').split('|').map(s => s.trim()).filter(Boolean)[0] || '')).filter(Boolean);
+        if (names.length) drops[m.name] = [...new Set(names)];
+      } catch (e) { console.warn(`  drops for ${m.name} failed:`, e.message); }
+    }
+    // a page layout change would parse to (almost) nothing: keep last week's tables rather than publish empty ones
+    if (Object.keys(drops).length >= mobs.length / 2) { write('drops.json', JSON.stringify(drops)); manifest.dropsAt = Date.now(); console.log(`drops: ${Object.keys(drops).length} monsters`); }
+    else console.warn(`drops: only ${Object.keys(drops).length} monsters parsed, kept the previous tables`);
+  } catch (e) { console.warn('drop tables failed (the log matcher falls back to all items):', e.message); }
+} else console.log('drop tables are less than a week old: kept');
+
 // ---------- the PaddleOCR English line recogniser (Apache-2.0), once ----------
 const HF = 'https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/english/';
 for (const [rel, url] of [['models/en_rec.onnx', HF + 'rec.onnx'], ['models/en_dict.txt', HF + 'dict.txt']]) {

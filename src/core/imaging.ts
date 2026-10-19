@@ -157,6 +157,8 @@ export interface LogScan {
   detected?: number;
   /** the region's raw RGBA pixels (W×H), for reading lines from the original image */
   rgba?: Uint8ClampedArray;
+  /** the region's top-left on the screen, and screen pixels per native HUD pixel (for the log matcher) */
+  X?: number; Y?: number; k?: number;
 }
 
 /**
@@ -221,7 +223,7 @@ export function logScan(src: FrameSource, r: Region, thr: number, scratch = docu
     }
     return bright >= 20 && yel > bright * 0.5;
   });
-  return { W, H, f, sc, slots, yellow, detected, rgba: d };
+  return { W, H, f, sc, slots, yellow, detected, rgba: d, X, Y, k: hudScale(ratio, H0) };
 }
 
 /** Signature of the text pixels inside one slot: same value = same line, so its OCR result can be reused. */
@@ -268,14 +270,18 @@ export function newLineCount(prev: LogScan | null, cur: LogScan, maxDiff = 0.45)
   const C = cur.slots.length, P = prev?.slots.length ?? 0;
   if (!C) return { count: 0, aligned: true };
   if (!prev || !P) return { count: C, aligned: false };
-  let best = -1, bestD = 1;
-  for (let s = 0; s < C; s++) {
-    const n = Math.min(3, C - s, P);
-    let d = 0;
-    for (let k = 0; k < n; k++) d += slotDiff(prev, k, cur, k + s);
-    d /= n;
-    // identical repeated lines make several shifts look equal: prefer the one that explains a grown log
-    if (d < bestD - 0.02 || (Math.abs(d - bestD) <= 0.02 && s === C - P)) { if (d < bestD) bestD = d; best = s; }
+  const meanDiff = (s: number, n: number) => { let d = 0; for (let k = 0; k < n; k++) d += slotDiff(prev, k, cur, k + s); return d / n; };
+  const d3 = Array.from({ length: C }, (_, s) => meanDiff(s, Math.min(3, C - s, P)));
+  let bestD = Math.min(...d3);
+  // identical repeated lines ("+10", "+10", "+10") make several shifts look equal over the bottom three slots: compare
+  // every overlapping slot to tell them apart (the lines above differ), then prefer the shift that explains a grown log
+  const tied = d3.map((d, s) => (d <= bestD + 0.02 ? s : -1)).filter(s => s >= 0);
+  let best = tied[0];
+  if (tied.length > 1) {
+    const all = tied.map(s => ({ s, d: meanDiff(s, Math.min(C - s, P)) })), top = Math.min(...all.map(x => x.d));
+    const close = all.filter(x => x.d <= top + 0.02);
+    best = (close.find(x => x.s === C - P) ?? close[0]).s;
+    bestD = d3[best];
   }
   if (best >= 0 && bestD <= maxDiff) return { count: best, aligned: true };
   // nothing lines up (burst of lines, or the scene changed a lot): count the bottom slots that match no previous slot.
