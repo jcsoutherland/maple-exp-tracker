@@ -65,6 +65,26 @@ if (!listsFresh) {
 const items = JSON.parse(fs.readFileSync(file('osms/items.json'), 'utf8'));
 const mobs = JSON.parse(fs.readFileSync(file('osms/monsters.json'), 'utf8'));
 
+// ---------- meowdb item numbers (at most weekly, one page) ----------
+// meowdb numbers its item pages its own way (Red Viper is item-db/669). Its A-Z page lists every item as a link, so one
+// download a week maps Classic item names to those pages and the app links straight to them. MEOWDB_FILE=<saved page>
+// parses a saved copy instead of downloading.
+const meowFresh = manifest.meowdbAt && Date.now() - manifest.meowdbAt < WEEK && has('meowdb.json') && !process.env.MIRROR_FORCE_LISTS;
+if (!meowFresh || process.env.MEOWDB_FILE) {
+  try {
+    const html = process.env.MEOWDB_FILE ? fs.readFileSync(process.env.MEOWDB_FILE, 'utf8') : (await get('https://meowdb.com/msclassic/item-db/all')).toString();
+    const ent = s => s.replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    const classic = new Set(items.map(i => i.name.toLowerCase())), index = {};
+    for (const m of html.matchAll(/href="\/msclassic\/item-db\/(\d+)">([^<]+)</g)) {
+      const k = ent(m[2]).trim().toLowerCase(); // first page wins for a name that appears twice
+      if (classic.has(k) && !(k in index)) index[k] = +m[1];
+    }
+    // a page layout change would parse to (almost) nothing: keep last week's index rather than publish an empty one
+    if (Object.keys(index).length >= items.length / 2) { write('meowdb.json', JSON.stringify(index)); manifest.meowdbAt = Date.now(); console.log(`meowdb: ${Object.keys(index).length} item pages`); }
+    else console.warn(`meowdb: only ${Object.keys(index).length} items parsed, kept the previous index`);
+  } catch (e) { console.warn('meowdb index failed (links fall back to copy-and-open):', e.message); }
+} else console.log('meowdb index is less than a week old: kept');
+
 // ---------- the PaddleOCR English line recogniser (Apache-2.0), once ----------
 const HF = 'https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/english/';
 for (const [rel, url] of [['models/en_rec.onnx', HF + 'rec.onnx'], ['models/en_dict.txt', HF + 'dict.txt']]) {

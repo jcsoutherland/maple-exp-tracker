@@ -53,6 +53,7 @@ async function list<T, R>(file: string, shape: (raw: R) => T[]): Promise<T[]> {
 export function loadOsms(): Promise<void> {
   return (loading ??= (async () => {
     // monsters are a nice-to-have: without them the app works as before
+    loadMeowdbIndex(); // links only: without it they fall back to copy-and-open
     cached('mobs-v3', () => list('monsters.json', shapeMobs), LIST_TTL).then(m => { mobs = m; }).catch(e => console.warn('OSMS monsters unavailable', e))
       .finally(() => { mobsDone = true; listeners.forEach(l => l()); });
     const [it, mp] = await Promise.all([
@@ -186,9 +187,27 @@ export function itemIcon(id: number): Promise<string | null> {
 }
 
 /**
- * Player-market price lookups. Neither site deep-links by game item id (meowdb uses its own ids, meso.watch only has
- * an on-page filter), so meowdb goes through a site search that lands on the item page, and meso.watch opens with the
- * name copied for its filter box.
+ * Item lookups on fan sites. Neither deep-links by game item id (meowdb numbers items its own way and its search isn't
+ * part of the address; meso.watch only has an on-page filter), so both open with the item name copied, ready to paste.
  */
-export const meowdbUrl = (name: string) => `https://www.google.com/search?q=${encodeURIComponent(`site:meowdb.com/msclassic/item-db "${name}"`)}&btnI=1`;
+export const MEOWDB_ITEMS_URL = 'https://meowdb.com/msclassic/item-db/all';
+
+/**
+ * meowdb's own page number for each item (lower-cased name → n, so Red Viper is item-db/669). Built weekly by the
+ * mirror from one page of meowdb (dev/mirror-data.mjs) and only ever read from the mirror, never from meowdb.
+ */
+let meowIndex: Record<string, number> = {};
+let meowLoading: Promise<void> | null = null;
+export function loadMeowdbIndex(): Promise<void> {
+  return (meowLoading ??= cached('meowdb-v1', async () => {
+    const r = await fetchFirst([MIRROR + 'meowdb.json']);
+    if (!r) throw new Error('no meowdb index on the mirror'); // not cached: try again next visit
+    return await r.json() as Record<string, number>;
+  }, LIST_TTL).then(m => { meowIndex = m; listeners.forEach(l => l()); }).catch(() => undefined));
+}
+/** The item's own meowdb page, or null when the index doesn't know it (then copy the name and open the list). */
+export const meowdbItemUrl = (name: string) => { const n = meowIndex[name.toLowerCase()]; return n ? `https://meowdb.com/msclassic/item-db/${n}` : null; };
 export const MESO_WATCH_URL = 'https://meso.watch/';
+/** Copy an item name for pasting into a fan site's search, with a toast saying where. */
+export const copyItemName = (name: string, site: string, toast: (m: string) => void) =>
+  navigator.clipboard?.writeText(name).then(() => toast(`“${name}” copied: paste it into ${site}'s search`), () => undefined);

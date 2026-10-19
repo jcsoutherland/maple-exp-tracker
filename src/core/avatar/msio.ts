@@ -128,6 +128,19 @@ export function rollLook(cls: string, level: number | null, gender: 0 | 1 = 0, v
   };
 }
 
+export interface GearPiece { slot: string; id: number; name: string; level: number }
+/** What a look is wearing, slot by slot (weapon last), from the same catalog rows that picked it. */
+export function lookGear(l: CharLook): GearPiece[] {
+  const table = GEAR[l.branch]?.[l.gender ? 'f' : 'm'] ?? {}, out: GearPiece[] = [];
+  for (const id of l.items) {
+    let hit: GearPiece | null = null;
+    for (const [slot, rows] of Object.entries(table)) { const r = rows.find(x => x[0] === id); if (r) { hit = { slot, id, name: r[1], level: r[2] }; break; } }
+    if (!hit) for (const [type, rows] of Object.entries(WEAPONS)) { const r = rows.find(x => x[0] === id); if (r) { hit = { slot: type, id, name: r[1], level: r[2] }; break; } }
+    if (hit) out.push(hit);
+  }
+  return out;
+}
+
 // ---------- frames ----------
 
 /** Renderer URL for one frame. FeetCenter: the feet sit at the image's centre, so frames line up. */

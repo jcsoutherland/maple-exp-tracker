@@ -1,12 +1,16 @@
 // Builds src/core/avatar/catalog.ts: the lookup table for the character generator, so a look is made instantly and
 // consistently for a job and level. Stored: ids, names, required levels and scores only (no images).
 //  - gear: per job branch, gender and slot, an upgrade ladder: items (by required level) that beat everything below
-//    them on the job's stat score (bowman DEX, thief LUK + DEX/2, warrior STR, magician INT; defence breaks ties)
+//    them on the job's stat score (bowman DEX, thief LUK + DEX/2, warrior STR, magician INT; defence breaks ties);
+//    earrings rank by crit damage first, then main stat, then defence
 //  - weapons: per weapon type, a ladder by attack (magic attack for wands/staves)
 //  - hair / faces: a pool per gender for the random part of a look
 // Stats and job/gender limits come from OSMS (MapleStory Classic); items are drawn with their GMS v83 id (matched by
 // name, since Classic's ids differ) and every item kept has sprite data on maplestory.io.
 //   node dev/build-catalog.mjs
+//   ONLY=Earrings node dev/build-catalog.mjs          rebuild just these gear slots (comma-separated); weapons, hair
+//                                                      and faces are kept, so existing looks don't change otherwise
+//   OSMS_FILE=items.json …                            use a downloaded copy of OSMS items.json instead of fetching it
 import fs from 'node:fs';
 
 const API = 'https://maplestory.io/api/GMS/83';
@@ -45,7 +49,8 @@ for (const q of ['Armor', 'Accessory', 'One-Handed%20Weapon', 'Two-Handed%20Weap
     const k = norm(x.name); if (!gmsByName.has(k)) gmsByName.set(k, []); gmsByName.get(k).push(x.id);
   }
 const gmsId = it => { const c = gmsByName.get(norm(it.name)) || []; return c.find(id => Math.floor(id / 10000) === Math.floor(it.id / 10000)) ?? c[0] ?? null; };
-const all = (await json('https://osmsdataexplorer.com/data/current/items.json')).items.filter(i => i.category === 'Equipment' && i.stats && plausible(i));
+const osmsData = process.env.OSMS_FILE ? JSON.parse(fs.readFileSync(process.env.OSMS_FILE, 'utf8')) : await json('https://osmsdataexplorer.com/data/current/items.json');
+const all = osmsData.items.filter(i => i.category === 'Equipment' && i.stats && plausible(i));
 const osms = all.map(i => ({ ...i, gms: gmsId(i) })).filter(i => i.gms);
 console.log('classic equips', all.length, 'matched to GMS by name', osms.length);
 
@@ -61,6 +66,16 @@ function score(it, b) {
   const main = b === 'bowman' ? DEX + STR * 0.25 : b === 'thief' ? LUK + DEX * 0.5 : b === 'warrior' ? STR + DEX * 0.25 : b === 'magician' ? INT + LUK * 0.25 : (STR + DEX + INT + LUK) * 0.25;
   return main * 10 + n(s.incPDD) * 0.05 + n(s.incMDD) * 0.02 + n(s.incMHP) * 0.01;
 }
+/** earrings: crit damage, then main stat, then defence, strictly in that order (each tier outweighs the next) */
+function earringScore(it, b) {
+  const s = it.stats;
+  return n(s.incCRD) * 1e6 + (score(it, b) - n(s.incPDD) * 0.05 - n(s.incMDD) * 0.02 - n(s.incMHP) * 0.01) * 1e3 + n(s.incPDD) + n(s.incMDD);
+}
+const slotScore = (slot, it, b) => (slot === 'Earrings' ? earringScore(it, b) : score(it, b));
+
+// ONLY=<slots>: start from the current catalog and rebuild just those gear slots
+const ONLY = process.env.ONLY ? process.env.ONLY.split(',').map(s => s.trim()) : null;
+const current = name => JSON.parse(fs.readFileSync('src/core/avatar/catalog.ts', 'utf8').match(new RegExp(`export const ${name}[^=]*= (.*?);\\n`, 's'))[1]);
 
 /** upgrade ladder: walking up by required level, keep each (drawable) item that beats the best so far */
 async function ladder(items, value) {
@@ -77,15 +92,16 @@ async function ladder(items, value) {
 }
 
 const SLOTS = { Hat: 'Hat', Top: 'Top', Bottom: 'Bottom', Overall: 'Overall', Shoes: 'Shoes', Glove: 'Glove', Cape: 'Cape', Earrings: 'Earring' };
-const gear = {};
+const gear = ONLY ? current('GEAR') : {};
 for (const b of BRANCHES) {
-  gear[b] = {};
+  gear[b] ??= {};
   for (const g of [0, 1]) {
     const key = g ? 'f' : 'm';
-    gear[b][key] = {};
+    gear[b][key] ??= {};
     for (const [slot, sub] of Object.entries(SLOTS)) {
+      if (ONLY && !ONLY.includes(slot)) continue;
       const pool = osms.filter(it => it.sub_category === sub && wears(it, b) && fitsGender(it, g));
-      gear[b][key][slot] = await ladder(pool, it => score(it, b));
+      gear[b][key][slot] = await ladder(pool, it => slotScore(slot, it, b));
     }
     console.log(b, key, Object.entries(gear[b][key]).map(([s, l]) => `${s}:${l.length}`).join(' '));
   }
@@ -94,8 +110,8 @@ for (const b of BRANCHES) {
 // weapon type from the id range (as in the game data)
 const TYPE = { 130: 'One-Handed Sword', 131: 'One-Handed Axe', 132: 'One-Handed Blunt Weapon', 133: 'Dagger', 137: 'Wand', 138: 'Staff',
   140: 'Two-Handed Sword', 141: 'Two-Handed Axe', 142: 'Two-Handed Blunt', 143: 'Spear', 144: 'Pole Arm', 145: 'Bow', 146: 'Crossbow', 147: 'Claw' };
-const weapons = {};
-for (const [pre, type] of Object.entries(TYPE)) {
+const weapons = ONLY ? current('WEAPONS') : {};
+for (const [pre, type] of ONLY ? [] : Object.entries(TYPE)) {
   const magic = type === 'Wand' || type === 'Staff';
   const pool = osms.filter(it => Math.floor(it.gms / 10000) === +pre);
   const lad = await ladder(pool, it => (magic ? n(it.stats.incMAD) : n(it.stats.incPAD)) + n(it.stats.incINT) * 0.5 + n(it.stats.incSTR) * 0.2 + n(it.stats.incDEX) * 0.2 + n(it.stats.incLUK) * 0.2);
@@ -114,9 +130,13 @@ async function pool(ids, lo, count) {
   }
   return out.sort((a, b) => a - b);
 }
-const [hairIds, faceIds] = await Promise.all([list('subCategoryFilter=Hair'), list('subCategoryFilter=Face')]);
-const hair = { m: await pool(hairIds, 30, 24), f: await pool(hairIds, 31, 24) };
-const face = { m: await pool(faceIds, 20, 20), f: await pool(faceIds, 21, 20) };
+let hair, face;
+if (ONLY) { hair = current('HAIR'); face = current('FACE'); } // the look pool stays as it is
+else {
+  const [hairIds, faceIds] = await Promise.all([list('subCategoryFilter=Hair'), list('subCategoryFilter=Face')]);
+  hair = { m: await pool(hairIds, 30, 24), f: await pool(hairIds, 31, 24) };
+  face = { m: await pool(faceIds, 20, 20), f: await pool(faceIds, 21, 20) };
+}
 console.log('hair', hair.m.length, hair.f.length, 'face', face.m.length, face.f.length);
 
 const fmt = v => JSON.stringify(v).replace(/\]\],"/g, ']],\n      "').replace(/\}\},"/g, '}},\n  "').replace(/\},"([mf])"/g, '},\n    "$1"');

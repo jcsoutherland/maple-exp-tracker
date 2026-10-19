@@ -117,8 +117,28 @@ ol.help li{margin-bottom:4px}
     radial-gradient(ellipse 34% 120% at 50% 62%,#d8dae09e 0%,#9a9ca638 46%,#0000 76%),
     linear-gradient(to bottom,#060607 0%,#0c0c0f 76%,#1b1c21 77%,#0f1013 100%)}
 .showroom canvas{display:block;width:100%;height:100%} /* drawn at 3x, shown at 1.5x: smooth downsampling keeps every pixel the same size */
-.reroll{position:absolute;top:6px;right:6px;padding:2px 7px;font-size:14px;line-height:20px;background:#ffffff14;border-color:#ffffff26;border-radius:6px;opacity:.75}
-.reroll:hover{opacity:1;background:#ffffff26}
+/* the dice and the ⓘ under it: same 32×26 glass button */
+.reroll,.gearbtn{position:absolute;right:6px;width:32px;height:26px;padding:0;display:grid;place-items:center;background:#ffffff14;border-color:#ffffff26;border-radius:6px;opacity:.75}
+.reroll{top:6px;font-size:14px;line-height:1}
+.reroll:hover:not(:disabled){opacity:1;background:#ffffff26;border-color:#ffffff40}
+/* the gear the character wears: an ⓘ under the dice; hover or tap covers the stage with the list */
+.gearbtn{top:38px;z-index:6;font:italic 700 15px/1 Georgia,serif;color:#e6e3f5;transition:opacity .15s}
+/* while the list is showing, the ⓘ steps aside (it stays focusable for the keyboard) */
+.gearinfo:hover .gearbtn,.gearinfo.open .gearbtn{opacity:0;pointer-events:none}
+.gearlist{position:absolute;inset:0;z-index:5;padding:10px 10px 10px 12px;overflow:auto;text-align:left;background:rgba(14,12,30,.9);backdrop-filter:blur(3px);opacity:0;visibility:hidden;transition:opacity .15s,visibility .15s}
+.gearinfo:hover .gearlist,.gearinfo.open .gearlist{opacity:1;visibility:visible}
+.gearhead{font-size:10.5px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;margin:0 34px 8px 0}
+.geargrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 8px}
+/* the first row sits beside the ⓘ: keep its right-hand cell clear of it */
+.geargrid > :nth-child(2){padding-right:30px}
+.gearrow{display:flex;align-items:center;gap:7px;min-width:0}
+.gearrow.lookonly{opacity:.55}
+.gearic{flex:none;width:26px;height:26px;display:grid;place-items:center;border-radius:6px;background:#ffffff0d}
+.gearic img{max-width:24px;max-height:24px;image-rendering:pixelated}
+.gearname{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.gearname > a,.gearname > span{font-size:12px;font-weight:600;color:var(--tx);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gearname > a:hover{color:var(--warm);text-decoration:underline}
+.gearname small{font-size:10.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stage-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;color:#e6e8ee;font-weight:600;font-size:13px;text-shadow:0 1px 3px #000}
 .stage-cap{font-size:11px;color:var(--mut);padding:4px 8px 8px}
 .nameplate{display:flex;align-items:center;gap:8px;font-size:16px}

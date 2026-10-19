@@ -1,7 +1,8 @@
-import { itemByName, MESO_WATCH_URL, meowdbUrl } from '../core/data/osms';
+import { copyItemName, itemByName, MESO_WATCH_URL } from '../core/data/osms';
 import type { Drop } from '../core/session';
 import { fmtN } from '../core/util';
 import { toast, useCtrl, useItemIcon } from './hooks';
+import { MeowdbLink } from './MeowdbLink';
 
 /** Drops as one readable column (icon · name ×qty), NPC value, and links to player-market prices. */
 export function DropTable({ drops, compact }: { drops: Record<string, Drop>; compact?: boolean }) {
@@ -36,9 +37,9 @@ function DropRow({ name, d, id, price, total, compact }: { name: string; d: Drop
       <td className="n">{total ? fmtN(total) : '—'}</td>
       {!compact && (
         <td className="links">
-          <a href={meowdbUrl(name)} target="_blank" rel="noopener">meowdb ↗</a>
-          <a href={MESO_WATCH_URL} target="_blank" rel="noopener" title="Opens meso.watch with the item name copied — paste it into the filter"
-            onClick={() => navigator.clipboard?.writeText(name).then(() => toast(`“${name}” copied — paste it into meso.watch's filter`), () => undefined)}>meso.watch ↗</a>
+          <MeowdbLink name={name}>meowdb ↗</MeowdbLink>
+          <a href={MESO_WATCH_URL} target="_blank" rel="noopener" title="Opens meso.watch with the item name copied: paste it into the filter"
+            onClick={() => copyItemName(name, 'meso.watch', toast)}>meso.watch ↗</a>
         </td>
       )}
     </tr>
