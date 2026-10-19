@@ -52,6 +52,9 @@ export function DropsTab() {
     <section>
       <div className="card">
         <h3>Drops this session</h3>
+        <div className="note">
+          Counts come from reading the pickup log in MapleStory Classic as it scrolls by, so they aren't 100% exact: a line hidden behind effects or other players can be missed. It does its best to catch every one.
+        </div>
         <DropTable drops={s?.drops ?? {}} />
         <div className="mut small" style={{ marginTop: 8 }}>
           Names are matched to the MapleStory Classic World item list. NPC price is what a shop pays; compare with player prices on meowdb or meso.watch.

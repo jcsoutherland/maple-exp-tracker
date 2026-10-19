@@ -9,11 +9,15 @@
 ::-webkit-scrollbar-thumb{background:#3a3566;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
 ::-webkit-scrollbar-thumb:hover{background:var(--acc);background-clip:padding-box}
 ::-webkit-scrollbar-corner{background:transparent}
-body{margin:0;color:var(--tx);font:13px/1.4 system-ui,Segoe UI,sans-serif;background:radial-gradient(1100px 380px at 50% -140px,rgba(139,123,255,.16),transparent 70%),var(--bg)}
+/* the glow is one non-repeating image at the top; html carries the base colour so short pages don't tile it */
+html{background:var(--bg)}
+body{margin:0;min-height:100vh;color:var(--tx);font:13px/1.4 system-ui,Segoe UI,sans-serif;background:radial-gradient(1100px 380px at 50% -140px,rgba(139,123,255,.16),transparent 70%) no-repeat,var(--bg)}
 button{background:var(--panel2);color:var(--tx);border:1px solid var(--line);border-radius:99px;padding:6px 14px;font:inherit;font-weight:600;cursor:pointer}
-button:hover{border-color:var(--acc);background:#2a2650}button:disabled{opacity:.4;cursor:default}
+/* disabled buttons stay put: no hover, and the pointer says "not now" (the reason is in their tooltip) */
+button:hover:not(:disabled){border-color:var(--acc);background:#2a2650}button:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
 button.pri{background:var(--acc);color:#fff;border-color:var(--acc);box-shadow:0 4px 14px rgba(139,123,255,.3)}
-button.pri:hover{background:#9d8fff}
+button.pri:hover:not(:disabled){background:#9d8fff}
+button.pri:disabled{box-shadow:none}
 button.danger{border-color:rgba(255,107,120,.35);color:#ff9aa3}
 input,select{background:#14132a;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit}
 input:focus,select:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(139,123,255,.2)}
@@ -136,6 +140,10 @@ ol.help li{margin-bottom:4px}
 .ctlbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;row-gap:8px;background:var(--panel2);border:1px solid rgba(255,255,255,.04);border-radius:12px;padding:7px 7px 7px 10px;min-width:0}
 .ctlbar .pill{font-size:11.5px;padding:2px 9px 2px 7px}
 .ctlbar .btns{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;flex:1 1 auto}
+/* a disabled button sits in a span that carries the "why" tooltip (disabled buttons get no mouse events) */
+.ctlbar .tip{display:inline-flex;cursor:not-allowed}.ctlbar .tip button:disabled{pointer-events:none}
+.ctlhint{flex-basis:100%;display:flex;align-items:center;gap:6px;padding:0 4px 1px;font-size:11.5px;color:var(--mut)}
+.ctlhint::before{content:"";width:6px;height:6px;border-radius:99px;background:var(--warm);flex:none}
 .ctlbar .btns button{padding:7px clamp(10px,1.5vw,20px);font-size:12.5px;white-space:nowrap}
 .stat .v.sm{font-size:15px}
 .stat .s{font-size:11px;color:var(--mut);min-height:15px}
@@ -163,6 +171,9 @@ button.sm.x{border-color:transparent;background:none;color:var(--mut)}
 .addpot{margin-top:8px;width:100%}
 .ic-wrap{display:inline-flex;width:30px;height:30px;align-items:center;justify-content:center;flex:none}
 /* ---- drops ---- */
+/* a soft "good to know" callout */
+.note{display:flex;gap:8px;align-items:flex-start;margin:0 0 12px;padding:8px 12px;border-radius:10px;background:rgba(139,123,255,.08);border:1px solid rgba(139,123,255,.22);color:#c9c4e6;font-size:12px;line-height:1.45}
+.note::before{content:"i";flex:none;width:16px;height:16px;margin-top:1px;border-radius:99px;background:var(--acc);color:#fff;font:700 11px/16px Georgia,serif;text-align:center}
 table.drops td{vertical-align:middle}
 .drops .item{display:flex;align-items:center;gap:8px}
 .drops .qty{color:var(--warm);font-weight:700;font-variant-numeric:tabular-nums}
@@ -179,6 +190,15 @@ table.drops td{vertical-align:middle}
 .hslot .hx{position:absolute;top:-6px;right:-6px;width:18px;height:18px;padding:0;border-radius:99px;font-size:12px;line-height:16px;display:none}
 .hslot:hover .hx{display:block}
 .sess.day > .sess{margin-left:6px}
+/* History archive: one folded section; the chevron turns when it opens */
+.archive{margin-top:18px}
+.archive > summary{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);cursor:pointer;list-style:none;user-select:none}
+.archive > summary::-webkit-details-marker{display:none}
+.archive > summary:hover{border-color:var(--acc)}
+.archive > summary b{font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut)}
+.archive .chev{width:15px;height:15px;color:var(--mut);transition:transform .2s}
+.archive[open] > summary{margin-bottom:4px}
+.archive[open] .chev{transform:rotate(90deg)}
 .mobpic{width:64px;height:56px;flex:none;display:flex;align-items:flex-end;justify-content:center}
 .mobpic img{max-width:64px;max-height:56px;image-rendering:pixelated}
 /* the stats, then the potions filling the rest of the column so both columns end level */

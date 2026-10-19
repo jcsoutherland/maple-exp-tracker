@@ -70,10 +70,17 @@ export function HistoryTab() {
       </div>
       {recent.map(x => <SessionCard key={x.id} x={x} onDelete={() => { store.saveSessions(all.filter(s => s.id !== x.id)); refresh(); }} />)}
       {!recent.length && <div className="mut small" style={{ margin: '10px 2px' }}>No new sessions since the last archive.</div>}
-      {days.length > 0 && <>
-        <h3 style={{ margin: '18px 2px 0' }}>Archive</h3>
-        {days.map(d => <DayCard key={d.key} d={d} onDelete={id => { store.saveSessions(all.filter(s => s.id !== id)); refresh(); }} />)}
-      </>}
+      {/* the archive stays folded away until you open it */}
+      {days.length > 0 && (
+        <details className="archive">
+          <summary>
+            <svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+            <b>Archive</b>
+            <span className="mut small">{days.length} day{days.length > 1 ? 's' : ''} · {list.length - recent.length} session{list.length - recent.length > 1 ? 's' : ''}</span>
+          </summary>
+          {days.map(d => <DayCard key={d.key} d={d} onDelete={id => { store.saveSessions(all.filter(s => s.id !== id)); refresh(); }} />)}
+        </details>
+      )}
     </section>
   );
 }

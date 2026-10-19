@@ -1,4 +1,13 @@
+import type { ReactNode } from 'react';
 import { toast, useCtrl } from './hooks';
+
+/**
+ * A button that explains itself when disabled: the tooltip sits on a wrapper because disabled buttons get no
+ * mouse events (so no hover either).
+ */
+function Gate({ why, children }: { why: string | null; children: ReactNode }) {
+  return why ? <span className="tip" title={why}>{children}</span> : <>{children}</>;
+}
 
 /** The Live dashboard's session strip: capture and session status, then share / start / pause / end. */
 export function SessionBar() {
@@ -10,8 +19,12 @@ export function SessionBar() {
     catch (e) { const err = e as DOMException; toast(err.name === 'NotAllowedError' ? 'Capture cancelled' : `Capture failed: ${err.name} ${err.message}`); }
   };
   const stop = () => { c.stop(); toast('Session ended and saved to History'); };
-  const startWhy = s ? 'A session is already running' : !cap.ready ? 'Share the game window first'
-    : c.ocrState === 'error' ? 'The text reader failed to load: reload the page' : c.ocrState !== 'ready' ? 'Getting ready…' : 'Start tracking';
+
+  // why each button is off right now (null = it's on)
+  const startWhy = s ? 'A session is already running' : !cap.sharing ? 'Share your game window first'
+    : !cap.ready ? 'Waiting for the first frames from the shared window…'
+    : c.ocrState === 'error' ? 'The text reader failed to load: reload the page' : c.ocrState !== 'ready' ? 'Getting ready…' : null;
+  const sessWhy = s ? null : !cap.sharing ? 'Share your game window, then start a session' : 'Start a session first';
 
   return (
     <div className="ctlbar">
@@ -20,11 +33,12 @@ export function SessionBar() {
       <div className="btns">
         {cap.sharing
           ? <button onClick={() => { c.stopCapture(); toast('Stopped capturing'); }} title="Stop sharing the game window (pauses a running session)">⏹ Stop capture</button>
-          : <button onClick={share}>Share game window</button>}
-        <button className="pri" disabled={!!s || !cap.ready || c.ocrState !== 'ready'} title={startWhy} onClick={() => c.start()}>▶ Start session</button>
-        <button disabled={!s} onClick={() => c.togglePause()}>{s?.paused ? '▶ Resume' : '⏸ Pause'}</button>
-        <button className="danger" disabled={!s} onClick={stop} title="End this session: save it to History and clear the dashboard for a fresh start">■ End &amp; save</button>
+          : <button className={s ? '' : 'pri'} onClick={share} title="Pick your MapleStory window to start tracking">Share game window</button>}
+        <Gate why={startWhy}><button className={cap.sharing ? 'pri' : ''} disabled={!!startWhy} onClick={() => c.start()}>▶ Start session</button></Gate>
+        <Gate why={sessWhy}><button disabled={!!sessWhy} onClick={() => c.togglePause()}>{s?.paused ? '▶ Resume' : '⏸ Pause'}</button></Gate>
+        <Gate why={sessWhy}><button className="danger" disabled={!!sessWhy} onClick={stop} title="End this session: save it to History and clear the dashboard for a fresh start">■ End &amp; save</button></Gate>
       </div>
+      {!cap.sharing && !s && <div className="ctlhint">Start, Pause and End unlock once you share your game window.</div>}
     </div>
   );
 }
