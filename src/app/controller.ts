@@ -7,7 +7,8 @@ import { SlotWatch, slotStrip } from '../core/slotwatch';
 import { allItems, canonItem, canonMap, dropsOnMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
 import { ExpLineFilter, LineShapeFilter, LogAnchor, snapInk, snapLine, type LineSnap } from '../core/logqueue';
 import { readLogSnap } from '../core/logread';
-import { matchSnap, type NameLists } from '../core/logmatch';
+import { matchLine, matchSnap, nativeStrip, parenScore, type LineMatch, type NameLists } from '../core/logmatch';
+import { LogFollower, type LogLine, type SlotToken } from '../core/logtrack';
 import { enhanceText, fixIL, frameSize, gaugeFill, logPreviewCanvas, logScan, newLineCount, prepRegion, regionSignature, slotSignature, type FrameSource, type LogScan } from '../core/imaging';
 import type { OcrEngine } from '../core/ocr/engine';
 import { TesseractEngine } from '../core/ocr/tesseract';
@@ -20,7 +21,7 @@ import { Tracker } from '../core/tracker';
 import { median, normLine, sim } from '../core/util';
 
 /** a pickup-log line waiting to be (or being) read */
-interface LogItem { snap: LineSnap; status: 'queued' | 'reading' | 'done' | 'failed'; tries: number; guess: boolean }
+interface LogItem { snap: LineSnap; status: 'queued' | 'reading' | 'done' | 'failed'; tries: number; guess: boolean; /** the followed line it reads (Ideal ratio) */ line?: LogLine }
 /** snapshots older than this are dropped unread, and the queue never holds more than LOG_QUEUE_MAX */
 const LOG_MAX_AGE_MS = 30_000, LOG_QUEUE_MAX = 60, LOG_READERS = 2, LOG_WATCH_SLOTS = 8; // ≤60 × ~22 KB
 /** the loading screen never waits longer than this on page load / session start */
@@ -279,7 +280,7 @@ export class Controller {
     this.tickExp(); this.tickMap(true);
   }
   private resetWatchers() {
-    this.lastLog = null; this.slotCache.clear(); this.counted = []; this.logLines = []; this.mapSig = 0; this.mapExpAt = 0; this.recent = []; this.lastTimeline = 0;
+    this.lastLog = null; this.follower = new LogFollower(); this.slotCache.clear(); this.counted = []; this.logLines = []; this.mapSig = 0; this.mapExpAt = 0; this.recent = []; this.lastTimeline = 0;
   }
   togglePause() {
     const s = this.sess;
@@ -336,6 +337,7 @@ export class Controller {
     this.busy.log = true;
     const t0 = performance.now();
     try {
+      if (this.settings.uiRatio === 'ideal') { this.tickLogIdeal(); return; }
       const v = this.capture.video, r = this.regions.log;
       const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'), this.logAnchor.value, this.settings.uiRatio);
       this.logAnchor.add(lo.detected, `${v.videoWidth}x${v.videoHeight}:${r.x},${r.y},${r.w},${r.h}`);
@@ -377,6 +379,124 @@ export class Controller {
     } catch (e) { console.error(e); } finally { this.busy.log = false; this.stats.lastTickMs = performance.now() - t0; }
   }
 
+  /**
+   * The log's line grid at the Ideal ratio, in log-region pixels: the newest line's text-cell top and where every
+   * line's ")" ends. Seeded from where the log sits in its default box, then learned from the lines the font matcher
+   * reads (each read line gives its exact row and edge).
+   */
+  private logGrid: { key: string; top0: number; xr: number; tops: number[]; xrs: number[]; misses: number } | null = null;
+  private follower = new LogFollower();
+  /** font-matcher results by slot image (an unchanged slot isn't read again) */
+  private slotReads = new Map<number, LineMatch | null>();
+
+  /**
+   * Ideal ratio: the log is drawn pixel for pixel, so every line slot is read by the font matcher each tick (cached
+   * while its pixels don't change) and the log is followed by the lines it recognises (LogFollower): a bright or moving
+   * background can't fake new lines, and identical repeats still count. A new line the matcher can't read goes to OCR.
+   */
+  private tickLogIdeal() {
+    const v = this.capture.video, r = this.regions.log;
+    const lo = logScan(v, r, r.thr - 30, document.createElement('canvas'), null, 'ideal');
+    this.stats.logChecks++;
+    if (!lo.rgba || lo.X == null || lo.Y == null) return;
+    const key = `${v.videoWidth}x${v.videoHeight}:${r.x},${r.y},${r.w},${r.h}`;
+    // where the newest line sits in the default box: 29 px above its bottom, ")" 9 px in from its right
+    if (this.logGrid?.key !== key) { this.logGrid = { key, top0: lo.H - 29, xr: lo.W - 9, tops: [], xrs: [], misses: 0 }; this.follower = new LogFollower(); }
+    const G = this.logGrid, names = this.logNames(), now = Date.now(), P = 14;
+    /** the slot's rows (region pixels, 3 above its text cell) as a native strip, read by the matcher */
+    const read = (j: number) => {
+      const r0 = G.top0 - P * j - 3, r1 = r0 + 20;
+      if (r0 < 0 || r1 > lo.H) return null;
+      const strip = nativeStrip(lo.rgba!.subarray(r0 * lo.W * 4, r1 * lo.W * 4), lo.W, r1 - r0, lo.X!, lo.Y! + r0, 1);
+      let h = 2166136261;
+      for (let i = 0; i < strip.M.length; i++) if (strip.M[i]) h = Math.imul(h ^ i, 16777619);
+      h = (h ^ (G.xr << 20)) >>> 0;
+      let m = this.slotReads.get(h);
+      if (m === undefined) {
+        m = matchLine(strip, names, G.xr, undefined, [2, 3, 4]);
+        this.slotReads.set(h, m);
+        if (this.slotReads.size > 400) this.slotReads.delete(this.slotReads.keys().next().value!);
+      }
+      return { m, strip, r0 };
+    };
+    const tokens: SlotToken[] = [];
+    let matched = 0;
+    for (let j = 0; j < 6; j++) {
+      const s = read(j);
+      if (!s) { tokens.push({ text: null, lum: 0, ink: false }); continue; }
+      if (s.m) {
+        matched++;
+        G.tops.push(s.r0 + s.m.y + P * j); G.xrs.push(s.m.xr);
+        if (G.tops.length > 60) { G.tops.shift(); G.xrs.shift(); }
+      }
+      // brightness is measured on this frame: a cached read can come from when the line was brighter (a fading line's
+      // text pixels stay the same set while they dim)
+      let lum = 0, n = 0;
+      const y0 = (s.m?.y ?? 3) + 3;
+      for (let y = y0; y < Math.min(s.strip.h, y0 + 12); y++) for (let x = 0; x < s.strip.w; x++) if (s.strip.M[y * s.strip.w + x]) { lum += s.strip.L[y * s.strip.w + x]; n++; }
+      lum = n ? lum / n : 0;
+      tokens.push({ text: s.m?.text ?? null, lum, ink: !!s.m || parenScore(s.strip, G.xr, [2, 3, 4]) >= 0.6 });
+    }
+    // a line read below the newest slot: the grid sits a line too high (the default box was moved)
+    const below = read(-1);
+    if (below?.m) { G.top0 += P; G.tops = []; G.xrs = []; this.follower = new LogFollower(); return; }
+    // learn the grid from the lines read: the most common row and edge
+    if (G.tops.length >= 8 && G.tops.length % 4 === 0) {
+      const mode = (a: number[]) => { const c = new Map<number, number>(); for (const x of a) c.set(x, (c.get(x) || 0) + 1); return [...c].sort((p, q) => q[1] - p[1])[0][0]; };
+      const t = mode(G.tops), x = mode(G.xrs);
+      if (t !== G.top0 || x !== G.xr) { G.top0 = t; G.xr = x; }
+    }
+    // nothing read for a long while although the log shows lines: look for them anywhere in the box
+    G.misses = matched ? 0 : G.misses + 1;
+    if (G.misses >= 45 && tokens.some(t => t.ink)) { G.misses = 0; this.findLogGrid(lo, names); }
+
+    this.debug?.('tok', tokens.map(t => (t.text ? t.text.replace(/^You have gained mesos /, 'M').replace(/^You received EXP /, 'E').replace(/^Bonus EXP for PARTY /, 'B').replace(/ x1 earned. /, '') + '@' + Math.round(t.lum) : t.ink ? '?@' + Math.round(t.lum) : '.')).join(' | '));
+    const { added, identified } = this.follower.update(tokens);
+    if (added.length) this.debug?.('newLines', added.length);
+    for (const ln of identified) this.countFollowed(ln);
+    for (const ln of added) ln.born = this.stats.logChecks;
+    // new lines the matcher hasn't read after ~1 s (covered, or an unknown item): OCR them, as the old reader would.
+    // Waiting gives the matcher its chance first: a player standing in front usually moves on.
+    this.follower.lines.forEach((ln, j) => {
+      if (!ln || ln.pre || ln.text != null || this.stats.logChecks - (ln.born ?? 0) < 12) return;
+      const it = ln.item as LogItem | undefined;
+      if (it && (it.status !== 'failed' || it.tries >= 3 || now - it.snap.t < 500)) return;
+      const a = Math.max(0, G.top0 - P * j), snap = snapLine(lo, null, [a, Math.min(lo.H, a + P + 3)], now);
+      if (it) { it.snap = snap; it.tries++; it.status = 'queued'; this.logQueue.push(it); return; }
+      const item: LogItem = { snap, status: 'queued', tries: 1, guess: false, line: ln };
+      ln.item = item;
+      this.logQueue.push(item);
+    });
+    this.pumpLog();
+  }
+
+  /** Search the whole log box for lines to set the grid from (when the default box has been moved). */
+  private findLogGrid(lo: LogScan, names: NameLists) {
+    const G = this.logGrid!;
+    for (let r0 = 0; r0 + 20 <= lo.H; r0 += 7) {
+      const strip = nativeStrip(lo.rgba!.subarray(r0 * lo.W * 4, (r0 + 20) * lo.W * 4), lo.W, 20, lo.X!, lo.Y! + r0, 1);
+      const m = matchLine(strip, names);
+      // the lowest line read is the newest one
+      if (m && r0 + m.y > G.top0 - 7) { G.top0 = r0 + m.y; G.xr = m.xr; }
+      else if (m && G.tops.length === 0) { G.top0 = r0 + m.y; G.xr = m.xr; }
+    }
+    this.debug?.('grid', [G.top0, G.xr]);
+    this.follower = new LogFollower();
+  }
+
+  /** A followed line has been read (by the matcher or OCR): count it once (EXP lines only show activity). */
+  private countFollowed(ln: LogLine) {
+    const t = ln.text!;
+    const it = ln.item as LogItem | undefined;
+    if (it && it.status !== 'done') it.status = 'done'; // read before its OCR turn came: drop that
+    this.markActive();
+    if (lineKind(t) === 'exp' || t.startsWith('Bonus EXP')) { this.stats.expSkipped++; return; }
+    this.stats.logMatched++;
+    this.debug?.('match', t);
+    this.tracker?.onLogLines([t]);
+    this.notify();
+  }
+
   /** Feed queued snapshots to the OCR workers (oldest first), skipping EXP lines and dropping stale ones. */
   private pumpLog() {
     const now = Date.now();
@@ -403,6 +523,11 @@ export class Controller {
       if (this.slotCache.size > 80) this.slotCache.delete(this.slotCache.keys().next().value!);
     }
     if (lineQuality(t) < 2) { q.status = 'failed'; this.debug?.('unreadable', t); return; } // retried from a new snapshot while the line is on screen
+    if (q.line) { // Ideal ratio: a followed line, unless the matcher has read it meanwhile
+      q.status = 'done';
+      if (q.line.text == null) { q.line.text = t; q.line.ocr = true; this.countFollowed(q.line); }
+      return;
+    }
     this.countLine(q, t, hash);
   }
 

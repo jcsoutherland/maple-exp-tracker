@@ -7,6 +7,7 @@
 //   REGIONS='{"quickslot":{"x":0.6885,"y":0.7778,"w":0.1021,"h":0.1296,"thr":140}}'   region overrides
 //   UI_RATIO=ideal     the game's UI ratio setting (default: default); REGIONS then overrides that ratio's boxes
 //   LEVEL=38 CLASS=Hunter PORT=5174   the character at the start, dev server port
+//   FROM=0 TO=120      replay only this part of the video (seconds)
 import fs from 'node:fs';
 import puppeteer from 'puppeteer-core';
 import { createServer } from 'vite';
@@ -76,9 +77,9 @@ const out = await page.evaluate(async (speed, opt) => {
   // Date.now() drives the forced-read and map timers; advance a fake clock with video time
   const t0 = Date.now(); const realNow = Date.now; Date.now = () => t0 + vt * 1000;
   const wall0 = performance.now(), SPEED = speed; // SPEED > 1 plays the video faster, simulating a busier (party) log
-  for (let t = 0; t < v.duration - 0.5; t += STEP) {
+  for (let t = opt.from; t < Math.min(opt.to, v.duration - 0.5); t += STEP) {
     // play back in real time at most: the OCR workers read in the background at their real speed, as live
-    const ahead = t * 1000 / SPEED - (performance.now() - wall0);
+    const ahead = (t - opt.from) * 1000 / SPEED - (performance.now() - wall0);
     if (ahead > 0) await new Promise(r => setTimeout(r, ahead));
     vt = t; v.currentTime = t;
     await new Promise(r => (v.onseeked = r));
@@ -101,11 +102,11 @@ const out = await page.evaluate(async (speed, opt) => {
     log, ocrLines, countedLines, skipped,
     summary: { exp: s.exp, expLost: s.expLost, mesos: s.mesos, maps: s.maps, drops: Object.fromEntries(Object.entries(s.drops).map(([k, d]) => [k, d.qty])),
       hp: s.hp, mp: s.mp, hpMax: tr.hp.max, mpMax: tr.mp.max },
-    perf: { logChecks: c.stats.logChecks, ocrCalls: c.stats.ocrCalls, expSkipped: c.stats.expSkipped, guessSkipped: c.stats.guessSkipped, logGuesses: c.stats.logGuesses, junkSkipped: c.stats.junkSkipped, logDropped: c.stats.logDropped, logTickMedianMs: Math.round(tickMs[tickMs.length >> 1]), logTickP95Ms: Math.round(tickMs[Math.floor(tickMs.length * 0.95)]) },
+    perf: { logChecks: c.stats.logChecks, logMatched: c.stats.logMatched, ocrCalls: c.stats.ocrCalls, expSkipped: c.stats.expSkipped, guessSkipped: c.stats.guessSkipped, logGuesses: c.stats.logGuesses, junkSkipped: c.stats.junkSkipped, logDropped: c.stats.logDropped, logTickMedianMs: Math.round(tickMs[tickMs.length >> 1]), logTickP95Ms: Math.round(tickMs[Math.floor(tickMs.length * 0.95)]) },
   };
 }, +(process.env.SPEED || 1), {
   logHz: +(process.env.LOG_HZ || 4), hotbar: JSON.parse(process.env.HOTBAR || '{}'), regions: JSON.parse(process.env.REGIONS || '{}'), uiRatio: process.env.UI_RATIO || 'default',
-  level: +(process.env.LEVEL || 37), cls: process.env.CLASS || 'Hunter', logOcr: process.env.LOG_OCR || 'paddle',
+  from: +(process.env.FROM || 0), to: +(process.env.TO || 1e9), level: +(process.env.LEVEL || 37), cls: process.env.CLASS || 'Hunter', logOcr: process.env.LOG_OCR || 'paddle',
 });
 console.log(out.log.join('\n'));
 if (process.env.DIAG) fs.writeFileSync(process.env.DIAG, JSON.stringify({ ocr: out.ocrLines, counted: out.countedLines, skipped: out.skipped }));

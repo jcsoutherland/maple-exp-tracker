@@ -67,17 +67,18 @@ export function nativeStrip(rgba: ArrayLike<number>, W: number, H: number, X: nu
 }
 
 /** how well glyph `g` explains the mask in its advance box at pen x (cell top y) */
-function charScore(s: NativeStrip, g: Glyph, x: number, y: number, acc: { hit: number; n: number; extra: number }) {
+type Acc = { hit: number; n: number; extra: number; l: number };
+function charScore(s: NativeStrip, g: Glyph, x: number, y: number, acc: Acc) {
   for (let r = 0; r < ROWS; r++) {
     const Y = y + ROW0 + r;
     if (Y < 0 || Y >= s.h) { for (let c = 0; c < g.adv; c++) if (g.role[r * g.adv + c] === 1) acc.n++; continue; }
     for (let c = 0; c < g.adv; c++) {
       const X = x + c, m = X >= 0 && X < s.w ? s.M[Y * s.w + X] : 0, role = g.role[r * g.adv + c];
-      if (role === 1) { acc.n++; if (m) acc.hit++; } else if (role === 0 && m) acc.extra++;
+      if (role === 1) { acc.n++; if (m) { acc.hit++; acc.l += s.L[Y * s.w + X]; } } else if (role === 0 && m) acc.extra++;
     }
   }
 }
-const score = (a: { hit: number; n: number; extra: number }) => (a.n ? a.hit / (a.n + a.extra) : 0);
+const score = (a: Acc) => (a.n ? a.hit / (a.n + a.extra) : 0);
 
 /** pens (left to right) of `text` laid out so its last glyph's advance box ends where a ")" ending at `xr` would */
 function layout(text: string, xr: number): number[] {
@@ -87,7 +88,7 @@ function layout(text: string, xr: number): number[] {
   return pens;
 }
 function fixedScore(s: NativeStrip, text: string, pens: number[], y: number, skip: (i: number) => boolean) {
-  const acc = { hit: 0, n: 0, extra: 0 };
+  const acc: Acc = { hit: 0, n: 0, extra: 0, l: 0 };
   for (let i = 0; i < text.length; i++) if (!skip(i)) charScore(s, GLYPHS.get(text[i])!, pens[i], y, acc);
   return acc;
 }
@@ -97,14 +98,19 @@ function readDigits(s: NativeStrip, text: string, pens: number[], y: number) {
   const out: { d: string; best: number; second: number }[] = [];
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== '#') continue;
-    const sc = '0123456789'.split('').map(d => { const a = { hit: 0, n: 0, extra: 0 }; charScore(s, GLYPHS.get(d)!, pens[i], y, a); return { d, v: score(a) }; }).sort((a, b) => b.v - a.v);
+    const sc = '0123456789'.split('').map(d => { const a: Acc = { hit: 0, n: 0, extra: 0, l: 0 }; charScore(s, GLYPHS.get(d)!, pens[i], y, a); return { d, v: score(a) }; }).sort((a, b) => b.v - a.v);
     out.push({ d: sc[0].d, best: sc[0].v, second: sc[1].v });
   }
   return out;
 }
 
 export type MatchKind = 'meso' | 'exp' | 'item';
-export interface LineMatch { kind: MatchKind; text: string; /** fixed words' score (0–1) */ score: number }
+export interface LineMatch {
+  kind: MatchKind; text: string;
+  /** fixed words' score (0–1) */ score: number;
+  /** where it was found in the strip: the text cell's top row and the ")" ink's right column */ y: number; xr: number;
+  /** mean brightness of its text pixels (lines fade out) */ lum: number;
+}
 export interface NameLists { /** names expected here (the map's monsters' drops); tried first */ likely: string[]; /** every item, filtered by width */ all: string[] }
 
 const AMOUNT_LINES: [MatchKind, string][] = [['meso', 'You have gained mesos (+'], ['exp', 'You received EXP (+'], ['exp', 'Bonus EXP for PARTY (+']];
@@ -118,16 +124,19 @@ const NEAR = 8;
  * Read one log line from its native strip. `edge` is where the lines' ")" ends (native x in the strip), when known;
  * otherwise it's found from the ink. Returns null unless every part matches confidently.
  */
-export function matchLine(s: NativeStrip, names: NameLists, edge: number | null = null, dbg?: (info: object) => void): LineMatch | null {
+export function matchLine(s: NativeStrip, names: NameLists, edge: number | null = null, dbg?: (info: object) => void, rows?: number[]): LineMatch | null {
   if (s.w < 40 || s.h < ROWS) return null;
+  let ink = 0;
+  for (let i = 0; i < s.M.length; i++) ink += s.M[i];
+  if (ink < 25) return null; // (almost) nothing there
   // right edge candidates: the learned edge, and the rightmost inked column
   let xr0 = -1;
   for (let x = s.w - 1; x >= 0 && xr0 < 0; x--) { let n = 0; for (let y = 0; y < s.h; y++) n += s.M[y * s.w + x]; if (n >= 2) xr0 = x; }
   const xrs = new Set<number>();
   for (const e of [edge, xr0 >= 0 ? xr0 : null]) if (e != null) for (let d = -1; d <= 1; d++) xrs.add(Math.round(e) + d);
   if (!xrs.size) return null;
-  const ys: number[] = [];
-  for (let y = -ROW0 - 1; y + ROW0 + ROWS <= s.h + 1; y++) ys.push(y);
+  const ys: number[] = rows ? [...rows] : [];
+  if (!rows) for (let y = -ROW0 - 1; y + ROW0 + ROWS <= s.h + 1; y++) ys.push(y);
 
   // hypotheses: fixed words with '#' digit cells, laid out from the right
   type Hyp = { kind: MatchKind; text: string; digitsFrom: number };
@@ -141,7 +150,7 @@ export function matchLine(s: NativeStrip, names: NameLists, edge: number | null 
     if (!best || v > best.v) best = { h, xr, y, v, pens };
   }
   if (!best || best.v < MATCH_MIN.fixed) return null;
-  const { h, y, pens, v } = best, d0 = h.text.indexOf('#'), d1 = h.text.lastIndexOf('#');
+  const { h, y, xr, pens, v } = best, d0 = h.text.indexOf('#'), d1 = h.text.lastIndexOf('#');
   // the words around the digits must show clearly, whatever covers the rest
   const near = score(fixedScore(s, h.text, pens, y, i => h.text[i] === '#' || i < d0 - NEAR || i > d1 + NEAR));
   dbg?.({ kind: h.kind, text: h.text, v, near });
@@ -151,12 +160,18 @@ export function matchLine(s: NativeStrip, names: NameLists, edge: number | null 
   if (digits.some(d => d.best < MATCH_MIN.digit || d.best - d.second < MATCH_MIN.digitLead)) return null;
   const n = digits.map(d => d.d).join('');
   if (n.length > 1 && n[0] === '0') return null;
-  const filled = h.text.replace(/#+/, n);
-  if (h.kind !== 'item') return { kind: h.kind, text: filled, score: v };
+  const filled = h.text.replace(/#+/, n), fx = fixedScore(s, h.text, pens, y, i => h.text[i] === '#'), lum = fx.hit ? fx.l / fx.hit : 0;
+  if (h.kind !== 'item') return { kind: h.kind, text: filled, score: v, y, xr, lum };
 
   // item: the name ends where " x" starts
   const name = readName(s, names, pens[0], y);
-  return name ? { kind: 'item', text: name + filled, score: v } : null;
+  return name ? { kind: 'item', text: name + filled, score: v, y, xr, lum } : null;
+}
+
+/** How well a closing ")" with its ink ending at column `xr` shows on any of the given cell rows: every log line ends in one. */
+export function parenScore(s: NativeStrip, xr: number, rows: number[]): number {
+  const g = GLYPHS.get(')')!;
+  return Math.max(0, ...rows.map(y => { const a: Acc = { hit: 0, n: 0, extra: 0, l: 0 }; charScore(s, g, xr - RIGHT, y, a); return score(a); }));
 }
 
 /** the item name whose glyphs, ending at pen `end`, best explain the mask */

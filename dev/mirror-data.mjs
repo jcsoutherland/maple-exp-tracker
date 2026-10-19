@@ -3,6 +3,7 @@
 //   node dev/mirror-data.mjs [outDir=public/data]
 //   MIRROR_BUDGET_MIN=30   stop downloading images after this many minutes (the rest come next run; default: no limit)
 //   MIRROR_FORCE_LISTS=1   refresh the lists even if they're less than a week old
+//   MIRROR_ONLY=drops      only the monster drop tables
 // Lists are refreshed at most weekly; images (item icons, monster images) are only downloaded when the mirror doesn't
 // have them yet, gently (~4 requests/s). The output is git-ignored: it's published, never committed.
 // Character frames are not mirrored: maplestory.io renders a new look in ~30 s but serves one it has drawn before from
@@ -118,6 +119,8 @@ if (!dropsFresh || process.env.MEOWDB_DIR) {
     else console.warn(`drops: only ${Object.keys(drops).length} monsters parsed, kept the previous tables`);
   } catch (e) { console.warn('drop tables failed (the log matcher falls back to all items):', e.message); }
 } else console.log('drop tables are less than a week old: kept');
+// MIRROR_ONLY=drops: just the drop tables (e.g. to try the log matcher locally), nothing else downloaded
+if (process.env.MIRROR_ONLY === 'drops') { write('manifest.json', JSON.stringify(manifest, null, 1)); process.exit(0); }
 
 // ---------- the PaddleOCR English line recogniser (Apache-2.0), once ----------
 const HF = 'https://huggingface.co/monkt/paddleocr-onnx/resolve/main/languages/english/';
