@@ -31,26 +31,31 @@ export interface Glyph { mean: number[]; w: number[] }
 export type Glyphs = Glyph[][];
 
 /** The canonical picture of one slot (row by row, brightest channel), resampled from the frame. */
-export function slotGrey(src: FrameSource, r: Region, i: number, cols: number, rows: number, scratch = document.createElement('canvas')): Float32Array {
+/** a canonical slot picture; `pad` = how many canonical px of the surroundings it includes on every side */
+export type SlotPic = Float32Array & { pad?: number };
+
+export function slotGrey(src: FrameSource, r: Region, i: number, cols: number, rows: number, scratch = document.createElement('canvas'), pad = 0): SlotPic {
   const { W, H } = frameSize(src);
   const sw = r.w * W / cols, sh = r.h * H / rows, sx = r.x * W + (i % cols) * sw, sy = r.y * H + Math.floor(i / cols) * sh;
-  scratch.width = CW; scratch.height = CH;
+  const pw = CW + 2 * pad, ph = CH + 2 * pad, mx = pad * sw / CW, my = pad * sh / CH;
+  scratch.width = pw; scratch.height = ph;
   const g = scratch.getContext('2d', { willReadFrequently: true })!;
   g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
-  g.drawImage(src, sx, sy, sw, sh, 0, 0, CW, CH);
-  const d = g.getImageData(0, 0, CW, CH).data, out = new Float32Array(CW * CH);
+  g.drawImage(src, sx - mx, sy - my, sw + 2 * mx, sh + 2 * my, 0, 0, pw, ph);
+  const d = g.getImageData(0, 0, pw, ph).data, out: SlotPic = new Float32Array(pw * ph);
   // the brightest channel: white strokes, the white slot and any coloured potion picture are all bright in it, so only
   // the digits' black outline is dark (in plain brightness a blue or dark-red potion is as dark as the outline)
   for (let p = 0, q = 0; q < out.length; p += 4, q++) out[q] = Math.max(d[p], d[p + 1], d[p + 2]);
+  out.pad = pad;
   return out;
 }
 
-/** The TW×TH window of a canonical slot at (x, y) (pixels outside read as white, the slot's colour). */
-export function windowAt(s: Float32Array, x: number, y: number): Float32Array {
-  const w = new Float32Array(TW * TH);
+/** The TW×TH window of a canonical slot at (x, y) (pixels outside the picture read as white, the slot's colour). */
+export function windowAt(s: SlotPic, x: number, y: number): Float32Array {
+  const pad = s.pad ?? 0, pw = CW + 2 * pad, ph = CH + 2 * pad, w = new Float32Array(TW * TH);
   for (let j = 0; j < TH; j++) for (let i = 0; i < TW; i++) {
-    const xx = x + i, yy = y + j;
-    w[j * TW + i] = xx >= 0 && yy >= 0 && xx < CW && yy < CH ? s[yy * CW + xx] : 255;
+    const xx = x + i + pad, yy = y + j + pad;
+    w[j * TW + i] = xx >= 0 && yy >= 0 && xx < pw && yy < ph ? s[yy * pw + xx] : 255;
   }
   return w;
 }
@@ -68,9 +73,9 @@ export function ncc(a: ArrayLike<number>, b: ArrayLike<number>, w?: ArrayLike<nu
 }
 
 /** Best digit at (x, y) searching ±`r` px across and ±1 down, or null when nothing matches well enough. */
-function bestDigit(s: Float32Array, x: number, y: number, set: Glyph[], r = 1, min = MIN_SCORE) {
+function bestDigit(s: Float32Array, x: number, y: number, set: Glyph[], r = 1, min = MIN_SCORE, ry = 1) {
   let best: { d: number; score: number; x: number; y: number } | null = null;
-  for (let dy = -1; dy <= 1; dy++) for (let dx = -r; dx <= r; dx++) {
+  for (let dy = -ry; dy <= ry; dy++) for (let dx = -r; dx <= r; dx++) {
     const w = windowAt(s, x + dx, y + dy);
     for (let d = 0; d < 10; d++) {
       const sc = ncc(w, set[d].mean, set[d].w);
@@ -84,13 +89,38 @@ function bestDigit(s: Float32Array, x: number, y: number, set: Glyph[], r = 1, m
  * Read the count on one canonical slot: find the first digit near the slot's bottom-left, then follow the digits to
  * the right. null when no count is readable (empty slot, cursor over it, a window in the way).
  */
-export function readCount(s: Float32Array, glyphs: Glyphs, adv: number[] = ADVANCE): { value: number; score: number } | null {
+export function readCount(s: Float32Array, glyphs: Glyphs, adv: number[] = ADVANCE, wide = false): { value: number; score: number; x: number; y: number; digits: number } | null {
+  if (wide) {
+    // the box may be off: gather the strong digit spots across a much larger part of the slot (coarsely, one per
+    // neighbourhood) and read a whole count from each; the longest, best read starts at the real first digit (the
+    // single best-matching spot is often a later digit, and starting there loses the digits before it)
+    const spots: NonNullable<ReturnType<typeof bestDigit>>[] = [];
+    for (let y = WIDE_Y[0]; y <= WIDE_Y[1]; y += 2) for (let x = WIDE_X[0]; x <= WIDE_X[1]; x += 2) {
+      // a pixel off, these small sharp digits match poorly: let near misses in here, the refine below re-checks them
+      const b = bestDigit(s, x, y, glyphs[0], 0, COARSE_SCORE, 0);
+      if (b) spots.push(b);
+    }
+    spots.sort((a, b) => b.score - a.score);
+    const picked: typeof spots = [];
+    for (const p of spots) if (picked.length < 12 && picked.every(q => Math.abs(q.x - p.x) > 3 || Math.abs(q.y - p.y) > 3)) picked.push(p);
+    let best: ReturnType<typeof follow> = null;
+    for (const p of picked) {
+      const f = bestDigit(s, p.x, p.y, glyphs[0]), r = f ? follow(s, f, glyphs, adv) : null;
+      if (r && (!best || r.digits > best.digits || (r.digits === best.digits && r.score > best.score))) best = r;
+    }
+    return best;
+  }
   let first: ReturnType<typeof bestDigit> = null;
   for (const y of Y0) for (const x of X0) {
     const b = bestDigit(s, x, y, glyphs[0]);
     if (b && (!first || b.score > first.score)) first = b;
   }
-  if (!first || first.d === 0) return null; // counts never start with 0
+  return first ? follow(s, first, glyphs, adv) : null;
+}
+
+/** From a first digit, follow the count's digits to the right. */
+function follow(s: Float32Array, first: { d: number; score: number; x: number; y: number }, glyphs: Glyphs, adv: number[]) {
+  if (first.d === 0) return null; // counts never start with 0
   const digits = [first.d];
   let x = first.x + advance(first.d, adv), y = first.y, min = first.score;
   while (digits.length < 4) {
@@ -99,7 +129,51 @@ export function readCount(s: Float32Array, glyphs: Glyphs, adv: number[] = ADVAN
     digits.push(b.d); min = Math.min(min, b.score);
     x = b.x + advance(b.d, adv); y = b.y;
   }
-  return { value: +digits.join(''), score: min };
+  return { value: +digits.join(''), score: min, x: first.x, y: first.y, digits: digits.length };
+}
+
+/** where a wide search looks for the first digit (canonical px): up to ~0.4 slot either way of the usual spot */
+const WIDE_X = [-20, 22], WIDE_Y = [6, 46], COARSE_SCORE = 0.3;
+/** box sizes tried around the drawn one: coarse steps, then the neighbours of the best */
+const FIT_SCALES = [1, 0.96, 1.04, 0.92, 1.08, 0.88, 1.12], FIT_PAD = 22;
+
+/**
+ * Fit the quickslot box to the slots really on screen. A hand-drawn box is rarely exact, and the reader follows a 1080p
+ * slot's geometry: 4% too big, or a quarter slot off, is enough to lose digits. So this tries box sizes around the
+ * drawn one (kept centred) and, at each, looks for every potion's count across a wide part of its slot; the size that
+ * reads the most digits best wins, moved so the digits sit where the reader expects them. null when nothing reads.
+ */
+export function fitQuickslot(src: FrameSource, r: Region, slots: number[], cols: number, rows: number, glyphs: Glyphs = GLYPHS, scratch?: HTMLCanvasElement) {
+  if (!glyphs.length || !slots.length) return null;
+  const at = (s: number): Region => ({ ...r, w: r.w * s, h: r.h * s, x: r.x + r.w * (1 - s) / 2, y: r.y + r.h * (1 - s) / 2 });
+  const med = (v: number[]) => v.slice().sort((a, b) => a - b)[Math.floor(v.length / 2)];
+  const midX = (X0[0] + X0[X0.length - 1]) / 2, midY = (Y0[0] + Y0[Y0.length - 1]) / 2;
+  // a box is judged by what the reader will actually get from it: the plain (narrow) reads of every potion. Only clean
+  // matches count, since at a wrong size the digits still half-match (≈0.7) and can even read as a longer number.
+  const judge = (reg: Region) => {
+    const reads = slots.map(i => readCount(slotGrey(src, reg, i, cols, rows, scratch), glyphs));
+    return { reg, reads, score: reads.reduce((a, x) => a + (x ? x.digits * Math.max(0, x.score - 0.6) : 0), 0) };
+  };
+  const tryScale = (s: number) => {
+    // find the counts with a wide search (and a margin around each slot: with the box off, a count can start just
+    // outside its slot's cell), then try the box as is and moved so they land where the reader looks for them
+    const reg = at(s), wide = slots.map(i => readCount(slotGrey(src, reg, i, cols, rows, scratch, FIT_PAD), glyphs, ADVANCE, true))
+      .filter((x): x is NonNullable<typeof x> => !!x && x.score >= MIN_SCORE + 0.1);
+    let best = { ...judge(reg), s };
+    if (wide.length) {
+      const dx = med(wide.map(x => x.x)) - midX, dy = med(wide.map(x => x.y)) - midY;
+      const moved = judge({ ...reg, x: reg.x + dx / CW * reg.w / cols, y: reg.y + dy / CH * reg.h / rows });
+      if (moved.score > best.score + 1e-6) best = { ...moved, s };
+    }
+    return best;
+  };
+  let best = FIT_SCALES.map(tryScale).reduce((a, b) => (b.score > a.score + 1e-6 ? b : a));
+  for (const step of [0.02, 0.01]) {
+    const c = best.s;
+    for (const s of [c - step, c + step]) { const t = tryScale(s); if (t.score > best.score + 1e-6) best = t; }
+  }
+  const got = best.reads.filter(x => !!x && x.score >= MIN_SCORE + 0.1).length;
+  return got ? { region: best.reg, scale: best.s, reads: got } : null;
 }
 
 /** a read must match at least this well to be trusted; this many matching reads in a row accept a new count */

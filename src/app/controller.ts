@@ -2,7 +2,7 @@ import { Capture } from '../core/capture';
 import { classLook, LOOK_V, randomVariant, rollLook, SpriteLoader, type CharLook } from '../core/avatar/msio';
 import { HOTBAR_COLS, HOTBAR_ROWS, REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
 import { potionByName } from '../core/potions';
-import { GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
+import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { canonItem, canonMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
 import { ExpLineFilter, LineShapeFilter, LogAnchor, snapInk, snapLine, type LineSnap } from '../core/logqueue';
 import { readLogSnap } from '../core/logread';
@@ -466,6 +466,28 @@ export class Controller {
   /** per hotbar slot holding a potion: its count, read and checked by a SlotCounter */
   private counts = new Map<number, SlotCounter>();
   /**
+   * The Quickslot box as fitted to the slots on screen (see fitQuickslot): a hand-drawn box a few % off loses digits
+   * ("96" read as 9). `for` is the drawn box and the potion slots it was fitted with; a change to either refits.
+   */
+  qsFit: { region: Region; scale: number; for: string } | null = null;
+  private qsFitAt = 0;
+  /** Fit the box when counting starts, and again (at most every 15 s) while some potion's count isn't reading. */
+  private fitCounts(v: FrameSource, now: number) {
+    const bar = this.settings.hotbar, slots = bar.map((n, i) => (n && potionByName(n) ? i : -1)).filter(i => i >= 0);
+    if (!slots.length) return;
+    const key = JSON.stringify([this.regions.quickslot, slots]);
+    const stale = slots.some(i => { const sc = this.counts.get(i); return !sc || now - sc.at > 10_000; });
+    if (this.qsFit?.for === key && !stale) return;
+    if (now - this.qsFitAt < 15_000) return;
+    this.qsFitAt = now;
+    const fit = fitQuickslot(v, this.regions.quickslot, slots, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
+    if (!fit) return;
+    const moved = !this.qsFit || JSON.stringify(this.qsFit.region) !== JSON.stringify(fit.region);
+    this.qsFit = { region: fit.region, scale: fit.scale, for: key };
+    if (moved && (Math.abs(fit.scale - 1) > 0.005 || fit.region.x !== this.regions.quickslot.x || fit.region.y !== this.regions.quickslot.y))
+      this.tracker?.event('info', `Quickslot box lined up with your hotbar automatically (${fit.reads} potion count${fit.reads > 1 ? 's' : ''} readable)`);
+  }
+  /**
    * Read the count printed on every hotbar slot that holds a potion (template matching, see potcount.ts). A drop of 1–3
    * that the potion's gauge confirms is potions used; a rise is a pickup; anything else is a misread and only moves the
    * baseline (noted in the activity log). Exact even when a potion is drunk while being hit.
@@ -473,11 +495,13 @@ export class Controller {
   private watchCounts(v: FrameSource) {
     const bar = this.settings.hotbar, now = Date.now();
     for (const k of [...this.counts.keys()]) if (!bar[k]) this.counts.delete(k);
+    this.fitCounts(v, now);
+    const qs = this.qsFit?.region ?? this.regions.quickslot;
     bar.forEach((name, i) => {
       const p = name ? potionByName(name) : null;
       if (!p || !this.tracker) return;
       const kind = p.hp || p.hpPct ? 'hp' : 'mp';
-      const r = readSlotCount(v, this.regions.quickslot, i, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
+      const r = readSlotCount(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
       const sc = this.counts.get(i) ?? this.counts.set(i, new SlotCounter()).get(i)!;
       const res = sc.feed(r, now, now - this.gaugeMovedAt[kind] < 3000);
       if (res.used) this.tracker.creditPots(kind, p.name, res.used);
