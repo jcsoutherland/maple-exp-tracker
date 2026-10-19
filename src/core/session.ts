@@ -67,14 +67,17 @@ export function newSession(char: string, cls: string, level: number | null, now 
 export const elapsed = (s: Session | null, now = Date.now()) => (s ? s.activeMs + (s.paused ? 0 : now - s.resumeAt) : 0);
 
 /**
- * Potions consumed and what they cost at the shop: per item (potions tied to a hotbar slot by that item, the rest as
- * the Active HP / MP potion, first in each order) and per stat.
+ * Potions consumed and what they cost at the shop, per item and per stat. Only potions on the hotbar count: mostly
+ * from their slot counts (exact), and a gauge rise the counts didn't explain goes to the hotbar potion of that stat
+ * whose restore amount fits it best (Red's +100 and Orange's +250 are easy to tell apart).
  */
 export function potCost(s: Pick<Session, 'hp' | 'mp'>, set: Settings) {
   const detail: SavedSession['potDetail'] = {}, items: PotUse[] = [];
   let total = 0;
   for (const k of ['hp', 'mp'] as const) {
-    const f = s[k], active = potionByName((k === 'hp' ? set.hpOrder : set.mpOrder)[0] ?? '');
+    const f = s[k];
+    const onBar = [...new Set(set.hotbar.filter((n): n is string => !!n))].map(n => potionByName(n))
+      .filter((p): p is NonNullable<typeof p> => !!p && (k === 'hp' ? !!(p.hp || p.hpPct) : !!(p.mp || p.mpPct)));
     let kc = 0, kcost = 0;
     const add = (name: string, count: number) => {
       const p = potionByName(name);
@@ -83,10 +86,15 @@ export function potCost(s: Pick<Session, 'hp' | 'mp'>, set: Settings) {
       it.count += count; it.cost += count * p.shopPrice;
       kc += count; kcost += count * p.shopPrice;
     };
-    if (active) {
-      const r = restoreOf(active, k, f.max);
-      // sessions saved before jump tracking only have the recovered total
-      add(active.name, f.jumps ? potionsUsed(f.jumps, r) : r ? Math.ceil(f.rec / r) : 0);
+    if (onBar.length) {
+      const rest = onBar.map(p => ({ p, r: restoreOf(p, k, f.max) }));
+      // each rise to the potion it's closest to in size (by ratio, so a +90 is a Red Potion, not a fraction of Orange)
+      const by = new Map<string, number[]>();
+      for (const j of f.jumps ?? []) {
+        const best = rest.reduce((a, b) => (Math.abs(Math.log(j / (b.r || 1))) < Math.abs(Math.log(j / (a.r || 1))) ? b : a));
+        (by.get(best.p.name) ?? by.set(best.p.name, []).get(best.p.name)!).push(j);
+      }
+      for (const { p, r } of rest) add(p.name, potionsUsed(by.get(p.name) ?? [], r));
     }
     for (const [name, n] of Object.entries(f.counted ?? {})) add(name, n);
     for (const [name, j] of Object.entries(f.byPot ?? {})) { // sessions from the short-lived slot-change version
@@ -94,7 +102,7 @@ export function potCost(s: Pick<Session, 'hp' | 'mp'>, set: Settings) {
       if (p) add(name, potionsUsed(j, restoreOf(p, k, f.max)));
     }
     const top = items.filter(i => i.kind === k).sort((a, b) => b.count - a.count)[0];
-    if (active || top) detail[k] = { name: top?.name ?? active!.name, id: top?.id ?? active?.id, count: kc, cost: kcost, kind: k };
+    if (top) detail[k] = { name: top.name, id: top.id, count: kc, cost: kcost, kind: k };
     total += kcost;
   }
   return { total, detail, items: items.sort((a, b) => b.cost - a.cost) };

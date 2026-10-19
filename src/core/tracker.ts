@@ -1,3 +1,4 @@
+import { expToNext } from './exptable';
 import { countNewLines, lineAmount, lineKind, parseItemLine, type ExpReading } from './parse';
 import type { EventType, Session } from './session';
 import { elapsed } from './session';
@@ -121,8 +122,36 @@ export class Tracker {
   }
 
   private gain(d: number) { const s = this.sess; s.exp += d; const m = this.mapName; s.maps[m] = (s.maps[m] || 0) + d; }
+  /** EXP the current level takes, from the game's table (null when the level isn't known) */
+  private tableTotal() { const lv = this.sess.level; return lv != null ? expToNext(lv) : null; }
   private setTotal(r: ExpReading) {
+    // with the level known the table is exact; reads only estimate it (and a consistently misread digit fools them)
+    const t = this.tableTotal();
+    if (t) { this.total = t; this.totalPct = 100; this.totalStale = false; return; }
     if (r.pct >= MIN_TOTAL_PCT && (!this.totalPct || r.pct > this.totalPct || this.totalStale)) { this.total = r.exp * 100 / r.pct; this.totalPct = r.pct; this.totalStale = false; }
+  }
+
+  private tableMisses = 0;
+  /**
+   * With the level known, a read must agree with its own % on the EXP table: a stray extra digit ("858571" for 85,857,
+   * which makes the level look 10× bigger) is repaired when exactly one deletion fits, anything else is dropped. Reads
+   * that fit the next level or two (a level-up not confirmed yet) pass on to the usual checks.
+   */
+  private checkTable(r: ExpReading): ExpReading | null {
+    const lv = this.sess.level, t = this.tableTotal();
+    if (lv == null || !t || r.pct < MIN_TOTAL_PCT) return r;
+    // the % has two decimals, so the level it implies is only that precise
+    const fits = (exp: number, l: number) => { const n = expToNext(l); return !!n && Math.abs(exp * 100 / r.pct / n - 1) <= 0.005 + 0.006 / r.pct; };
+    if ([lv, lv + 1, lv + 2].some(l => fits(r.exp, l))) { this.tableMisses = 0; return r; }
+    // a stray character comes from the edge of the box (the "[" before the % read as 1, a speck in front), so try the
+    // last digit, then the first, then the middle ones: at a high % several deletions can fit within its precision
+    const d = String(r.exp), order = [d.length - 1, 0, ...Array.from({ length: Math.max(0, d.length - 2) }, (_, i) => i + 1)];
+    for (const i of order) {
+      const c = +(d.slice(0, i) + d.slice(i + 1));
+      if (d.length > 1 && fits(c, lv)) { this.tableMisses = 0; return { ...r, exp: c }; }
+    }
+    if (++this.tableMisses === 40) this.event('info', `EXP reads don't fit level ${lv} on the EXP table: check your level, or the EXP box in Setup`);
+    return null;
   }
   /** Make a reading the EXP baseline. */
   private accept(r: ExpReading, total = true) { this.exp = r.exp; this.pct = r.pct; this.expAt = this.now(); if (total) this.setTotal(r); }
@@ -155,6 +184,9 @@ export class Tracker {
 
   /** Feed one EXP bar reading. 'level' = a level-up was confirmed; 'candidate' = the bar rolled over (read the level number). */
   onExp(r: ExpReading): ExpResult {
+    const vetted = this.checkTable(r);
+    if (!vetted) return null;
+    r = vetted;
     if (this.exp == null) {
       // the baseline needs two reads that agree (out of the last few), so one misread can't become the starting point;
       // they must imply the same level total as closely as the % display allows (a digit misread by a few hundred

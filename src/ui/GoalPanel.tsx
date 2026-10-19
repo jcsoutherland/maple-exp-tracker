@@ -15,11 +15,16 @@ function useRate() {
 /** Level, EXP into it, and the saved target level for the character on screen. */
 function useGoal() {
   const c = useCtrl(), s = c.sess ?? c.lastFinished, id = c.identity;
-  const level = s?.level ?? id.level ?? null, exp = c.sess ? c.tracker?.exp ?? 0 : 0;
+  const level = s?.level ?? id.level ?? null, t = c.sess ? c.tracker : null, levelExp = level ? expToNext(level) : null;
+  // EXP into the level: the read number, but never more than the level takes; if it disagrees with the bar's % (a
+  // misread), the % on the EXP table is the safer figure
+  let exp = t?.exp ?? 0;
+  if (levelExp && t?.pct != null && Math.abs(exp - t.pct / 100 * levelExp) > levelExp * 0.02) exp = Math.round(t.pct / 100 * levelExp);
+  if (levelExp) exp = Math.min(Math.max(0, exp), levelExp - 1);
   const saved = id.name ? store.loadChars()[id.name]?.goal : undefined;
   const goal = level ? Math.min(MAX_LEVEL, Math.max(level + 1, saved ?? level + 1)) : null;
   const remaining = level && goal ? expToReach(level, exp, goal) : null;
-  const next = level ? (expToNext(level) ?? 0) - exp : null;
+  const next = levelExp != null ? Math.max(0, levelExp - exp) : null;
   return { level, exp, goal, remaining, next };
 }
 

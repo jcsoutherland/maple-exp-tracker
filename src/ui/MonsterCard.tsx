@@ -5,6 +5,8 @@ import { useCtrl } from './hooks';
 
 /** meowdb's monster pages use the same ids as the OSMS data */
 const meowdbMob = (m: MobRec) => `https://meowdb.com/msclassic/monsters/${m.id}`;
+/** monsters shown before "Show all" */
+const SHOWN = 3;
 
 /** Object URL of a monster's animated idle image (fetched once, then from this device). */
 function useMobImage(m: MobRec) {
@@ -24,6 +26,7 @@ function useMobImage(m: MobRec) {
  */
 export function MonsterPanel() {
   const c = useCtrl();
+  const [all, setAll] = useState(false);
   const s = c.sess ?? c.lastFinished, map = c.tracker?.mapCur ?? null;
   if (!mobsReady()) return null;
   const fought = new Map(Object.entries(s?.mobs ?? {}));
@@ -34,11 +37,13 @@ export function MonsterPanel() {
   return (
     <div className="xpanel">
       <div className="xhead"><span>Monsters</span><span className="mut small">{map ?? 'map unknown'}</span></div>
-      {list.length ? (
+      {list.length ? (<>
+        {/* the three that matter most (the ones fought first, then by level); the rest behind "Show all" */}
         <div className="mobgrid">
-          {list.map(m => <MobTile key={m.id} m={m} cur={m.name === latest} />)}
+          {(all ? list : list.slice(0, SHOWN)).map(m => <MobTile key={m.id} m={m} cur={m.name === latest} />)}
         </div>
-      ) : (
+        {list.length > SHOWN && <button className="mobmore" onClick={() => setAll(a => !a)}>{all ? 'Show fewer' : `Show all ${list.length}`}</button>}
+      </>) : (
         <div className="mob-empty">
           <img src={import.meta.env.BASE_URL + 'favicon.svg'} alt="" />
           <b>No monsters known for this map</b>

@@ -9,7 +9,7 @@ import { useCtrl, useItemIcon } from './hooks';
 const DND = 'application/x-maple-pot';
 interface Drag { name: string; from?: number }
 
-/** HP and MP recovery items. Drag one to the top to make it Active; drag them onto the hotbar to count each separately. */
+/** HP and MP recovery items. Potions placed on the hotbar are the ones counted, each separately. */
 export function PotionsTab() {
   const c = useCtrl();
   const s = c.sess || c.lastFinished;
@@ -28,9 +28,10 @@ export function PotionsTab() {
         <PotionSection kind="mp" />
       </div>
       <div className="mut small" style={{ marginTop: 4 }}>
-        The HP/MP gauges are checked 10× a second: each sharp rise of at least the regen cutoff (Setup) is a potion, even while you're
-        being hit; a rise worth two potions counts as two. It's credited to the hotbar potion whose count changed just before, otherwise
-        to the Active one. Restore amounts come from the item data; shop price is {SHOP_PRICE_FACTOR}× the item's NPC sell value.
+        Only potions on the hotbar are counted. Their slot counts are read off the screen, so each type is counted exactly and pickups
+        never count. If a count can't be read for a moment, a sharp rise on the HP/MP gauge (at least the regen cutoff in Setup) goes to
+        the hotbar potion whose restore amount fits it best. Restore amounts come from the item data; shop price
+        is {SHOP_PRICE_FACTOR}× the item's NPC sell value.
       </div>
     </section>
   );
@@ -41,6 +42,10 @@ function Hotbar() {
   const c = useCtrl();
   const bar = c.settings.hotbar;
   const [over, setOver] = useState<number | null>(null);
+  // while tracking, each potion slot shows the count read off the screen; none readable = the Quickslot box is off
+  const live = !!c.sess && !c.sess.paused && c.capture.ready;
+  const filled = bar.map((n, i) => (n && potionByName(n) ? i : -1)).filter(i => i >= 0);
+  const unread = live && c.rates().el > 15000 && filled.length > 0 && filled.every(i => c.slotCount(i) == null);
   const set = (i: number, name: string | null, from?: number) => {
     const b = [...bar];
     if (from != null && from !== i) b[from] = b[i]; // swap when moved between slots
@@ -55,6 +60,8 @@ function Hotbar() {
           Drag potions from the lists below onto the slots they use in your game's quickslot. Each one's count is then watched
           (no OCR), so every potion type is counted separately and pickups never count. Line up the <b>Quickslot</b> box once in Setup.
         </div>
+        {live && <div className="mut small" style={{ marginTop: 8 }}>The number under each potion is the count being read from your screen right now.</div>}
+        {unread && <div className="note warnnote"><span>Can't read the potion counts on your quickslot. Open <b>Setup</b> and line the <b>Quickslot</b> box up with your in-game quickslot.</span></div>}
       </div>
       <div className="hotbar" style={{ gridTemplateColumns: `repeat(${HOTBAR_COLS}, 1fr)` }}>
         {Array.from({ length: HOTBAR_COLS * HOTBAR_ROWS }, (_, i) => {
@@ -67,7 +74,8 @@ function Hotbar() {
               onDragLeave={() => setOver(o => (o === i ? null : o))}
               onDrop={e => { e.preventDefault(); setOver(null); const d = JSON.parse(e.dataTransfer.getData(DND) || 'null') as Drag | null; if (d) set(i, d.name, d.from); }}
               title={p ? `${p.name} (drag to move)` : 'Drop a potion here'}>
-              {p ? <><PotIcon p={p} /><button className="hx" title="Remove" onClick={() => set(i, null)}>×</button></> : null}
+              {p ? <><PotIcon p={p} /><button className="hx" title="Remove" onClick={() => set(i, null)}>×</button>
+                {live && <span className={'hcount' + (c.slotCount(i) == null ? ' unread' : '')} title={c.slotCount(i) == null ? 'Count not readable yet' : 'Count read from your screen'}>{c.slotCount(i) ?? '?'}</span>}</> : null}
             </div>
           );
         })}
@@ -80,37 +88,30 @@ function PotionSection({ kind }: { kind: 'hp' | 'mp' }) {
   const c = useCtrl();
   const s = c.sess || c.lastFinished;
   const pc = s ? potCost(s, c.settings) : null;
+  // the list is a palette to drag onto the hotbar; only potions on the hotbar are counted
   const key = kind === 'hp' ? 'hpOrder' : 'mpOrder';
   const order = c.settings[key];
-  const [drag, setDrag] = useState<number | null>(null);
-  const [over, setOver] = useState<number | null>(null);
   const setOrder = (o: string[]) => c.updateSettings({ [key]: o });
-  const move = (from: number, to: number) => { const o = [...order]; const [x] = o.splice(from, 1); o.splice(to, 0, x); setOrder(o); };
   const others = allPotions(kind).filter(p => !order.includes(p.name));
 
   return (
     <div className="card">
       <h3 style={{ color: `var(--${kind})` }}>{kind === 'hp' ? '❤ HP recovery' : '💧 MP recovery'}</h3>
       <div className="potlist">
-        {order.map((name, i) => {
+        {order.map(name => {
           const p = potionByName(name);
           if (!p) return null;
           const used = pc?.items.find(u => u.name === p.name && u.kind === kind), onBar = c.settings.hotbar.includes(p.name);
           return (
-            <div key={name} draggable
-              className={'potrow' + (i === 0 ? ' active' : '') + (over === i && drag !== i ? ' over' : '')}
-              onDragStart={e => { setDrag(i); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData(DND, JSON.stringify({ name: p.name } satisfies Drag)); }}
-              onDragOver={e => { if (drag != null) { e.preventDefault(); setOver(i); } }}
-              onDragLeave={() => setOver(o => (o === i ? null : o))}
-              onDrop={e => { e.preventDefault(); if (drag != null && drag !== i) move(drag, i); setDrag(null); setOver(null); }}
-              onDragEnd={() => { setDrag(null); setOver(null); }}>
+            <div key={name} draggable className={'potrow' + (onBar ? ' active' : '')} title="Drag onto the hotbar to count it"
+              onDragStart={e => { e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData(DND, JSON.stringify({ name: p.name } satisfies Drag)); }}>
               <span className="grip" aria-hidden>⋮⋮</span>
               <PotIcon p={p} />
               <div className="potname">
                 <b>{p.name}</b>
-                <span className="mut small">{restoreText(p, kind)} · {fmtN(p.shopPrice)} mesos{onBar ? ' · on hotbar' : ''}</span>
+                <span className="mut small">{restoreText(p, kind)} · {fmtN(p.shopPrice)} mesos</span>
               </div>
-              {i === 0 ? <span className="badge" title="Potions not tied to a hotbar slot are counted as this one">Active</span> : <button className="sm" title="Make active" onClick={() => move(i, 0)}>▲ Use</button>}
+              {onBar && <span className="badge" title="On the hotbar, so it's counted">On hotbar</span>}
               {used && <div className="potused"><b>×{fmtN(used.count)}</b><span className="mut small">{fmtN(used.cost)} mesos</span></div>}
               {order.length > 1 && <button className="sm x" title="Remove from list" onClick={() => setOrder(order.filter(n => n !== name))}>×</button>}
             </div>

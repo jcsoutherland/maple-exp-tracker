@@ -43,7 +43,7 @@ describe('EXP bar', () => {
   it('detects a level-up when the bar rolls over', () => {
     const { s, t } = make();
     t.onExp(R(216000)); t.onExp(R(216500));
-    const total = 216500 / R(216500).pct * 100;
+    const total = 216600; // level 37 on the EXP table
     t.onExp(R(300, 240000));
     expect(t.onExp(R(400, 240000))).toBe('candidate'); // the bar rolled over: not a level-up until the level number says so
     expect(s.level).toBe(37);
@@ -90,6 +90,24 @@ describe('EXP bar', () => {
     t.onExp({ exp: 1000500, pct: R(500, 240000).pct });
     t.onExp(R(600, 240000));
     expect(s.exp - before).toBe(200);
+  });
+  it('uses the EXP table for the level total, so a digit misread on every frame is repaired, not believed', () => {
+    // level 38 takes 240,500: "85857" read as "858571" each time would otherwise make the level look 2.4M EXP
+    const s = newSession('Flynny', 'Hunter', 38, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => 0 });
+    t.mapCur = 'Map A';
+    const L = (exp: number) => ({ exp: exp * 10 + 1, pct: Math.floor(exp * 10000 / 240500) / 100 });
+    t.onExp(L(85857)); t.onExp(L(85892)); t.onExp(L(85927)); t.onExp(L(85962));
+    expect(t.total).toBe(240500);
+    expect(t.exp).toBe(85962);
+    expect(s.exp).toBe(85962 - 85857);
+  });
+  it('drops reads that fit neither the level nor a single-digit repair', () => {
+    const s = newSession('Flynny', 'Hunter', 38, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => 0 });
+    const L = (exp: number) => ({ exp, pct: Math.floor(exp * 10000 / 240500) / 100 });
+    t.onExp(L(85857)); t.onExp(L(85892));
+    t.onExp({ exp: 99999, pct: L(85900).pct }); // garbage that agrees with nothing
+    t.onExp(L(85927));
+    expect(s.exp).toBe(85927 - 85857);
   });
   it('does not take a misread first reading as the baseline', () => {
     const { s, t } = make();
@@ -231,6 +249,15 @@ describe('HP/MP gauges', () => {
 });
 
 describe('potions', () => {
+  it('only counts hotbar potions, and gives each gauge rise to the hotbar potion its size fits', () => {
+    const s = newSession('Flynny', 'Hunter', 38, 0);
+    s.hp.jumps = [100, 92, 250, 240]; s.mp.jumps = [200];
+    const bar = Array.from({ length: 12 }, (_, i) => ({ 5: 'Orange Potion', 6: 'Red Potion', 10: 'Blue Potion' } as Record<number, string>)[i] ?? null);
+    const pc = potCost(s, { ...DEFAULT_SETTINGS, hotbar: bar });
+    const n = (name: string) => pc.items.find(i => i.name === name)?.count ?? 0;
+    expect([n('Red Potion'), n('Orange Potion'), n('Blue Potion')]).toEqual([2, 2, 1]);
+    expect(potCost(s, { ...DEFAULT_SETTINGS, hotbar: Array(12).fill(null) }).total).toBe(0); // nothing on the hotbar: nothing counted
+  });
   it('has digit templates for every position', () => {
     expect(GLYPHS.length).toBe(3);
     for (const set of GLYPHS) { expect(set.length).toBe(10); for (const g of set) { expect(g.mean.length).toBe(TW * TH); expect(g.w.length).toBe(TW * TH); } }
