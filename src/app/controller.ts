@@ -1,9 +1,12 @@
 import { Capture } from '../core/capture';
 import { classLook, LOOK_V, randomVariant, rollLook, SpriteLoader, type CharLook } from '../core/avatar/msio';
-import { HOTBAR_COLS, HOTBAR_ROWS, REGION_DEFS, type Region, type RegionKey, type Settings, type UiRatio } from '../core/config';
+import { HOTBAR_COLS, HOTBAR_ROWS, hudScale, REGION_DEFS, type Region, type RegionKey, type Settings, type UiRatio } from '../core/config';
 import { potionByName } from '../core/potions';
 import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { SlotWatch, slotStrip } from '../core/slotwatch';
+import { HotbarAuto, loadPotionIcons, scanSlots, type IconTpl } from '../core/hotbarscan';
+/** how often the quickslot is checked for which potions it holds */
+const HOTBAR_SCAN_MS = 5000;
 import { allItems, canonItem, canonMap, dropsOnMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
 import { ExpLineFilter, LineShapeFilter, LogAnchor, snapInk, snapLine, type LineSnap } from '../core/logqueue';
 import { readLogSnap } from '../core/logread';
@@ -666,8 +669,10 @@ export class Controller {
    * baseline (noted in the activity log). Exact even when a potion is drunk while being hit.
    */
   private watchCounts(v: FrameSource) {
+    this.followHotbar(v, Date.now());
     const bar = this.settings.hotbar, now = Date.now();
-    for (const k of [...this.counts.keys()]) if (!bar[k]) { this.counts.delete(k); this.slotWatch.delete(k); }
+    // a slot emptied, or now holding a different potion, starts its count afresh
+    for (const k of [...this.counts.keys()]) if (bar[k] !== this.countFor.get(k)) { this.counts.delete(k); this.slotWatch.delete(k); this.countFor.delete(k); }
     this.fitCounts(v, now);
     const qs = this.qsFit?.region ?? this.regions.quickslot;
     bar.forEach((name, i) => {
@@ -680,11 +685,54 @@ export class Controller {
       const ch = w.w.feed(slotStrip(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, this.scratch.slots), now);
       if (ch != null) w.changedAt = ch;
       const sc = this.counts.get(i) ?? this.counts.set(i, new SlotCounter()).get(i)!;
+      this.countFor.set(i, p.name);
       const res = sc.feed(r, now, now - this.gaugeMovedAt[kind] < 3000, now - w.changedAt < 4000);
       if (res.used) this.tracker.creditPots(kind, p.name, res.used);
       else if (res.rejected) this.tracker.event('info', `${p.name} count ${res.from} → ${sc.val} ignored (looks like a misread)`);
     });
   }
+  // ---------- the hotbar follows the game by itself (hotbarscan.ts) ----------
+  private hotbarAuto = new HotbarAuto();
+  /** which potion each slot's count belongs to */
+  private countFor = new Map<number, string>();
+  private potionIcons: { scale: number; icons: IconTpl[] } | null = null;
+  private iconsLoading = false;
+  private hotbarScanAt = 0;
+  /**
+   * Every few seconds, recognise which potion is in each quickslot slot by its icon and, once a change is steady,
+   * update the hotbar (as if dragged on the Potions tab). Counting then follows the new layout as it always does: a
+   * slot whose potion changed starts a fresh count. Off when the Potions tab's "Detect automatically" is unticked.
+   */
+  private followHotbar(v: FrameSource, now: number) {
+    // wait for the item list (it names every potion and food) before loading their icons
+    if (!this.settings.autoHotbar || !(osmsReady() || osmsSettled()) || now - this.hotbarScanAt < HOTBAR_SCAN_MS) return;
+    this.hotbarScanAt = now;
+    const { H } = frameSize(v), scale = hudScale(this.settings.uiRatio, H);
+    if (this.potionIcons?.scale !== scale) {
+      if (!this.iconsLoading) {
+        this.iconsLoading = true;
+        loadPotionIcons(scale).then(icons => { this.potionIcons = { scale, icons }; }).catch(() => undefined).finally(() => { this.iconsLoading = false; });
+      }
+      return;
+    }
+    const scan = scanSlots(v, this.qsFit?.region ?? this.regions.quickslot, HOTBAR_COLS, HOTBAR_ROWS, this.potionIcons.icons, scale, this.scratch.slots);
+    const next = this.hotbarAuto.feed(scan, this.settings.hotbar);
+    if (!next) return;
+    const was = this.settings.hotbar;
+    next.forEach((n, i) => {
+      if (n === was[i]) return;
+      this.tracker?.event('info', n ? `Hotbar: ${n} found in slot ${i + 1}${was[i] ? ` (was ${was[i]})` : ''}` : `Hotbar: ${was[i]} no longer in slot ${i + 1}`);
+    });
+    // potions found that aren't on the Potions tab's lists yet are added to them
+    const add = (key: 'hpOrder' | 'mpOrder', pred: (n: string) => boolean) => {
+      const list = this.settings[key], extra = next.filter((n): n is string => !!n && pred(n) && !list.includes(n));
+      return extra.length ? [...list, ...new Set(extra)] : list;
+    };
+    const isHp = (n: string) => { const p = potionByName(n); return !!p && !!(p.hp || p.hpPct); };
+    const isMp = (n: string) => { const p = potionByName(n); return !!p && !!(p.mp || p.mpPct); };
+    this.updateSettings({ hotbar: next, hpOrder: add('hpOrder', isHp), mpOrder: add('mpOrder', isMp) });
+  }
+
   /** Are the hotbar counts covering this stat's potions right now (a slot for it read in the last 5 s)? */
   private potsCounted(kind: 'hp' | 'mp') {
     const now = Date.now();

@@ -60,6 +60,11 @@ function Hotbar() {
           Drag potions from the lists below onto the slots they use in your game's quickslot. Each one's count is then watched
           (no OCR), so every potion type is counted separately and pickups never count. Line up the <b>Quickslot</b> box once in Setup.
         </div>
+        <label className="small" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}
+          title="While tracking, potions and food are recognised by their icons: put on, moved or taken off, the hotbar follows (and new ones join the lists)">
+          <input type="checkbox" checked={c.settings.autoHotbar} onChange={e => c.updateSettings({ autoHotbar: e.target.checked })} />
+          Detect potions on my quickslot automatically
+        </label>
         {live && <div className="mut small" style={{ marginTop: 8 }}>The number under each potion is the count being read from your screen right now.</div>}
         {unread && <div className="note warnnote"><span>Can't read the potion counts on your quickslot. Open <b>Setup</b> and line the <b>Quickslot</b> box up with your in-game quickslot.</span></div>}
       </div>

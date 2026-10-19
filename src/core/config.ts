@@ -98,12 +98,14 @@ export interface Settings {
   hotbar: (string | null)[];
   /** the game's UI ratio setting; each ratio keeps its own regions */
   uiRatio: UiRatio;
+  /** follow the in-game quickslot by itself: potions recognised by their icons are placed, moved and removed */
+  autoHotbar: boolean;
 }
 export const DEFAULT_SETTINGS: Settings = {
   v: 3, schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, idlePauseSec: 45, uiRatio: 'ideal',
   hpOrder: ['Meat', 'Red Potion', 'Orange Potion', 'White Potion'],
   mpOrder: ['Lemon', 'Blue Potion', 'Mana Elixir'],
-  hotbar: new Array(12).fill(null),
+  hotbar: new Array(12).fill(null), autoHotbar: true,
 };
 
 /**
