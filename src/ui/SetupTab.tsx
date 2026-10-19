@@ -61,7 +61,7 @@ export function SetupTab() {
         <h3>Quick start</h3>
         <ol className="help">
           <li>Click <b>Share game window</b> and pick the MapleStory window (not the whole screen). Run the game windowed or borderless.</li>
-          <li>Set <b>In-game UI</b> to the game's UI ratio setting (Default or Ideal), then click <b>Grab frame</b>. Each coloured box should cover its text; to fix one, select it in the list and drag a new box on the image.</li>
+          <li>Set <b>In-game UI</b> to the game's UI ratio setting (Ideal or Default), then click <b>Grab frame</b>. Each coloured box should cover its text; to fix one, select it in the list and drag a new box on the image.</li>
           <li>Click <b>Test OCR</b>. If a black-on-white preview is messy, adjust that region's threshold.</li>
           <li>On <b>Live</b>, check name/class/level and press <b>▶ Start session</b>. <b>⧉ Pop-out overlay</b> gives an always-on-top mini window.</li>
         </ol>
@@ -74,7 +74,7 @@ export function SetupTab() {
           <span className="sp" />
           <label title="Match the game's UI ratio setting. Default ratio scales the HUD with the window; Ideal ratio keeps it at its native size. Each keeps its own regions.">
             In-game UI <select value={c.settings.uiRatio} onChange={e => c.setUiRatio(e.target.value as UiRatio)}>
-              <option value="default">Default ratio</option><option value="ideal">Ideal ratio</option></select></label>
+              <option value="ideal">Ideal ratio</option><option value="default">Default ratio</option></select></label>
           <button className="danger" onClick={() => c.resetRegions()} title="Put this UI ratio's regions back to their defaults">Reset regions</button>
         </div>
         <canvas ref={cv} id="setupCanvas" width={1920} height={1080} />

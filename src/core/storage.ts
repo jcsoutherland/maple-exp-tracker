@@ -16,6 +16,8 @@ export const loadSettings = (): Settings => {
   const s = read<Partial<Settings>>(K.settings, {});
   // v2: the auto-pause default went from 20 s to 45 s (a value still at the old default follows it)
   if ((s.v ?? 1) < 2 && s.idlePauseSec === 20) s.idlePauseSec = 45;
+  // v3: Ideal ratio became the default UI ratio (switched once; choosing Default afterwards sticks)
+  if ((s.v ?? 1) < 3) s.uiRatio = 'ideal';
   return { ...DEFAULT_SETTINGS, ...s, v: DEFAULT_SETTINGS.v, schedule: { ...DEFAULT_SETTINGS.schedule, ...s.schedule } };
 };
 export const saveSettings = (s: Settings) => write(K.settings, s);

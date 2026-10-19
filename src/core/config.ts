@@ -100,7 +100,7 @@ export interface Settings {
   uiRatio: UiRatio;
 }
 export const DEFAULT_SETTINGS: Settings = {
-  v: 2, schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, idlePauseSec: 45, uiRatio: 'default',
+  v: 3, schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, idlePauseSec: 45, uiRatio: 'ideal',
   hpOrder: ['Meat', 'Red Potion', 'Orange Potion', 'White Potion'],
   mpOrder: ['Lemon', 'Blue Potion', 'Mana Elixir'],
   hotbar: new Array(12).fill(null),
