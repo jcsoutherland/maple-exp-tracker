@@ -3,7 +3,7 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
-  # weekly: refresh the data mirror (lists from OSMS, any new images) and redeploy
+  # weekly: redeploy, topping up any missing images (the fan-site lists and drop tables refresh only every three weeks)
   schedule:
     - cron: '17 6 * * 1'
   workflow_dispatch:

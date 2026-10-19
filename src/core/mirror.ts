@@ -1,7 +1,7 @@
 /**
- * The data mirror. A weekly GitHub Action (dev/mirror-data.mjs) downloads the item / map / monster lists, item icons
+ * The data mirror. A GitHub Action (dev/mirror-data.mjs) downloads the item / map / monster lists, item icons
  * and monster images, and publishes them next to the app on GitHub Pages. The app reads them from there, so OSMS sees a
- * few requests a week in total however many people use the tracker; it only goes to the original site for a file the
+ * few requests every three weeks in total however many people use the tracker; it only goes to the original site for a file the
  * mirror doesn't have yet. (Character frames come from maplestory.io's CDN; see avatar/msio.ts.)
  */
 export const MIRROR = `${import.meta.env?.BASE_URL ?? '/'}data/`;

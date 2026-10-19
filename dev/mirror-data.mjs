@@ -1,10 +1,10 @@
-// Builds the data mirror published next to the app (see src/core/mirror.ts), so the fan sites see a few requests a week
+// Builds the data mirror published next to the app (see src/core/mirror.ts), so the fan sites see a few requests every three weeks
 // in total instead of a download per user:
 //   node dev/mirror-data.mjs [outDir=public/data]
 //   MIRROR_BUDGET_MIN=30   stop downloading images after this many minutes (the rest come next run; default: no limit)
-//   MIRROR_FORCE_LISTS=1   refresh the lists even if they're less than a week old
+//   MIRROR_FORCE_LISTS=1   refresh the lists even if they're less than three weeks old
 //   MIRROR_ONLY=drops      only the monster drop tables
-// Lists are refreshed at most weekly; images (item icons, monster images) are only downloaded when the mirror doesn't
+// Lists are refreshed at most every three weeks (the game rarely changes); images (item icons, monster images) are only downloaded when the mirror doesn't
 // have them yet, gently (~4 requests/s). The output is git-ignored: it's published, never committed.
 // Character frames are not mirrored: maplestory.io renders a new look in ~30 s but serves one it has drawn before from
 // its CDN in milliseconds, and the app's fixed pool of looks keeps everyone on the same few, so their cache does the job.
@@ -17,8 +17,8 @@ import esbuild from 'esbuild';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')), '..');
 const out = path.resolve(process.argv[2] || path.join(root, 'public/data'));
 const budgetMs = (+process.env.MIRROR_BUDGET_MIN || 0) * 60_000 || Infinity;
-const t0 = Date.now(), WEEK = 7 * 864e5, GAP_MS = 250; // one request every 250 ms at most
-const HEADERS = { 'User-Agent': 'MSClassicTrainingTracker-mirror (weekly; github.com/jcsoutherland/maple-exp-tracker)' };
+const t0 = Date.now(), REFRESH = 21 * 864e5, GAP_MS = 250; // one request every 250 ms at most
+const HEADERS = { 'User-Agent': 'MSClassicTrainingTracker-mirror (every 3 weeks; github.com/jcsoutherland/maple-exp-tracker)' };
 const OSMS = 'https://osmsdataexplorer.com/data/';
 
 // the app's own code: list shapes, the look pool and frame URLs, so the mirror holds exactly what the app asks for
@@ -53,8 +53,8 @@ async function get(url, kind) {
   return kind === 'json' ? res.json() : Buffer.from(await res.arrayBuffer());
 }
 
-// ---------- lists (at most weekly) ----------
-const listsFresh = manifest.listsAt && Date.now() - manifest.listsAt < WEEK && has('osms/items.json') && !process.env.MIRROR_FORCE_LISTS;
+// ---------- lists (at most every three weeks) ----------
+const listsFresh = manifest.listsAt && Date.now() - manifest.listsAt < REFRESH && has('osms/items.json') && !process.env.MIRROR_FORCE_LISTS;
 if (!listsFresh) {
   const [items, maps, mobs] = [await get(OSMS + 'current/items.json', 'json'), await get(OSMS + 'current/maps.json', 'json'), await get(OSMS + 'current/monsters.json', 'json')];
   write('osms/items.json', JSON.stringify(lib.shapeItems(items)));
@@ -62,15 +62,15 @@ if (!listsFresh) {
   write('osms/monsters.json', JSON.stringify(lib.shapeMobs(mobs)));
   manifest.listsAt = Date.now();
   console.log('lists refreshed');
-} else console.log('lists are less than a week old: kept');
+} else console.log('lists are less than three weeks old: kept');
 const items = JSON.parse(fs.readFileSync(file('osms/items.json'), 'utf8'));
 const mobs = JSON.parse(fs.readFileSync(file('osms/monsters.json'), 'utf8'));
 
-// ---------- meowdb item numbers (at most weekly, one page) ----------
+// ---------- meowdb item numbers (at most every three weeks, one page) ----------
 // meowdb numbers its item pages its own way (Red Viper is item-db/669). Its A-Z page lists every item as a link, so one
-// download a week maps Classic item names to those pages and the app links straight to them. MEOWDB_FILE=<saved page>
+// download every three weeks maps Classic item names to those pages and the app links straight to them. MEOWDB_FILE=<saved page>
 // parses a saved copy instead of downloading.
-const meowFresh = manifest.meowdbAt && Date.now() - manifest.meowdbAt < WEEK && has('meowdb.json') && !process.env.MIRROR_FORCE_LISTS;
+const meowFresh = manifest.meowdbAt && Date.now() - manifest.meowdbAt < REFRESH && has('meowdb.json') && !process.env.MIRROR_FORCE_LISTS;
 if (!meowFresh || process.env.MEOWDB_FILE) {
   try {
     const html = process.env.MEOWDB_FILE ? fs.readFileSync(process.env.MEOWDB_FILE, 'utf8') : (await get('https://meowdb.com/msclassic/item-db/all')).toString();
@@ -80,17 +80,17 @@ if (!meowFresh || process.env.MEOWDB_FILE) {
       const k = ent(m[2]).trim().toLowerCase(); // first page wins for a name that appears twice
       if (classic.has(k) && !(k in index)) index[k] = +m[1];
     }
-    // a page layout change would parse to (almost) nothing: keep last week's index rather than publish an empty one
+    // a page layout change would parse to (almost) nothing: keep the previous index rather than publish an empty one
     if (Object.keys(index).length >= items.length / 2) { write('meowdb.json', JSON.stringify(index)); manifest.meowdbAt = Date.now(); console.log(`meowdb: ${Object.keys(index).length} item pages`); }
     else console.warn(`meowdb: only ${Object.keys(index).length} items parsed, kept the previous index`);
   } catch (e) { console.warn('meowdb index failed (links fall back to copy-and-open):', e.message); }
-} else console.log('meowdb index is less than a week old: kept');
+} else console.log('meowdb index is less than three weeks old: kept');
 
-// ---------- monster drop tables from meowdb (at most weekly, one page per monster) ----------
+// ---------- monster drop tables from meowdb (at most every three weeks, one page per monster) ----------
 // Each meowdb monster page lists what it drops ("MSEA reference drops", server-rendered). The pickup-log matcher
 // (src/core/logmatch.ts) tries the current map's monsters' drops first when it reads an item name. MEOWDB_DIR=<folder>
 // parses saved copies (monsters.html, monster-<n>.html) instead of downloading.
-const dropsFresh = manifest.dropsAt && Date.now() - manifest.dropsAt < WEEK && has('drops.json') && !process.env.MIRROR_FORCE_LISTS;
+const dropsFresh = manifest.dropsAt && Date.now() - manifest.dropsAt < REFRESH && has('drops.json') && !process.env.MIRROR_FORCE_LISTS;
 if (!dropsFresh || process.env.MEOWDB_DIR) {
   try {
     const dir = process.env.MEOWDB_DIR, ent = s => s.replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
@@ -114,11 +114,11 @@ if (!dropsFresh || process.env.MEOWDB_DIR) {
         if (names.length) drops[m.name] = [...new Set(names)];
       } catch (e) { console.warn(`  drops for ${m.name} failed:`, e.message); }
     }
-    // a page layout change would parse to (almost) nothing: keep last week's tables rather than publish empty ones
+    // a page layout change would parse to (almost) nothing: keep the previous tables rather than publish empty ones
     if (Object.keys(drops).length >= mobs.length / 2) { write('drops.json', JSON.stringify(drops)); manifest.dropsAt = Date.now(); console.log(`drops: ${Object.keys(drops).length} monsters`); }
     else console.warn(`drops: only ${Object.keys(drops).length} monsters parsed, kept the previous tables`);
   } catch (e) { console.warn('drop tables failed (the log matcher falls back to all items):', e.message); }
-} else console.log('drop tables are less than a week old: kept');
+} else console.log('drop tables are less than three weeks old: kept');
 // MIRROR_ONLY=drops: just the drop tables (e.g. to try the log matcher locally), nothing else downloaded
 if (process.env.MIRROR_ONLY === 'drops') { write('manifest.json', JSON.stringify(manifest, null, 1)); process.exit(0); }
 
