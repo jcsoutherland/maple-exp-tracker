@@ -78,11 +78,9 @@ function frame(t: number) {
   else { cv!.classList.remove('on'); g.clearRect(0, 0, W, H); raf = 0; }
 }
 
-/** Celebrate reaching level `to` (from `from`); calling it again restarts the show. */
-export function celebrateLevel(from: number, to: number) {
-  const ms = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : SHOW_MS;
-  listeners.forEach(cb => cb({ from, to, ms }));
-  if (!ms) return;
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function startShow(ms: number) {
   setup();
   if (!ctx) return;
   document.body.classList.add('celebrate');
@@ -90,4 +88,18 @@ export function celebrateLevel(from: number, to: number) {
   until = performance.now() + ms; nextLaunch = 0;
   for (let i = 0; i < 3; i++) setTimeout(launch, i * 120);
   if (!raf) raf = requestAnimationFrame(frame);
+}
+
+/** Celebrate reaching level `to` (from `from`); calling it again restarts the show. */
+export function celebrateLevel(from: number, to: number) {
+  const ms = reducedMotion() ? 0 : SHOW_MS;
+  listeners.forEach(cb => cb({ from, to, ms }));
+  if (ms) startShow(ms);
+}
+
+/** Just the fireworks, no banner (the logo easter egg). Ignored until the last show has fully faded; false if ignored. */
+export function playFireworks(): boolean {
+  if (raf || reducedMotion()) return false;
+  startShow(SHOW_MS);
+  return true;
 }

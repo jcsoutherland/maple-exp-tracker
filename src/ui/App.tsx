@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { DropsTab } from './DropsTab';
-import { celebrateLevel } from './fireworks';
+import { celebrateLevel, playFireworks } from './fireworks';
 import { HistoryTab } from './HistoryTab';
 import { LiveTab } from './LiveTab';
 import { MiniOverlay, usePip } from './MiniOverlay';
@@ -38,7 +38,8 @@ export function App() {
   return (
     <>
       <header>
-        <h1><img className="logo" src={import.meta.env.BASE_URL + 'favicon.svg'} alt="" /> MS Classic Training Tracker</h1>
+        {/* easter egg: clicking the logo sets off the fireworks (once the last show has faded) */}
+        <h1><img className="logo" src={import.meta.env.BASE_URL + 'favicon.svg'} alt="" onClick={playFireworks} /> MS Classic Training Tracker</h1>
         <span className="sp" />
         <button onClick={pip.toggle} title="Always-on-top mini overlay">⧉ Pop-out overlay</button>
       </header>
