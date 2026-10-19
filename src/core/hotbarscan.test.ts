@@ -33,3 +33,10 @@ describe('HotbarAuto', () => {
     for (let k = 0; k < 10; k++) expect(a.feed(bar({ 5: k % 2 ? 'Red Potion' : 'Orange Potion' }), cur)).toBeNull();
   });
 });
+
+describe('HotbarAuto keeps a potion whose count still reads', () => {
+  it('an icon that stops matching is not removed while its count reads', () => {
+    const a = new HotbarAuto(), cur = bar({ 5: 'Red Potion' }), counted = bar({}).map((_, i) => i === 5);
+    for (let k = 0; k < REMOVE_AFTER * 2; k++) expect(a.feed(bar({}), cur, counted)).toBeNull();
+  });
+});

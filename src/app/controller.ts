@@ -6,7 +6,9 @@ import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcou
 import { SlotWatch, slotStrip } from '../core/slotwatch';
 import { HotbarAuto, loadPotionIcons, scanSlots, type IconTpl } from '../core/hotbarscan';
 /** how often the quickslot is checked for which potions it holds */
-const HOTBAR_SCAN_MS = 5000;
+const HOTBAR_SCAN_MS = 2000;
+/** a potion sighting that isn't confirmed by then is dropped */
+const PENDING_MAX_MS = 30_000;
 import { allItems, canonItem, canonMap, dropsOnMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
 import { ExpLineFilter, LineShapeFilter, LogAnchor, snapInk, snapLine, type LineSnap } from '../core/logqueue';
 import { readLogSnap } from '../core/logread';
@@ -679,31 +681,60 @@ export class Controller {
       const p = name ? potionByName(name) : null;
       if (!p || !this.tracker) return;
       const kind = p.hp || p.hpPct ? 'hp' : 'mp';
-      const r = readSlotCount(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
-      // the slot's picture is watched too (not read): a count may only change when the picture did, lately
       const w = this.slotWatch.get(i) ?? this.slotWatch.set(i, { w: new SlotWatch(), changedAt: -Infinity }).get(i)!;
-      const ch = w.w.feed(slotStrip(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, this.scratch.slots), now);
-      if (ch != null) w.changedAt = ch;
       const sc = this.counts.get(i) ?? this.counts.set(i, new SlotCounter()).get(i)!;
       this.countFor.set(i, p.name);
-      const res = sc.feed(r, now, now - this.gaugeMovedAt[kind] < 3000, now - w.changedAt < 4000);
+      const res = this.readCount(v, qs, i, kind, sc, w, now);
+      // while another potion is being confirmed in this slot, uses are held until it's settled which one they were
+      const pend = this.pending.get(i);
+      if (pend) { pend.oldUsed += res.used; return; }
       if (res.used) this.tracker.creditPots(kind, p.name, res.used);
       else if (res.rejected) this.tracker.event('info', `${p.name} count ${res.from} → ${sc.val} ignored (looks like a misread)`);
     });
+    // a potion seen but not yet confirmed on the hotbar is counted from its first sighting, held until it's confirmed
+    for (const [i, pend] of this.pending) {
+      const p = potionByName(pend.name);
+      if (p) pend.newUsed += this.readCount(v, qs, i, p.hp || p.hpPct ? 'hp' : 'mp', pend.sc, pend.w, now).used;
+    }
+  }
+  /** Read one slot's count, with its picture watched too (not read): a count may only change when the picture did, lately. */
+  private readCount(v: FrameSource, qs: Region, i: number, kind: 'hp' | 'mp', sc: SlotCounter, w: { w: SlotWatch; changedAt: number }, now: number) {
+    const r = readSlotCount(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
+    const ch = w.w.feed(slotStrip(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, this.scratch.slots), now);
+    if (ch != null) w.changedAt = ch;
+    return sc.feed(r, now, now - this.gaugeMovedAt[kind] < 3000, now - w.changedAt < 4000);
   }
   // ---------- the hotbar follows the game by itself (hotbarscan.ts) ----------
   private hotbarAuto = new HotbarAuto();
   /** which potion each slot's count belongs to */
   private countFor = new Map<number, string>();
+  /**
+   * Slots where a scan saw a potion the hotbar doesn't have there yet. Its count is read from that first sighting, and
+   * its uses (newUsed) are credited once it's confirmed; the slot's old potion's uses meanwhile (oldUsed) are credited
+   * instead if it isn't (a tooltip, a window over the quickslot). Nothing drunk while confirming is lost or counted twice.
+   */
+  private pending = new Map<number, { name: string; since: number; sc: SlotCounter; w: { w: SlotWatch; changedAt: number }; newUsed: number; oldUsed: number }>();
+  /** Settle a pending slot: credit the uses of whichever potion it turned out to be. */
+  private settlePending(i: number, confirmed: boolean) {
+    const pend = this.pending.get(i), t = this.tracker;
+    if (!pend) return;
+    this.pending.delete(i);
+    const name = confirmed ? pend.name : this.settings.hotbar[i], used = confirmed ? pend.newUsed : pend.oldUsed;
+    const p = name ? potionByName(name) : null;
+    if (p && used && t) t.creditPots(p.hp || p.hpPct ? 'hp' : 'mp', p.name, used);
+    if (confirmed) { this.counts.set(i, pend.sc); this.slotWatch.set(i, pend.w); this.countFor.set(i, pend.name); }
+  }
   private potionIcons: { scale: number; icons: IconTpl[] } | null = null;
   private iconsLoading = false;
   private hotbarScanAt = 0;
   /**
-   * Every few seconds, recognise which potion is in each quickslot slot by its icon and, once a change is steady,
-   * update the hotbar (as if dragged on the Potions tab). Counting then follows the new layout as it always does: a
-   * slot whose potion changed starts a fresh count. Off when the Potions tab's "Detect automatically" is unticked.
+   * Every 2 s, recognise which potion is in each quickslot slot by its icon and, once a change is steady,
+   * update the hotbar (as if dragged on the Potions tab). A new potion is counted from the moment it's first seen
+   * (see pending), so uses while it's being confirmed still count. Off when the Potions tab's "Detect automatically" is unticked.
    */
   private followHotbar(v: FrameSource, now: number) {
+    // switched off mid-sighting: the held uses go back to the slot's own potion
+    if (!this.settings.autoHotbar) for (const i of [...this.pending.keys()]) this.settlePending(i, false);
     // wait for the item list (it names every potion and food) before loading their icons
     if (!this.settings.autoHotbar || !(osmsReady() || osmsSettled()) || now - this.hotbarScanAt < HOTBAR_SCAN_MS) return;
     this.hotbarScanAt = now;
@@ -711,14 +742,28 @@ export class Controller {
     if (this.potionIcons?.scale !== scale) {
       if (!this.iconsLoading) {
         this.iconsLoading = true;
-        loadPotionIcons(scale).then(icons => { this.potionIcons = { scale, icons }; }).catch(() => undefined).finally(() => { this.iconsLoading = false; });
+        loadPotionIcons(scale).then(icons => { this.potionIcons = { scale, icons }; this.hotbarScanAt = 0; }).catch(() => undefined).finally(() => { this.iconsLoading = false; });
       }
       return;
     }
     const scan = scanSlots(v, this.qsFit?.region ?? this.regions.quickslot, HOTBAR_COLS, HOTBAR_ROWS, this.potionIcons.icons, scale, this.scratch.slots);
-    const next = this.hotbarAuto.feed(scan, this.settings.hotbar);
+    const bar = this.settings.hotbar;
+    scan.forEach((n, i) => {
+      const pend = this.pending.get(i);
+      // a different potion (or the old one back) ends a sighting; an empty read (something over the slot) doesn't
+      if (pend && ((n && n !== pend.name) || now - pend.since > PENDING_MAX_MS)) this.settlePending(i, false);
+      if (n && n !== bar[i] && !this.pending.has(i) && potionByName(n))
+        this.pending.set(i, { name: n, since: now, sc: new SlotCounter(), w: { w: new SlotWatch(), changedAt: -Infinity }, newUsed: 0, oldUsed: 0 });
+    });
+    // a slot whose count still reads still holds its potion, whatever its icon looked like
+    const counted = bar.map((_, i) => now - (this.counts.get(i)?.at ?? -Infinity) < 3000);
+    const next = this.hotbarAuto.feed(scan, bar, counted);
     if (!next) return;
-    const was = this.settings.hotbar;
+    const was = bar;
+    next.forEach((n, i) => {
+      const pend = this.pending.get(i);
+      if (pend && n !== was[i]) this.settlePending(i, n === pend.name);
+    });
     next.forEach((n, i) => {
       if (n === was[i]) return;
       this.tracker?.event('info', n ? `Hotbar: ${n} found in slot ${i + 1}${was[i] ? ` (was ${was[i]})` : ''}` : `Hotbar: ${was[i]} no longer in slot ${i + 1}`);

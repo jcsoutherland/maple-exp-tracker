@@ -16,11 +16,19 @@ export interface IconTpl {
   w: number; h: number;
 }
 
-/** a slot holds a potion when its icon matches this well, and clearly better than any other potion */
-const MIN_SCORE = 0.72, MARGIN = 0.12;
+/**
+ * A slot holds a potion when its icon's shape matches this well (MIN_SHAPE: skills stay under 0.6) and,
+ * with its colour cast counted in too (Red and Orange Potion are the same shape), clearly better than any other potion.
+ */
+const MIN_SHAPE = 0.65, MIN_SCORE = 0.5, MARGIN = 0.2;
+/** an empty slot is a plain pale square that a pale icon (White Potion) fits by shape; a real icon's outline gives it
+ *  far more contrast (potions 59+, empty slots about 26) */
+const MIN_STD = 40;
+/** how much a colour cast off from the icon's lowers its score */
+const CAST_WEIGHT = 2;
 
 /** The icons of every recovery item, at the HUD's scale (1 at Ideal ratio), with the overdrawn corners left out. */
-export async function loadPotionIcons(scale = 1): Promise<IconTpl[]> {
+export async function loadPotionIcons(scale = 1, smooth = scale !== 1): Promise<IconTpl[]> {
   const out: IconTpl[] = [], seen = new Set<string>();
   for (const p of [...allPotions('hp'), ...allPotions('mp')]) {
     if (!p.id || seen.has(p.name)) continue;
@@ -32,7 +40,7 @@ export async function loadPotionIcons(scale = 1): Promise<IconTpl[]> {
     const w = Math.round(img.width * scale), h = Math.round(img.height * scale), c = document.createElement('canvas');
     c.width = w; c.height = h;
     const g = c.getContext('2d', { willReadFrequently: true })!;
-    g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, w, h);
+    g.imageSmoothingEnabled = smooth; g.drawImage(img, 0, 0, w, h);
     const d = g.getImageData(0, 0, w, h).data, pts: IconTpl['pts'] = [];
     for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
       const k = (y * w + x) * 4;
@@ -44,7 +52,7 @@ export async function loadPotionIcons(scale = 1): Promise<IconTpl[]> {
 }
 
 /** The potion in each slot (null = none recognised: a skill, empty, or not sure). */
-export function scanSlots(src: FrameSource, r: Region, cols: number, rows: number, icons: IconTpl[], scale = 1, scratch = document.createElement('canvas')): (string | null)[] {
+export function scanSlots(src: FrameSource, r: Region, cols: number, rows: number, icons: IconTpl[], scale = 1, scratch = document.createElement('canvas'), detail = false): (string | null)[] {
   const { W, H } = frameSize(src), cw = r.w * W / cols, ch = r.h * H / rows, M = Math.round(4 * scale);
   const out: (string | null)[] = [];
   for (let i = 0; i < cols * rows; i++) {
@@ -54,13 +62,13 @@ export function scanSlots(src: FrameSource, r: Region, cols: number, rows: numbe
     const g = scratch.getContext('2d', { willReadFrequently: true })!;
     g.drawImage(src, x0, y0, w, h, 0, 0, w, h);
     const s = g.getImageData(0, 0, w, h).data;
-    const scores = new Map<string, number>();
+    const scores = new Map<string, { sc: number; shape: number; std: number }>();
     for (const ic of icons) {
       // the icon sits about centred in its slot: try it within a few pixels of that
       const cx = Math.round((w - ic.w) / 2), cy = Math.round((h - ic.h) / 2);
-      let best = -1;
+      let best = -1, shape = -1, std = 0;
       for (let oy = cy - M; oy <= cy + M; oy++) for (let ox = cx - M; ox <= cx + M; ox++) {
-        let n = 0, sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+        let n = 0, sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0, dr = 0, dg = 0, db = 0;
         for (const p of ic.pts) {
           const X = ox + p.x, Y = oy + p.y;
           if (X < 0 || Y < 0 || X >= w || Y >= h) continue;
@@ -68,17 +76,25 @@ export function scanSlots(src: FrameSource, r: Region, cols: number, rows: numbe
           const sx = X - M, sy = Y - M;
           if ((sx < cw * 0.45 && sy < ch * 0.32) || (sx < cw * 0.75 && sy > ch * 0.62)) continue;
           const k = (Y * w + X) * 4;
-          for (const [a, b] of [[p.r, s[k]], [p.g, s[k + 1]], [p.b, s[k + 2]]]) { n++; sa += a; sb += b; saa += a * a; sbb += b * b; sab += a * b; }
+          const r = s[k], g = s[k + 1], b = s[k + 2];
+          n += 3; sa += p.r + p.g + p.b; sb += r + g + b;
+          saa += p.r * p.r + p.g * p.g + p.b * p.b; sbb += r * r + g * g + b * b; sab += p.r * r + p.g * g + p.b * b;
+          dr += r - p.r; dg += g - p.g; db += b - p.b;
         }
         if (n < 30) continue;
-        const va = saa - sa * sa / n, vb = sbb - sb * sb / n, sc = va > 0 && vb > 0 ? (sab - sa * sb / n) / Math.sqrt(va * vb) : 0;
-        if (sc > best) best = sc;
+        const va = saa - sa * sa / n, vb = sbb - sb * sb / n, ncc = va > 0 && vb > 0 ? (sab - sa * sb / n) / Math.sqrt(va * vb) : 0;
+        // shape alone can't tell look-alikes apart (Red and Orange Potion): the icon's colour cast must match too, though
+        // not its brightness (a slot on cooldown is drawn darker)
+        const px = n / 3, m = (dr + dg + db) / 3, cast = (Math.abs(dr - m) + Math.abs(dg - m) + Math.abs(db - m)) / px / 255;
+        const sc = ncc - CAST_WEIGHT * cast;
+        if (sc > best) { best = sc; shape = ncc; std = Math.sqrt(vb / n); }
       }
-      scores.set(ic.name, Math.max(best, scores.get(ic.name) ?? -1));
+      if (best > (scores.get(ic.name)?.sc ?? -Infinity)) scores.set(ic.name, { sc: best, shape, std });
     }
-    const ranked = [...scores].sort((a, b) => b[1] - a[1]);
+    const ranked = [...scores].map(([n, v]) => [n, v.sc, v.shape, v.std] as const).sort((a, b) => b[1] - a[1]);
     const [top, next] = ranked;
-    out.push(top && top[1] >= MIN_SCORE && (!next || top[1] - next[1] >= MARGIN) ? top[0] : null);
+    if (detail) { out.push(`${top?.[0]} ${top?.[1].toFixed(2)} (shape ${top?.[2].toFixed(2)} std ${top?.[3].toFixed(0)}) / ${next?.[0]} ${next?.[1].toFixed(2)}`); continue; }
+    out.push(top && top[2] >= MIN_SHAPE && top[3] >= MIN_STD && top[1] >= MIN_SCORE && (!next || top[1] - next[1] >= MARGIN) ? top[0] : null);
   }
   return out;
 }
@@ -86,13 +102,13 @@ export function scanSlots(src: FrameSource, r: Region, cols: number, rows: numbe
 /**
  * Turns slot scans into hotbar changes, carefully: a potion is placed after the same one is seen in a slot on
  * PLACE_AFTER scans in a row, and taken off after REMOVE_AFTER scans in a row see none there (a cursor, a tooltip or
- * a window over the quickslot only hides it for a moment).
+ * a window over the quickslot only hides it for a moment), and never while its count can still be read (`counted`).
  */
 export const PLACE_AFTER = 3, REMOVE_AFTER = 4;
 export class HotbarAuto {
   private hist: (string | null)[][] = [];
   /** Feed one scan; returns the new hotbar when it should change, else null. */
-  feed(scan: (string | null)[], current: (string | null)[]): (string | null)[] | null {
+  feed(scan: (string | null)[], current: (string | null)[], counted: boolean[] = []): (string | null)[] | null {
     const next = [...current];
     let changed = false;
     scan.forEach((name, i) => {
@@ -101,7 +117,7 @@ export class HotbarAuto {
       if (h.length > REMOVE_AFTER) h.shift();
       const lastN = (n: number) => h.length >= n && h.slice(-n).every(x => x === h[h.length - 1]);
       if (name && name !== current[i] && lastN(PLACE_AFTER)) { next[i] = name; changed = true; }
-      else if (!name && current[i] && lastN(REMOVE_AFTER)) { next[i] = null; changed = true; }
+      else if (!name && current[i] && !counted[i] && lastN(REMOVE_AFTER)) { next[i] = null; changed = true; }
     });
     return changed ? next : null;
   }
