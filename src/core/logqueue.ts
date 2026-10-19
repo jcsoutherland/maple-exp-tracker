@@ -40,6 +40,32 @@ export function snapRaw(s: LineSnap, x0 = 0, x1 = 1): HTMLCanvasElement | null {
   return c;
 }
 
+/**
+ * The line's text alone, as black on white, by its drop shadow: the game draws every log glyph with a darker copy one
+ * pixel down-right, so a text pixel is bright and clearly brighter than the pixel below / down-right of it. That holds
+ * on any background, which plain colour reading can't manage on bright maps (white text on sand or sky). Upscaled 3×
+ * with a white margin for the reader. Takes snapRaw's output (pixels at their on-screen size).
+ */
+export function shadowText(src: HTMLCanvasElement): HTMLCanvasElement {
+  const w = src.width, h = src.height, d = src.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, w, h).data;
+  const L = new Float32Array(w * h);
+  for (let p = 0; p < w * h; p++) L[p] = 0.299 * d[p * 4] + 0.587 * d[p * 4 + 1] + 0.114 * d[p * 4 + 2];
+  const ink = document.createElement('canvas'); ink.width = w; ink.height = h;
+  const g = ink.getContext('2d')!, im = g.createImageData(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const p = y * w + x, below = y + 1 < h ? Math.min(L[p + w], x + 1 < w ? L[p + w + 1] : 255) : 255;
+    const on = L[p] > SHADOW_MIN_L && L[p] - below > SHADOW_STEP;
+    const o = p * 4; im.data[o] = im.data[o + 1] = im.data[o + 2] = on ? 0 : 255; im.data[o + 3] = 255;
+  }
+  g.putImageData(im, 0, 0);
+  const z = 3, m = 6, out = document.createElement('canvas'); out.width = w * z + 2 * m; out.height = h * z + 2 * m;
+  const og = out.getContext('2d')!; og.fillStyle = '#fff'; og.fillRect(0, 0, out.width, out.height);
+  og.imageSmoothingEnabled = false; og.drawImage(ink, m, m, w * z, h * z);
+  return out;
+}
+/** a glyph pixel is at least this bright, and this much brighter than its shadow pixel */
+const SHADOW_MIN_L = 150, SHADOW_STEP = 45;
+
 /** How much text a snapshot holds (ink pixels), and a hash of its ink pattern: equal hashes read the same. */
 export function snapInk(s: LineSnap): { ink: number; hash: number } {
   let ink = 0, h = 2166136261;

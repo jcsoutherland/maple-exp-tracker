@@ -4,6 +4,7 @@ import { newSession, potCost } from './session';
 import { anchorOf, LogAnchor } from './logqueue';
 import { DEFAULT_SETTINGS } from './config';
 import { GLYPHS, SlotCounter, TH, TW } from './potcount';
+import { changedPixels, SlotWatch } from './slotwatch';
 import { Tracker } from './tracker';
 import { parseRecovery, potionsUsed } from './potions';
 
@@ -275,6 +276,27 @@ describe('potions', () => {
     expect(feed(65, false)).toBe(1);       // one potion counts even if the bar didn't visibly move (drunk near full)
     expect(feed(63, false)).toBe(0);       // but two at once need the bar to agree
     expect(c.feed(r(64, 0.3), 0, true).used).toBe(0); // a read too unsure to trust
+  });
+  it('only lets a count change when the slot picture changed (a steady misread on a still slot never counts)', () => {
+    const c = new SlotCounter(), r = (value: number) => ({ value, score: 0.9 });
+    const feed = (v: number, changed: boolean, n = 3) => { let used = 0; for (let k = 0; k < n; k++) used += c.feed(r(v), 0, true, changed).used; return used; };
+    expect(feed(78, false)).toBe(0);             // the starting count needs no change
+    expect(feed(73, false)).toBe(0);             // misread three times on an unchanged slot: ignored
+    expect(c.val).toBe(78);
+    expect(feed(77, true)).toBe(1);              // the slot changed and reads one less: counted
+    expect(feed(70, false, 12)).toBe(0);         // a new number held a long time with no change: baseline moves, nothing counted
+    expect(c.val).toBe(70);
+  });
+  it('notices a slot picture changing, but not noise or something passing over it', () => {
+    const N = 50 * 27, base = new Float32Array(N).fill(220), w = new SlotWatch();
+    const with_ = (k: number, v: number, from = 0) => { const a = base.slice(); for (let i = from; i < from + k; i++) a[i] = v; return a; };
+    expect(w.feed(base, 0)).toBeNull();
+    expect(w.feed(with_(5, 30), 300)).toBeNull();          // a few pixels of noise
+    expect(w.feed(with_(40, 30), 600)).toBeNull();         // something passes over…
+    expect(w.feed(base, 900)).toBeNull();                  // …and is gone: no change
+    expect(w.feed(with_(40, 30, 100), 1200)).toBeNull();   // the digits change…
+    expect(w.feed(with_(40, 30, 100), 1500)).toBe(1200);   // …and stay: changed, as of the first read showing it
+    expect(changedPixels(base, with_(40, 30))).toBe(40);
   });
   it('totals hotbar-counted potions per item', () => {
     const s = newSession('Flynny', 'Hunter', 38, 0);

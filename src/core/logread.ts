@@ -1,4 +1,4 @@
-import { snapCanvas, snapExtent, snapRaw, type LineSnap } from './logqueue';
+import { shadowText, snapCanvas, snapExtent, snapRaw, type LineSnap } from './logqueue';
 import type { OcrEngine } from './ocr/engine';
 import type { PaddleEngine } from './ocr/paddle';
 import { lineQuality } from './parse';
@@ -34,6 +34,12 @@ export async function readLogSnap(eng: OcrEngine, s: LineSnap, edge: number | nu
     const r = await pad.readLine(c, 'line'), q = lineQuality(r.text);
     if (q > best.q || (q === best.q && r.conf > best.conf)) best = { text: r.text, conf: r.conf, q };
     if (best.q >= 2) break;
+  }
+  // still no proper line: a bright background (sand, sky, snow) swamps the colours, so read the text by its shadow
+  if (best.q < 2 && tries[0]) {
+    onCall();
+    const r = await pad.readLine(shadowText(tries[0]), 'line'), q = lineQuality(r.text);
+    if (q > best.q || (q === best.q && r.conf > best.conf)) best = { text: r.text, conf: r.conf, q };
   }
   return best.text;
 }

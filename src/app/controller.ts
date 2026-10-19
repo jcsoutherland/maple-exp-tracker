@@ -3,6 +3,7 @@ import { classLook, LOOK_V, randomVariant, rollLook, SpriteLoader, type CharLook
 import { HOTBAR_COLS, HOTBAR_ROWS, REGION_DEFS, type Region, type RegionKey, type Settings } from '../core/config';
 import { potionByName } from '../core/potions';
 import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
+import { SlotWatch, slotStrip } from '../core/slotwatch';
 import { canonItem, canonMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
 import { ExpLineFilter, LineShapeFilter, LogAnchor, snapInk, snapLine, type LineSnap } from '../core/logqueue';
 import { readLogSnap } from '../core/logread';
@@ -465,6 +466,8 @@ export class Controller {
   private gaugeN = 0;
   /** per hotbar slot holding a potion: its count, read and checked by a SlotCounter */
   private counts = new Map<number, SlotCounter>();
+  /** per hotbar potion slot: its picture, watched for changes (a count may only change with it) */
+  private slotWatch = new Map<number, { w: SlotWatch; changedAt: number }>();
   /**
    * The Quickslot box as fitted to the slots on screen (see fitQuickslot): a hand-drawn box a few % off loses digits
    * ("96" read as 9). `for` is the drawn box and the potion slots it was fitted with; a change to either refits.
@@ -494,7 +497,7 @@ export class Controller {
    */
   private watchCounts(v: FrameSource) {
     const bar = this.settings.hotbar, now = Date.now();
-    for (const k of [...this.counts.keys()]) if (!bar[k]) this.counts.delete(k);
+    for (const k of [...this.counts.keys()]) if (!bar[k]) { this.counts.delete(k); this.slotWatch.delete(k); }
     this.fitCounts(v, now);
     const qs = this.qsFit?.region ?? this.regions.quickslot;
     bar.forEach((name, i) => {
@@ -502,8 +505,12 @@ export class Controller {
       if (!p || !this.tracker) return;
       const kind = p.hp || p.hpPct ? 'hp' : 'mp';
       const r = readSlotCount(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
+      // the slot's picture is watched too (not read): a count may only change when the picture did, lately
+      const w = this.slotWatch.get(i) ?? this.slotWatch.set(i, { w: new SlotWatch(), changedAt: -Infinity }).get(i)!;
+      const ch = w.w.feed(slotStrip(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, this.scratch.slots), now);
+      if (ch != null) w.changedAt = ch;
       const sc = this.counts.get(i) ?? this.counts.set(i, new SlotCounter()).get(i)!;
-      const res = sc.feed(r, now, now - this.gaugeMovedAt[kind] < 3000);
+      const res = sc.feed(r, now, now - this.gaugeMovedAt[kind] < 3000, now - w.changedAt < 4000);
       if (res.used) this.tracker.creditPots(kind, p.name, res.used);
       else if (res.rejected) this.tracker.event('info', `${p.name} count ${res.from} → ${sc.val} ignored (looks like a misread)`);
     });
