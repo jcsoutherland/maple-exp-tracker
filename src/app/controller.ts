@@ -4,6 +4,7 @@ import { HOTBAR_COLS, HOTBAR_ROWS, hudScale, REGION_DEFS, type Region, type Regi
 import { potionByName } from '../core/potions';
 import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { SlotWatch, slotStrip } from '../core/slotwatch';
+import { crossRead, readSlotSprite } from '../core/itemno';
 import { HotbarAuto, loadPotionIcons, scanSlots, type IconTpl, type ScanMemo } from '../core/hotbarscan';
 /** how often the quickslot is checked for which potions it holds */
 const HOTBAR_SCAN_MS = 2000;
@@ -699,7 +700,11 @@ export class Controller {
   }
   /** Read one slot's count, with its picture watched too (not read): a count may only change when the picture did, lately. */
   private readCount(v: FrameSource, qs: Region, i: number, kind: 'hp' | 'mp', sc: SlotCounter, w: { w: SlotWatch; changedAt: number }, now: number) {
-    const r = readSlotCount(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
+    const tpl = readSlotCount(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
+    // at the Ideal ratio the game's own digit pictures match the screen exactly: they cross-check the templates (and
+    // win when the two disagree), as the font matcher does for the pickup log
+    const ideal = this.settings.uiRatio === 'ideal';
+    const r = ideal ? crossRead(tpl, readSlotSprite(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, 1, this.scratch.slots), true) : tpl;
     const ch = w.w.feed(slotStrip(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, this.scratch.slots), now);
     if (ch != null) w.changedAt = ch;
     return sc.feed(r, now, now - this.gaugeMovedAt[kind] < 3000, now - w.changedAt < 4000);
