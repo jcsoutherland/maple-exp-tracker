@@ -8,13 +8,17 @@
 /** must match PORT in desktop/main.js */
 export const DESKTOP_PORT = 47821;
 /** the app's download: the latest GitHub release */
-export const DESKTOP_DOWNLOAD = 'https://github.com/jcsoutherland/maple-exp-tracker/releases/latest/download/MapleTrackerOverlay.exe';
+export const DESKTOP_DOWNLOAD = 'https://github.com/jcsoutherland/maple-exp-tracker/releases/latest/download/MapleTrackerOverlay-Setup.exe';
 /** this page is the tracker running inside the desktop app (standalone mode) */
 export const inDesktopApp = () => new URLSearchParams(location.search).has('desktop');
 
 export type LinkState = 'off' | 'connecting' | 'connected';
-/** how long a launched app gets to connect before it's taken as not installed */
-const LAUNCH_WAIT_MS = 6000;
+/**
+ * How long a launched app gets to connect before it's taken as not installed: briefly when nothing happened at all (an
+ * unknown link opens nothing, silently), much longer once the page lost focus, since then Chrome asked "Open app?" or the
+ * app itself came up, and an app that's starting (or a user reading the question) mustn't be taken for a missing one.
+ */
+const LAUNCH_QUIET_MS = 5000, LAUNCH_BUSY_MS = 30_000;
 
 const SEEN_KEY = 'desktopOverlaySeen';
 /** Has the desktop app ever connected from this browser? (A page can't see what's installed; this is the next best.) */
@@ -56,16 +60,20 @@ export class DesktopLink {
     return ok;
   }
   private async open() {
-    location.href = 'mapleoverlay://open';
-    // while Chrome's "Open app?" question is up the page loses focus: give the user time to answer it
-    const start = Date.now(), quick = LAUNCH_WAIT_MS, slow = 30_000;
-    while (!this.isConnected()) {
-      const waited = Date.now() - start;
-      if (waited > slow || (waited > quick && document.hasFocus())) return false;
-      if (!this.ws) { if (this.retry) clearTimeout(this.retry); this.retry = null; this.connect(); }
-      await new Promise(r => setTimeout(r, 700));
-    }
-    return true;
+    let blurred = !document.hasFocus();
+    const onBlur = () => { blurred = true; };
+    window.addEventListener('blur', onBlur);
+    try {
+      location.href = 'mapleoverlay://open';
+      const start = Date.now();
+      while (!this.isConnected()) {
+        const waited = Date.now() - start;
+        if (waited > (blurred || !document.hasFocus() ? LAUNCH_BUSY_MS : LAUNCH_QUIET_MS)) return false;
+        if (!this.ws) { if (this.retry) clearTimeout(this.retry); this.retry = null; this.connect(); }
+        await new Promise(r => setTimeout(r, 700));
+      }
+      return true;
+    } finally { window.removeEventListener('blur', onBlur); }
   }
   send(stats: unknown) {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'stats', stats }));

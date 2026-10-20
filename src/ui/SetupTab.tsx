@@ -179,7 +179,8 @@ function DesktopOverlayCard() {
       <div className="mut small" style={{ marginBottom: 10, maxWidth: 720 }}>
         The overlay as its own small Windows app: borderless, always on top of the game, no address bar. Drag it by its top line;
         right-click it for options. It shows this page's numbers, or tracks on its own without a browser (right-click → <b>Open the
-        tracker here</b>). {!inApp && <>Download it with the <a href={DESKTOP_DOWNLOAD}>⬇ button</a> next to Pop-out overlay. </>}Windows may warn that the app is unrecognised the first time: choose <b>More info → Run anyway</b>.
+        tracker here</b>). {!inApp && <>Download it with the <a href={DESKTOP_DOWNLOAD}>⬇ button</a> next to Pop-out overlay. </>}It installs in a few seconds, just for you (no admin), with a Start menu and desktop shortcut. Windows may warn that it's
+        unrecognised (the app isn't code-signed): choose <b>More info → Run anyway</b>.
       </div>
       <div className="row">
         <label className="featsw" title={inApp ? 'Always on inside the app' : 'Sends the overlay numbers to the app on this computer only (127.0.0.1)'}>

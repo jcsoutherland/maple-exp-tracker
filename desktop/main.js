@@ -138,8 +138,8 @@ function showOverlay() {
 }
 
 /**
- * Let the website open this app with a mapleoverlay:// link. A portable build runs from a temporary copy, so the link
- * points at the downloaded exe itself (PORTABLE_EXECUTABLE_FILE); re-registered on every start, so a moved exe still opens.
+ * Let the website open this app with a mapleoverlay:// link. The installer registers it too; doing it on every start
+ * keeps it pointing at this copy (and covers a portable build, which runs from a temporary copy of itself).
  */
 function registerProtocol() {
   if (!app.isPackaged) return;
