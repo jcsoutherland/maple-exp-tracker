@@ -11,7 +11,8 @@ const { autoUpdater } = require('electron-updater');
 const PORT = 47821;
 /** the website opens the app with a mapleoverlay:// link (see launch() in src/app/desktopLink.ts) */
 const PROTOCOL = 'mapleoverlay';
-const SITE = 'https://mapleclassic.training/';
+// development: MAPLE_SITE=http://localhost:5173/ runs the in-app tracker from a local dev server
+const SITE = process.env.MAPLE_SITE || 'https://mapleclassic.training/';
 
 const statePath = () => path.join(app.getPath('userData'), 'overlay.json');
 const loadState = () => { try { return JSON.parse(fs.readFileSync(statePath(), 'utf8')); } catch { return {}; } };
@@ -29,8 +30,9 @@ let shown = null;
 function pickSource() {
   let best = null;
   for (const [ws, s] of sources) {
-    const rank = s.stats?.state === 'on' ? 2 : s.stats?.state === 'paused' ? 1 : 0;
-    // a running session first; among equals, the one already shown (no flicker), then the newest
+    // a running session first; with none anywhere, this app's own tracker (what ▶ starts); then the one already shown
+    // (no flicker), then the newest
+    const rank = s.stats?.state === 'on' ? 3 : s.stats?.state === 'paused' ? 2 : s.inApp ? 1 : 0;
     if (!best || rank > best.rank || (rank === best.rank && (ws === shown || (best.ws !== shown && s.at > best.at)))) best = { ws, rank, at: s.at };
   }
   shown = best?.ws ?? null;
@@ -73,17 +75,20 @@ function startLink() {
     if (!/^https:\/\/mapleclassic\.training$|^http:\/\/localhost(:\d+)?$/.test(origin)) { ws.close(); return; }
     ws.on('message', buf => {
       let m; try { m = JSON.parse(String(buf)); } catch { return; }
-      if (m.type === 'stats') { sources.set(ws, { stats: m.stats, at: Date.now() }); pickSource(); }
+      if (m.type === 'stats') { sources.set(ws, { stats: m.stats, inApp: !!m.inApp, at: Date.now() }); pickSource(); }
       else if (m.type === 'show') showOverlay();
+      else if (m.type === 'notice' && ws === shown) overlay?.webContents.send('notice', String(m.text || '').slice(0, 140));
     });
     ws.on('close', () => { sources.delete(ws); pickSource(); });
   });
 }
 
 /** Standalone: the tracker in its own window, capturing the game window the user picks. */
-function openTracker() {
-  if (tracker && !tracker.isDestroyed()) { tracker.show(); tracker.focus(); return; }
-  tracker = new BrowserWindow({ width: 1280, height: 860, title: 'MS Classic Training Tracker', backgroundColor: '#0f0e1c', autoHideMenuBar: true, icon: ICON });
+function openTracker(show = true) {
+  if (tracker && !tracker.isDestroyed()) { if (show) { tracker.show(); tracker.focus(); } return; }
+  // it keeps reading the game while hidden or minimised (no background throttling)
+  tracker = new BrowserWindow({ width: 1280, height: 860, title: 'MS Classic Training Tracker', backgroundColor: '#0f0e1c', autoHideMenuBar: true, icon: ICON,
+    show, webPreferences: { backgroundThrottling: false } });
   tracker.loadURL(SITE + '?desktop=1');
   tracker.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
   tracker.on('closed', () => { tracker = null; });
@@ -96,7 +101,8 @@ function handleCapture() {
     const windows = sources.filter(s => s.name && !/MS Classic Tracker Overlay|EXP Tracker|MS Classic Training Tracker/.test(s.name));
     windows.sort((a, b) => (/maple/i.test(b.name) ? 1 : 0) - (/maple/i.test(a.name) ? 1 : 0));
     const list = windows.slice(0, 8);
-    const r = await dialog.showMessageBox(tracker ?? undefined, {
+    if (process.env.OVERLAY_TEST_PICK && list.length) { callback({ video: list[0] }); return; } // development: no dialog
+    const r = await dialog.showMessageBox(tracker?.isVisible() ? tracker : overlay ?? undefined, {
       type: 'question', title: 'Share a window', message: 'Which window should the tracker read?',
       buttons: [...list.map(s => s.name.slice(0, 60)), 'Cancel'], cancelId: list.length, defaultId: 0, noLink: true,
     });
@@ -135,7 +141,33 @@ async function confirmClose() {
 ipcMain.on('menu', () => menu().popup({ window: overlay }));
 ipcMain.on('close', confirmClose);
 ipcMain.on('install-update', installUpdate);
-ipcMain.on('cmd', (_e, cmd) => { if (shown && ['start', 'pause'].includes(cmd)) shown.send(JSON.stringify({ type: 'cmd', cmd })); });
+/**
+ * The overlay's ▶ / ⏸ go to the tracker it shows. To the tracker inside this app they go as a real click (the
+ * userGesture flag), so ▶ can open the window picker before starting; a browser tab gets a message instead.
+ */
+ipcMain.on('cmd', (_e, cmd) => sendCmd(cmd));
+const hasSession = s => s?.stats?.state === 'on' || s?.stats?.state === 'paused';
+/**
+ * ▶ with no session anywhere tracks right here, no browser needed: this app's own tracker (opened hidden if it isn't
+ * open) gets a real click, so it shows the window picker, then starts once the game window is shared.
+ */
+async function startHere() {
+  openTracker(false);
+  const inAppSource = () => [...sources].find(([, s]) => s.inApp)?.[0];
+  for (const t0 = Date.now(); !inAppSource() && Date.now() - t0 < 30_000; ) await new Promise(r => setTimeout(r, 300));
+  if (!tracker || tracker.isDestroyed()) return;
+  tracker.webContents.executeJavaScript(`window.__overlayCmd && window.__overlayCmd('start')`, true).catch(() => undefined);
+}
+function sendCmd(cmd) {
+  if (!['start', 'pause'].includes(cmd)) return;
+  if (cmd === 'start' && !hasSession(sources.get(shown))) { void startHere(); return; }
+  if (!shown) return;
+  if (sources.get(shown)?.inApp && tracker && !tracker.isDestroyed()) {
+    tracker.webContents.executeJavaScript(`window.__overlayCmd && window.__overlayCmd(${JSON.stringify(cmd)})`, true).catch(() => undefined);
+    return;
+  }
+  shown.send(JSON.stringify({ type: 'cmd', cmd }));
+}
 ipcMain.on('open-tracker', openTracker);
 
 /**
@@ -189,6 +221,10 @@ function registerProtocol() {
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { showOverlay(); checkUpdate(); });
-  app.whenReady().then(() => { registerProtocol(); startLink(); handleCapture(); createOverlay(); startUpdates(); });
+  app.whenReady().then(() => {
+    registerProtocol(); startLink(); handleCapture(); createOverlay(); startUpdates();
+    // development: OVERLAY_TEST_START=<ms> presses the overlay's ▶ that long after start
+    if (process.env.OVERLAY_TEST_START) setTimeout(() => sendCmd('start'), +process.env.OVERLAY_TEST_START);
+  });
   app.on('window-all-closed', () => app.quit());
 }

@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('overlay', {
   close: () => ipcRenderer.send('close'),
   onUpdate: fn => ipcRenderer.on('update', (_e, v) => fn(v)),
   onUpdating: fn => ipcRenderer.on('updating', (_e, v) => fn(v)),
+  onNotice: fn => ipcRenderer.on('notice', (_e, v) => fn(v)),
   installUpdate: () => ipcRenderer.send('install-update'),
   openTracker: () => ipcRenderer.send('open-tracker'),
 });

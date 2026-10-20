@@ -20,6 +20,8 @@
   button:hover:not(:disabled){border-color:var(--acc)}button:disabled{opacity:.4;cursor:default}
   .upd{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:700}
   .upd[hidden],.updating[hidden]{display:none}
+  .notice{position:fixed;left:10px;right:10px;bottom:8px;padding:5px 8px;border-radius:8px;background:#2a1f12;border:1px solid rgba(255,178,87,.4);color:var(--warm);font-size:11px}
+  .notice[hidden]{display:none}
   .updating{color:var(--warm);font-size:10px;letter-spacing:0;white-space:nowrap}
   .x{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0}
   .x:hover{border-color:var(--bad);color:var(--bad)}
@@ -55,14 +57,15 @@
     <button id="close" class="x" title="Close the overlay"><svg viewBox="0 0 10 10" width="9" height="9"><path d="M2 2 8 8M8 2 2 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
   </div>
   <div class="wait">
-    <span>Waiting for the tracker. Open <b>mapleclassic.training</b> and switch on <b>Send stats to the desktop overlay</b> (Setup tab), or track right here:</span>
-    <button id="here">Open the tracker in this app</button>
+    <span>Press <b>▶ Start tracking</b> and pick the MapleStory window, or track on <b>mapleclassic.training</b> with <b>Send stats to the desktop overlay</b> on (Setup tab).</span>
+    <button id="here">▶ Start tracking</button>
   </div>
   <div class="ov-bar live">
     <span class="ov-lv">LV.<b id="lv">?</b></span>
     <div class="ov-exp"><div id="fill" style="width:0"></div><span><i>EXP</i> <span id="exp" style="display:inline">—</span></span></div>
   </div>
   <div class="ov-stats live" id="stats"></div>
+  <div class="notice" id="notice" hidden></div>
 </div>
 <script>
   const $ = id => document.getElementById(id);
@@ -70,9 +73,11 @@
   $('more').onclick = () => window.overlay.menu();
   $('close').onclick = () => window.overlay.close();
   $('upd').onclick = () => window.overlay.installUpdate();
+  let noticeT = 0;
+  window.overlay.onNotice(text => { const n = $('notice'); n.textContent = text; n.hidden = false; clearTimeout(noticeT); noticeT = setTimeout(() => { n.hidden = true; }, 7000); });
   window.overlay.onUpdating(v => { $('updating').hidden = !v; $('updating').textContent = v ? 'Updating to ' + v + '…' : ''; });
   window.overlay.onUpdate(v => { $('upd').hidden = false; $('upd').title = 'Version ' + v + ' is ready: click to restart into it (it also installs when you quit)'; });
-  $('here').onclick = () => window.overlay.openTracker();
+  $('here').onclick = () => window.overlay.cmd('start');
   // one button, play or pause by state; the same two icons as the website's overlay
   const ICON = {
     pause: '<svg viewBox="0 0 10 10" width="10" height="10"><rect x="1.8" y="1.2" width="2.3" height="7.6" rx=".5" fill="currentColor"/><rect x="5.9" y="1.2" width="2.3" height="7.6" rx=".5" fill="currentColor"/></svg>',

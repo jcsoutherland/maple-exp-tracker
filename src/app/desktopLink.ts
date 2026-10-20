@@ -76,7 +76,11 @@ export class DesktopLink {
     } finally { window.removeEventListener('blur', onBlur); }
   }
   send(stats: unknown) {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'stats', stats }));
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'stats', stats, inApp: inDesktopApp() }));
+  }
+  /** A short message on the overlay (why ▶ couldn't start, say). */
+  notice(text: string) {
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'notice', text }));
   }
 
   // a call, not a field read: the state changes while launch() waits

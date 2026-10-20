@@ -106,10 +106,41 @@ export class Controller {
   private scratch = { sig: document.createElement('canvas'), gauge: document.createElement('canvas'), slots: document.createElement('canvas') };
 
   /** the link to the desktop overlay app: on when switched on in Setup, or when this page runs inside the app */
-  desktop = new DesktopLink(cmd => { if (cmd === 'start') { if (!this.sess) void this.start(); } else this.togglePause(); }, () => this.notify());
+  desktop = new DesktopLink(cmd => {
+    if (cmd === 'pause') { this.togglePause(); return; }
+    void this.startFromOverlay().then(why => { if (why === 'needs-click') this.desktop.notice('Click "Share game window" in your browser tab first, then ▶ again'); });
+  }, () => this.notify());
+  /**
+   * The overlay's ▶ with no session: share the game window first when it isn't shared yet, then start once frames come
+   * in. Sharing asks the browser's window picker, which only opens from a click in this page (or, in the desktop app, a
+   * click the app passes through): a click on the desktop overlay linked to a browser tab can't open it ('needs-click').
+   */
+  async startFromOverlay(): Promise<'started' | 'needs-click' | 'cancelled' | 'not-ready' | null> {
+    if (this.sess) { this.togglePause(); return null; }
+    if (!this.capture.sharing && this.capture.kind !== 'file') {
+      // without a click in this page the browser refuses the picker outright; with one, a failure is the user cancelling
+      const clicked = navigator.userActivation?.isActive ?? true;
+      try { await this.shareScreen(); } catch { return clicked ? 'cancelled' : 'needs-click'; }
+    }
+    for (const t0 = Date.now(); !(this.capture.ready && this.ocrState === 'ready'); ) {
+      // the text reader may still be loading (the app's own tracker, just opened): up to a minute
+      if (Date.now() - t0 > 60_000 || this.ocrState === 'error') return 'not-ready';
+      await new Promise(r => setTimeout(r, 250));
+    }
+    if (this.sess) return null;
+    await this.start();
+    return 'started';
+  }
   private syncDesktop() { this.desktop.enable(this.settings.desktopOverlay || inDesktopApp()); }
+  /** inside the desktop app, the overlay's buttons arrive as real clicks (so the window picker may open) through this */
+  private exposeOverlayCmd() {
+    if (inDesktopApp()) (window as unknown as { __overlayCmd?: (c: string) => void }).__overlayCmd = c => {
+      if (c === 'pause') this.togglePause();
+      else void this.startFromOverlay();
+    };
+  }
   constructor() {
-    queueMicrotask(() => this.syncDesktop());
+    queueMicrotask(() => { this.syncDesktop(); this.exposeOverlayCmd(); });
     const ch = store.loadChars(), last = store.loadSessions().slice(-1)[0];
     if (last) this.identity = { name: last.char, cls: ch[last.char]?.cls || last.cls, level: ch[last.char]?.level ?? last.level };
     // whatever the user last typed/confirmed wins over history

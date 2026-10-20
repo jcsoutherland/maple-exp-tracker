@@ -58,11 +58,12 @@ export function useOverlayStats(): OverlayStats {
   return {
     state: !s ? 'idle' : s.paused ? 'paused' : 'on', time: s ? fmtDur(el) : '', name: c.identity.name || '', level,
     exp: `${t?.exp != null ? fmtN(t.exp) : '—'} ${pct != null ? `[${pct.toFixed(2)}%]` : ''}`.trim(), pct: pct ?? 0, tiles,
-    action: !s ? 'start' : s.paused ? 'resume' : 'pause', actionOk: !!s || (c.capture.ready && c.ocrState === 'ready'),
+    // with no session, ▶ shares the game window first when needed (see controller.startFromOverlay)
+    action: !s ? 'start' : s.paused ? 'resume' : 'pause', actionOk: !!s || c.ocrState !== 'error',
   };
 }
 
-const ACTION_TITLE = { start: 'Start session', pause: 'Pause', resume: 'Resume' } as const;
+const ACTION_TITLE = { start: 'Start a session (shares the game window first if needed)', pause: 'Pause', resume: 'Resume' } as const;
 /** Play and pause drawn as a pair: the same box, the same weight. */
 export function PlayPause({ action }: { action: OverlayStats['action'] }) {
   return (
@@ -85,7 +86,10 @@ export function MiniOverlay({ win }: { win: Window }) {
         <span className="sp" />
         <span className="ov-name">{o.name}</span>
         <button className="ov-pp" disabled={!o.actionOk} title={ACTION_TITLE[o.action]}
-          onClick={() => (o.action === 'start' ? void c.start() : c.togglePause())}><PlayPause action={o.action} /></button>
+          onClick={() => void c.startFromOverlay().then(why => {
+            if (why === 'needs-click') toast('Click "Share game window" on the tracker page first');
+            else if (why === 'not-ready') toast("The shared window isn't sending frames yet: try ▶ again in a moment");
+          })}><PlayPause action={o.action} /></button>
       </div>
       <div className="ov-bar">
         <span className="ov-lv">LV.<b>{o.level ?? '?'}</b></span>
