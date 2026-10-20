@@ -1,6 +1,6 @@
 import { Capture } from '../core/capture';
 import { classLook, LOOK_V, randomVariant, rollLook, SpriteLoader, type CharLook } from '../core/avatar/msio';
-import { HOTBAR_COLS, HOTBAR_ROWS, hudScale, REGION_DEFS, type Region, type RegionKey, type Settings, type UiRatio } from '../core/config';
+import { anyOn, featureOn, HOTBAR_COLS, HOTBAR_ROWS, hudScale, REGION_DEFS, type Region, type RegionKey, type Settings, type UiRatio } from '../core/config';
 import { potionByName } from '../core/potions';
 import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { SlotWatch, slotStrip } from '../core/slotwatch';
@@ -8,6 +8,8 @@ import { crossRead, readSlotSprite } from '../core/itemno';
 import { HotbarAuto, loadPotionIcons, scanSlots, type IconTpl, type ScanMemo } from '../core/hotbarscan';
 /** how often the quickslot is checked for which potions it holds */
 const HOTBAR_SCAN_MS = 2000;
+/** the features the EXP bar is read for */
+const EXP_FEATURES = ['expGain', 'expRate', 'expLost', 'levelGoal', 'kills', 'graphs', 'expByMap'] as const;
 /** a potion sighting that isn't confirmed by then is dropped */
 const PENDING_MAX_MS = 30_000;
 import { allItems, canonItem, canonMap, dropsOnMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
@@ -339,7 +341,7 @@ export class Controller {
    * and skipped (the EXP bar counts EXP exactly), so a fast party log doesn't drown the meso / item lines.
    */
   private tickLog() {
-    if (!this.canRun || this.busy.log) return;
+    if (!this.canRun || this.busy.log || !anyOn(this.settings, 'mesos', 'drops')) return;
     this.busy.log = true;
     const t0 = performance.now();
     try {
@@ -611,7 +613,7 @@ export class Controller {
   }
 
   private async tickBars() {
-    if (!this.canRun || this.busy.bars) return;
+    if (!this.canRun || this.busy.bars || !featureOn(this.settings, 'potions')) return;
     this.busy.bars = true;
     try {
       const v = this.capture.video;
@@ -626,7 +628,7 @@ export class Controller {
   private tickGauge() {
     if (!this.canRun) return;
     const v = this.capture.video;
-    if (++this.gaugeN % 3 === 0) this.watchCounts(v); // ~3×/s
+    if (++this.gaugeN % 3 === 0 && featureOn(this.settings, 'potions')) this.watchCounts(v); // ~3×/s
     const now = Date.now();
     for (const k of ['hp', 'mp'] as const) {
       const f = gaugeFill(v, this.regions[k === 'hp' ? 'hpGauge' : 'mpGauge'], k, this.scratch.gauge), prev = this.gaugeLast[k];
@@ -803,7 +805,7 @@ export class Controller {
   }
 
   private async tickExp() {
-    if (!this.canRun || this.busy.exp) return;
+    if (!this.canRun || this.busy.exp || !anyOn(this.settings, ...EXP_FEATURES)) return;
     this.busy.exp = true;
     try {
       const r = parseExp(await this.read('exp', this.capture.video));
@@ -842,7 +844,7 @@ export class Controller {
 
   private lastMapRead = 0;
   private async tickMap(force: boolean) {
-    if (!this.canRun || this.busy.map) return;
+    if (!this.canRun || this.busy.map || !anyOn(this.settings, 'expByMap', 'monsters', 'kills', 'drops')) return;
     if (!force && Date.now() - this.lastMapRead < this.settings.schedule.mapMs) return;
     const v = this.capture.video;
     const sig = regionSignature(v, this.regions.map, this.scratch.sig) ^ regionSignature(v, this.regions.mapBar, this.scratch.sig);
@@ -900,6 +902,8 @@ export class Controller {
   private checkIdle() {
     const s = this.sess, sec = this.settings.idlePauseSec;
     if (!s || s.paused || !sec) return;
+    // with neither the EXP bar nor the pickup log read, fighting can't be told from idling: never auto-pause then
+    if (!anyOn(this.settings, ...EXP_FEATURES, 'mesos', 'drops')) return;
     const quietSince = Math.max(this.lastActive, s.resumeAt, this.tracker?.lastDrop('mp') ?? 0);
     if (Date.now() - quietSince < sec * 1000) return;
     s.activeMs += quietSince - s.resumeAt;

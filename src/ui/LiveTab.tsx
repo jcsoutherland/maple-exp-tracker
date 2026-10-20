@@ -1,4 +1,4 @@
-import { CLASS_GROUPS, CLASSES, MAX_LEVEL } from '../core/config';
+import { CLASS_GROUPS, CLASSES, featureOn, MAX_LEVEL, type Feature } from '../core/config';
 import { useMemo } from 'react';
 import { MAP_MIN_EXP, potCost } from '../core/session';
 import { fmtDur, fmtHM, fmtK, fmtN } from '../core/util';
@@ -23,6 +23,8 @@ export function LiveTab() {
   const { el, hr, r10 } = c.rates();
   const pc = s ? potCost(s, c.settings) : null;
   const rate = r10 || hr;
+  // features switched off on the Setup tab leave the dashboard
+  const on = (f: Feature) => featureOn(c.settings, f);
   const toGo = t?.total && t.exp != null ? t.total - t.exp : null;
   const mesoHr = s && el > 60000 ? s.mesos / (el / 3.6e6) : null;
   const xpPct = Math.max(0, Math.min(100, t?.pct ?? 0)), xpText = t?.pct != null ? `EXP ${t.pct.toFixed(2)}%` : 'EXP —';
@@ -88,43 +90,43 @@ export function LiveTab() {
             {/* the dark copy is as wide as the whole bar, so it lines up with the light one underneath */}
             {xpPct > 0 && <div className="xpbar-fill" style={{ width: xpPct + '%' }}><span style={{ width: 10000 / xpPct + '%' }}>{xpText}</span></div>}
           </div>
-          <div className="mut small">{toGo != null && rate ? `Level up in ~${fmtHM(toGo / rate * 3.6e6)} · ${fmtN(toGo)} EXP to go` : ' '}</div>
+          <div className="mut small">{on('levelGoal') && toGo != null && rate ? `Level up in ~${fmtHM(toGo / rate * 3.6e6)} · ${fmtN(toGo)} EXP to go` : ' '}</div>
           <div className="mut small">📍 {t ? t.mapName : '—'}</div>
-          <MonsterPanel />
+          {on('monsters') && <MonsterPanel />}
         </div>
         <div className="sheet-right">
         <SessionBar />
         <div className="sheet-stats">
           <Stat k="Session" v={fmtDur(el)} s={s ? (s.paused ? 'paused' : 'since ' + new Date(s.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : ''} />
-          <Stat k="EXP gained" v={fmtN(s?.exp ?? 0)} s={s?.levelUps ? `${s.levelUps} level-up${s.levelUps > 1 ? 's' : ''} 🎉` : ''} accent={C_EXP}
-            onSub={s?.levelUps && s.level ? () => celebrateLevel(s.level! - 1, s.level!) : undefined} subTitle="Click to see the level-up animation again" />
-          <Stat k="EXP / hr" v={hr != null ? fmtK(hr) : '—'} s={'last 10 min ' + (r10 != null ? fmtK(r10) : '—')} accent={C_RATE} />
-          <Stat k="Mesos" v={fmtN(s?.mesos ?? 0)} s={(mesoHr != null ? fmtK(mesoHr) : '—') + ' / hr'} accent={C_MESO} />
-          <Stat k="Potions" v={pc?.total ? '-' + fmtN(pc.total) : '0'} s={pc ? `${fmtN(pc.items.reduce((a, i) => a + i.count, 0))} used` : ''} />
-          <Stat k="Net mesos" v={s && pc ? fmtN(s.mesos - pc.total) : '0'} s="after potions" />
-          <div className="stat">
+          {on('expGain') && <Stat k="EXP gained" v={fmtN(s?.exp ?? 0)} s={s?.levelUps ? `${s.levelUps} level-up${s.levelUps > 1 ? 's' : ''} 🎉` : ''} accent={C_EXP}
+            onSub={s?.levelUps && s.level ? () => celebrateLevel(s.level! - 1, s.level!) : undefined} subTitle="Click to see the level-up animation again" />}
+          {on('expRate') && <Stat k="EXP / hr" v={hr != null ? fmtK(hr) : '—'} s={'last 10 min ' + (r10 != null ? fmtK(r10) : '—')} accent={C_RATE} />}
+          {on('mesos') && <Stat k="Mesos" v={fmtN(s?.mesos ?? 0)} s={(mesoHr != null ? fmtK(mesoHr) : '—') + ' / hr'} accent={C_MESO} />}
+          {on('potions') && <Stat k="Potions" v={pc?.total ? '-' + fmtN(pc.total) : '0'} s={pc ? `${fmtN(pc.items.reduce((a, i) => a + i.count, 0))} used` : ''} />}
+          {on('mesos') && <Stat k="Net mesos" v={s && pc ? fmtN(s.mesos - pc.total) : '0'} s="after potions" />}
+          {on('potions') && <div className="stat">
             <div className="k">HP / MP</div>
             <div className="v sm">{t ? <><span style={{ color: 'var(--hp)' }}>{t.hp.cur ?? '?'}/{t.hp.max ?? '?'}</span> · <span style={{ color: 'var(--mp)' }}>{t.mp.cur ?? '?'}/{t.mp.max ?? '?'}</span></> : '—'}</div>
             <div className="s">&nbsp;</div>
-          </div>
-          <Stat k="EXP lost" v={s?.expLost ? '-' + fmtN(s.expLost) : '0'} s={s?.deaths ? `${s.deaths} death${s.deaths > 1 ? 's' : ''} · net ${fmtN(s.exp - s.expLost)}` : 'no deaths'} bad={!!s?.expLost} />
+          </div>}
+          {on('expLost') && <Stat k="EXP lost" v={s?.expLost ? '-' + fmtN(s.expLost) : '0'} s={s?.deaths ? `${s.deaths} death${s.deaths > 1 ? 's' : ''} · net ${fmtN(s.exp - s.expLost)}` : 'no deaths'} bad={!!s?.expLost} />}
         </div>
-        <PotionPanel />
-        <div className="sheet-extra">
-          <GoalPanel />
-          <KillsPanel />
-        </div>
+        {on('potions') && <PotionPanel />}
+        {(on('levelGoal') || on('kills')) && <div className="sheet-extra">
+          {on('levelGoal') && <GoalPanel />}
+          {on('kills') && <KillsPanel />}
+        </div>}
         </div>
       </div>
 
-      <div className="charts3">
+      {on('graphs') && <div className="charts3">
         <div className="card"><MiniChart title="EXP gained" points={expPts} color={C_EXP} fmt={v => fmtN(v)} /></div>
         <div className="card"><MiniChart title="EXP / hr (10-min window)" points={ratePts.length ? ratePts : [[0, 0]]} color={C_RATE} fmt={v => fmtK(v)} empty={ratePts.length < 2 ? "Needs about a minute of data" : undefined} /></div>
-        <div className="card"><MiniChart title="Mesos picked up" points={mesoPts} color={C_MESO} fmt={v => fmtN(v)} /></div>
-      </div>
+        {on('mesos') && <div className="card"><MiniChart title="Mesos picked up" points={mesoPts} color={C_MESO} fmt={v => fmtN(v)} /></div>}
+      </div>}
 
-      <div className="grid2">
-        <div className="card">
+      {(on('expByMap') || on('activity')) && <div className="grid2">
+        {on('expByMap') && <div className="card">
           <h3>EXP by map</h3>
           <table>
             <thead><tr><th>Map</th><th className="n">EXP</th><th className="n">%</th></tr></thead>
@@ -135,8 +137,8 @@ export function LiveTab() {
             </tbody>
           </table>
           <div className="mut small" style={{ marginTop: 6 }}>Maps under {fmtN(MAP_MIN_EXP)} EXP are dimmed and left out when the session is saved.</div>
-        </div>
-        <div className="card">
+        </div>}
+        {on('activity') && <div className="card">
           <h3>Activity</h3>
           <div className="feed">
             {s?.events.slice(0, 40).map((e, i) => (
@@ -144,10 +146,10 @@ export function LiveTab() {
             ))}
           </div>
           <div className="perf">log checks {c.stats.logChecks} · read by font {c.stats.logMatched} · OCR calls {c.stats.ocrCalls} · EXP lines skipped {c.stats.expSkipped} · log queue {c.stats.logBacklog}{c.stats.logDropped ? ` · dropped ${c.stats.logDropped}` : ''} · last log tick {c.stats.lastTickMs.toFixed(0)} ms</div>
-        </div>
-      </div>
+        </div>}
+      </div>}
 
-      <LootProfit />
+      {(on('mesos') || on('drops')) && <LootProfit />}
       </div>
       </div>
     </section>

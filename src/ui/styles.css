@@ -327,3 +327,14 @@ body.celebrate .stage{box-shadow:0 0 0 2px var(--warm),0 0 30px rgba(255,178,87,
 input.num{font-variant-numeric:tabular-nums;text-align:right}
 input[type=number]{-moz-appearance:textfield;appearance:textfield}
 input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+
+/* feature on/off switches (Setup tab) */
+.featgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px 16px}
+.featsw{display:flex;align-items:center;gap:10px;cursor:pointer;padding:4px 0}
+.featsw input{position:absolute;opacity:0;width:1px;height:1px}
+.featsw .sw{flex:none;position:relative;width:34px;height:20px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);transition:background .15s}
+.featsw .sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:99px;background:var(--mut);transition:transform .15s,background .15s}
+.featsw input:checked + .sw{background:var(--acc);border-color:var(--acc)}
+.featsw input:checked + .sw::after{transform:translateX(14px);background:#fff}
+.featsw input:focus-visible + .sw{box-shadow:0 0 0 3px rgba(139,123,255,.35)}
+.featsw small{display:block;color:var(--mut);font-size:11px}

@@ -100,12 +100,39 @@ export interface Settings {
   uiRatio: UiRatio;
   /** follow the in-game quickslot by itself: potions recognised by their icons are placed, moved and removed */
   autoHotbar: boolean;
+  /** which features run (see FEATURES); a feature switched off stops its screen reading and leaves the dashboard */
+  features: Partial<Record<Feature, boolean>>;
 }
+
+/**
+ * The features that can be switched off (Setup tab), for a lighter tracker. Each screen reading stops only when every
+ * feature it serves is off: the EXP bar serves the EXP features, the map name serves EXP by map, monsters, kills and
+ * drops, the pickup log serves mesos and drops, and the HP/MP numbers and quickslot serve potions.
+ */
+export const FEATURES = {
+  expGain: { label: 'Total EXP gain', reads: 'EXP bar' },
+  expRate: { label: 'EXP / hr', reads: 'EXP bar' },
+  expLost: { label: 'EXP lost', reads: 'EXP bar' },
+  levelGoal: { label: 'Level goal', reads: 'EXP bar' },
+  kills: { label: 'Kills estimate', reads: 'EXP bar, map name' },
+  monsters: { label: 'Monster information', reads: 'map name' },
+  graphs: { label: 'Rate graphs', reads: 'EXP bar' },
+  expByMap: { label: 'EXP by map', reads: 'EXP bar, map name' },
+  mesos: { label: 'Meso tracking', reads: 'pickup log' },
+  drops: { label: 'Drop tracking', reads: 'pickup log, map name' },
+  potions: { label: 'Potion tracking', reads: 'HP/MP numbers, quickslot' },
+  activity: { label: 'Activity log', reads: '' },
+} as const;
+export type Feature = keyof typeof FEATURES;
+/** Is this feature on? (all are, unless switched off) */
+export const featureOn = (s: Pick<Settings, 'features'>, f: Feature) => s.features?.[f] !== false;
+/** Is any of these features on? */
+export const anyOn = (s: Pick<Settings, 'features'>, ...fs: Feature[]) => fs.some(f => featureOn(s, f));
 export const DEFAULT_SETTINGS: Settings = {
   v: 3, schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, idlePauseSec: 45, uiRatio: 'ideal',
   hpOrder: ['Meat', 'Red Potion', 'Orange Potion', 'White Potion'],
   mpOrder: ['Lemon', 'Blue Potion', 'Mana Elixir'],
-  hotbar: new Array(12).fill(null), autoHotbar: true,
+  hotbar: new Array(12).fill(null), autoHotbar: true, features: {},
 };
 
 /**

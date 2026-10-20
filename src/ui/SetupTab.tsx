@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OcrTestRow } from '../app/controller';
-import { REGION_DEFS, type RegionKey, type Schedule, type UiRatio } from '../core/config';
+import { FEATURES, featureOn, REGION_DEFS, type Feature, type RegionKey, type Schedule, type UiRatio } from '../core/config';
 import { attachSelect, type FracRect } from './selectable';
 import { toast, useCtrl } from './hooks';
 import { NumberInput } from './NumberInput';
@@ -120,6 +120,7 @@ export function SetupTab() {
           <span className="mut small">Plays a gameplay recording through the tracker as if it were live (recordings are compressed, so live capture reads better).</span>
         </div>
       </div>
+      <FeatureSwitches />
       <div className="card">
         <h3>Read schedule &amp; detection</h3>
         <div className="row">
@@ -140,5 +141,29 @@ export function SetupTab() {
         </div>
       </div>
     </section>
+  );
+}
+
+/** On/off per feature: one switched off stops its screen reading (once nothing else needs it) and leaves the dashboard. */
+function FeatureSwitches() {
+  const c = useCtrl(), feats = Object.entries(FEATURES) as [Feature, (typeof FEATURES)[Feature]][];
+  const set = (f: Feature, on: boolean) => c.updateSettings({ features: { ...c.settings.features, [f]: on } });
+  return (
+    <div className="card">
+      <h3>Features</h3>
+      <div className="mut small" style={{ marginBottom: 10 }}>
+        Switch off what you don't need for a lighter tracker. A feature that's off is hidden from the dashboard, and its screen
+        reading stops once no other feature uses it (the EXP bar is shared by all the EXP features, the pickup log by mesos and drops).
+      </div>
+      <div className="featgrid">
+        {feats.map(([f, d]) => (
+          <label key={f} className="featsw" title={d.reads ? 'Reads: ' + d.reads : 'Display only'}>
+            <input type="checkbox" role="switch" checked={featureOn(c.settings, f)} onChange={e => set(f, e.target.checked)} />
+            <span className="sw" aria-hidden="true" />
+            <span>{d.label}<small>{d.reads ? d.reads : 'display only'}</small></span>
+          </label>
+        ))}
+      </div>
+    </div>
   );
 }

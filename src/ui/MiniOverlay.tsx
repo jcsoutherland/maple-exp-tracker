@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { featureOn, type Feature } from '../core/config';
 import { fmtDur, fmtHM, fmtK, fmtN } from '../core/util';
 import { useGoal, useRate } from './GoalPanel';
 import { toast, useCtrl } from './hooks';
@@ -39,6 +40,7 @@ export function MiniOverlay({ win }: { win: Window }) {
   const c = useCtrl();
   const s = c.sess, t = c.tracker, { el, hr, r10 } = c.rates(), rate = useRate(), { level, goal, remaining } = useGoal();
   const last5 = c.gainOver(5 * 60_000), money = s ? sessionNet(s, c.settings) : null;
+  const on = (f: Feature) => featureOn(c.settings, f);
   const pct = t?.pct ?? null, state = !s ? 'idle' : s.paused ? 'paused' : 'on';
   return createPortal(
     <div className="ov">
@@ -59,11 +61,11 @@ export function MiniOverlay({ win }: { win: Window }) {
         </div>
       </div>
       <div className="ov-stats">
-        <div><span>Last 5 min</span><b className="pos">{last5 != null ? signed(last5) : '—'}</b></div>
-        <div><span>EXP/h · {r10 ? '10m' : 'all'}</span><b>{r10 || hr ? fmtK((r10 || hr)!) : '—'}</b></div>
-        <div><span>This session</span><b className="pos">{s ? signed(s.exp) : '—'}</b></div>
-        <div><span>To Lv. {goal ?? '?'}</span><b>{remaining && rate ? fmtHM(remaining / rate * 3.6e6) : '—'}</b></div>
-        <div><span>Profit</span><b className={money && money.net < 0 ? 'neg' : 'pos'}>{money ? signed(money.net) : '—'}</b></div>
+        {on('expGain') && <div><span>Last 5 min</span><b className="pos">{last5 != null ? signed(last5) : '—'}</b></div>}
+        {on('expRate') && <div><span>EXP/h · {r10 ? '10m' : 'all'}</span><b>{r10 || hr ? fmtK((r10 || hr)!) : '—'}</b></div>}
+        {on('expGain') && <div><span>This session</span><b className="pos">{s ? signed(s.exp) : '—'}</b></div>}
+        {on('levelGoal') && <div><span>To Lv. {goal ?? '?'}</span><b>{remaining && rate ? fmtHM(remaining / rate * 3.6e6) : '—'}</b></div>}
+        {(on('mesos') || on('drops')) && <div><span>Profit</span><b className={money && money.net < 0 ? 'neg' : 'pos'}>{money ? signed(money.net) : '—'}</b></div>}
       </div>
     </div>,
     win.document.body,
