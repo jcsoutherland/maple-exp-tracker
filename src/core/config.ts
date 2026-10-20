@@ -128,6 +128,11 @@ export type Feature = keyof typeof FEATURES;
 export const featureOn = (s: Pick<Settings, 'features'>, f: Feature) => s.features?.[f] !== false;
 /** Is any of these features on? */
 export const anyOn = (s: Pick<Settings, 'features'>, ...fs: Feature[]) => fs.some(f => featureOn(s, f));
+/** the features the EXP bar is read for */
+export const EXP_FEATURES = ['expGain', 'expRate', 'expLost', 'levelGoal', 'kills', 'graphs', 'expByMap'] as const;
+/** Auto-pause needs to see fighting (EXP coming in or loot in the pickup log): impossible with both readings off. */
+export const canAutoPause = (s: Pick<Settings, 'features'>) => anyOn(s, ...EXP_FEATURES, 'mesos', 'drops');
+export const AUTO_PAUSE_OFF_WHY = "Auto-pause is off: it watches for EXP and loot to tell fighting from idling, and every EXP feature plus meso and drop tracking are switched off (Setup → Features).";
 export const DEFAULT_SETTINGS: Settings = {
   v: 3, schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, idlePauseSec: 45, uiRatio: 'ideal',
   hpOrder: ['Meat', 'Red Potion', 'Orange Potion', 'White Potion'],

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OcrTestRow } from '../app/controller';
-import { FEATURES, featureOn, REGION_DEFS, type Feature, type RegionKey, type Schedule, type UiRatio } from '../core/config';
+import { AUTO_PAUSE_OFF_WHY, canAutoPause, FEATURES, featureOn, REGION_DEFS, type Feature, type RegionKey, type Schedule, type UiRatio } from '../core/config';
 import { attachSelect, type FracRect } from './selectable';
 import { toast, useCtrl } from './hooks';
 import { NumberInput } from './NumberInput';
@@ -131,7 +131,7 @@ export function SetupTab() {
           <label>Map check <NumberInput width={70} min={2000} max={120000} step={1000} value={sched.mapMs} onChange={v => setSched('mapMs', v)} /> ms, and every <NumberInput width={70} min={500} max={1000000} step={500} value={sched.mapExpStep} onChange={v => setSched('mapExpStep', v)} /> EXP</label>
         </div>
         <div className="row" style={{ marginTop: 8 }}>
-          <label title="0 = never. The session resumes by itself when EXP moves again.">Auto-pause after idle (s) <NumberInput width={60} min={0} max={3600} step={5} value={c.settings.idlePauseSec} onChange={v => c.updateSettings({ idlePauseSec: v })} /></label>
+          <label title={canAutoPause(c.settings) ? '0 = never. The session resumes by itself when EXP moves again.' : AUTO_PAUSE_OFF_WHY}>Auto-pause after idle (s) <NumberInput width={60} min={0} max={3600} step={5} value={c.settings.idlePauseSec} onChange={v => c.updateSettings({ idlePauseSec: v })} disabled={!canAutoPause(c.settings)} /></label>
           <label>Min HP jump counted as pot <NumberInput width={60} min={1} max={5000} step={5} value={c.settings.hpMin} onChange={v => c.updateSettings({ hpMin: v })} /></label>
           <label>Min MP jump counted as pot <NumberInput width={60} min={1} max={5000} step={5} value={c.settings.mpMin} onChange={v => c.updateSettings({ mpMin: v })} /></label>
         </div>

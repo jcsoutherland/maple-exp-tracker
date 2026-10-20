@@ -1,4 +1,4 @@
-import { CLASS_GROUPS, CLASSES, featureOn, MAX_LEVEL, type Feature } from '../core/config';
+import { AUTO_PAUSE_OFF_WHY, canAutoPause, CLASS_GROUPS, CLASSES, featureOn, MAX_LEVEL, type Feature } from '../core/config';
 import { useMemo } from 'react';
 import { MAP_MIN_EXP, potCost } from '../core/session';
 import { fmtDur, fmtHM, fmtK, fmtN } from '../core/util';
@@ -60,10 +60,11 @@ export function LiveTab() {
         </select>
         <button disabled={!c.capture.ready || c.ocrState !== 'ready'} onClick={() => c.identify()}>Read from screen</button>
         <span className="sp" />
-        <label className="idlecfg" title="Pause the session after this many seconds without EXP or loot (0 = never). It resumes by itself when EXP moves again, and idle time isn't counted.">
+        <label className="idlecfg" title={canAutoPause(c.settings) ? "Pause the session after this many seconds without EXP or loot (0 = never). It resumes by itself when EXP moves again, and idle time isn't counted." : AUTO_PAUSE_OFF_WHY}>
           <span className="mut">Auto-pause after</span>
-          <NumberInput className="lv" min={0} max={3600} step={5} value={c.settings.idlePauseSec} onChange={v => c.updateSettings({ idlePauseSec: v })} />
-          <span className="mut">{c.settings.idlePauseSec ? 's idle' : 's (off)'}</span>
+          <NumberInput className="lv" min={0} max={3600} step={5} value={c.settings.idlePauseSec} onChange={v => c.updateSettings({ idlePauseSec: v })}
+            disabled={!canAutoPause(c.settings)} title={canAutoPause(c.settings) ? undefined : AUTO_PAUSE_OFF_WHY} />
+          <span className="mut" title={canAutoPause(c.settings) ? undefined : AUTO_PAUSE_OFF_WHY}>{!canAutoPause(c.settings) ? 's (off: see why)' : c.settings.idlePauseSec ? 's idle' : 's (off)'}</span>
         </label>
       </div>
 

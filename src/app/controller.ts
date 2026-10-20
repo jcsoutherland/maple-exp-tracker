@@ -1,6 +1,6 @@
 import { Capture } from '../core/capture';
 import { classLook, LOOK_V, randomVariant, rollLook, SpriteLoader, type CharLook } from '../core/avatar/msio';
-import { anyOn, featureOn, HOTBAR_COLS, HOTBAR_ROWS, hudScale, REGION_DEFS, type Region, type RegionKey, type Settings, type UiRatio } from '../core/config';
+import { anyOn, canAutoPause, EXP_FEATURES, featureOn, HOTBAR_COLS, HOTBAR_ROWS, presetRegions, REGION_DEFS, type Region, type RegionKey, type Settings, type UiRatio } from '../core/config';
 import { potionByName } from '../core/potions';
 import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { SlotWatch, slotStrip } from '../core/slotwatch';
@@ -8,8 +8,7 @@ import { crossRead, readSlotSprite } from '../core/itemno';
 import { HotbarAuto, loadPotionIcons, scanSlots, type IconTpl, type ScanMemo } from '../core/hotbarscan';
 /** how often the quickslot is checked for which potions it holds */
 const HOTBAR_SCAN_MS = 2000;
-/** the features the EXP bar is read for */
-const EXP_FEATURES = ['expGain', 'expRate', 'expLost', 'levelGoal', 'kills', 'graphs', 'expByMap'] as const;
+
 /** a potion sighting that isn't confirmed by then is dropped */
 const PENDING_MAX_MS = 30_000;
 import { allItems, canonItem, canonMap, dropsOnMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
@@ -661,6 +660,14 @@ export class Controller {
     if (this.qsFit?.for === key && !stale) return;
     if (now - this.qsFitAt < 15_000) return;
     this.qsFitAt = now;
+    // at the Ideal ratio the HUD has one size and is pinned to the screen, so the drawn box is right whenever the game's
+    // own digit sprites read a count through it. The template fit would only move it: those templates come from scaled
+    // video and misread unscaled digits (87 as 37), stretching the box 4% and losing the icons along its bottom row
+    if (this.settings.uiRatio === 'ideal' && this.hudPx(v) === 1
+      && slots.some(i => readSlotSprite(v, this.regions.quickslot, i, HOTBAR_COLS, HOTBAR_ROWS, 1, this.scratch.slots))) {
+      this.qsFit = { region: this.regions.quickslot, scale: 1, for: key };
+      return;
+    }
     const fit = fitQuickslot(v, this.regions.quickslot, slots, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
     if (!fit) return;
     const moved = !this.qsFit || JSON.stringify(this.qsFit.region) !== JSON.stringify(fit.region);
@@ -705,11 +712,22 @@ export class Controller {
     const tpl = readSlotCount(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, GLYPHS, this.scratch.slots);
     // at the Ideal ratio the game's own digit pictures match the screen exactly: they cross-check the templates (and
     // win when the two disagree), as the font matcher does for the pickup log
-    const ideal = this.settings.uiRatio === 'ideal';
-    const r = ideal ? crossRead(tpl, readSlotSprite(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, 1, this.scratch.slots), true) : tpl;
+    const ideal = this.settings.uiRatio === 'ideal', px = this.hudPx(v);
+    const r = ideal ? crossRead(tpl, readSlotSprite(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, px, this.scratch.slots), px === 1) : tpl;
     const ch = w.w.feed(slotStrip(v, qs, i, HOTBAR_COLS, HOTBAR_ROWS, this.scratch.slots), now);
     if (ch != null) w.changedAt = ch;
     return sc.feed(r, now, now - this.gaugeMovedAt[kind] < 3000, now - w.changedAt < 4000);
+  }
+  /**
+   * Screen pixels per game pixel on the quickslot, measured from its (fitted) box against its size in game pixels:
+   * 1 when the shared window shows the game 1:1 at the Ideal ratio. Not assumed from the ratio setting, since the browser
+   * may scale a shared window down (a 1080p game shared at 720p). Snapped to 1 within 8% (the box fit itself wanders a
+   * few %), else to 0.05 steps.
+   */
+  private hudPx(v: FrameSource) {
+    const { W, H } = frameSize(v), qs = this.qsFit?.region ?? this.regions.quickslot;
+    const s = qs.w / presetRegions('ideal', W, H).quickslot.w;
+    return Math.abs(s - 1) < 0.08 ? 1 : Math.round(s * 20) / 20;
   }
   // ---------- the hotbar follows the game by itself (hotbarscan.ts) ----------
   private hotbarAuto = new HotbarAuto();
@@ -747,7 +765,7 @@ export class Controller {
     // wait for the item list (it names every potion and food) before loading their icons
     if (!this.settings.autoHotbar || !(osmsReady() || osmsSettled()) || now - this.hotbarScanAt < HOTBAR_SCAN_MS) return;
     this.hotbarScanAt = now;
-    const { H } = frameSize(v), scale = hudScale(this.settings.uiRatio, H);
+    const scale = this.hudPx(v);
     if (this.potionIcons?.scale !== scale) {
       if (!this.iconsLoading) {
         this.iconsLoading = true;
@@ -903,7 +921,7 @@ export class Controller {
     const s = this.sess, sec = this.settings.idlePauseSec;
     if (!s || s.paused || !sec) return;
     // with neither the EXP bar nor the pickup log read, fighting can't be told from idling: never auto-pause then
-    if (!anyOn(this.settings, ...EXP_FEATURES, 'mesos', 'drops')) return;
+    if (!canAutoPause(this.settings)) return;
     const quietSince = Math.max(this.lastActive, s.resumeAt, this.tracker?.lastDrop('mp') ?? 0);
     if (Date.now() - quietSince < sec * 1000) return;
     s.activeMs += quietSince - s.resumeAt;
