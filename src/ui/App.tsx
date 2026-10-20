@@ -6,8 +6,8 @@ import { LiveTab } from './LiveTab';
 import { MiniOverlay, useOverlayStats, usePip } from './MiniOverlay';
 import { PotionsTab } from './PotionsTab';
 import { SetupTab } from './SetupTab';
-import { useCtrl } from './hooks';
-import { DESKTOP_DOWNLOAD, inDesktopApp } from '../app/desktopLink';
+import { toast, useCtrl } from './hooks';
+import { appSeen, DESKTOP_DOWNLOAD, downloadApp, inDesktopApp } from '../app/desktopLink';
 
 const TABS = { live: 'Live', pots: 'Potions', drops: 'Drops', hist: 'History', setup: 'Setup' } as const;
 type Tab = keyof typeof TABS;
@@ -23,6 +23,31 @@ const ICONS: Record<Tab, JSX.Element> = {
 
 export function App() {
   const c = useCtrl();
+  // Pop-out overlay: the desktop app when "Send stats to the desktop overlay" is on and the app is installed (it has
+  // connected from this browser before), else the browser pop-out on the same click (which has to come straight from the
+  // click, so it can't wait to find out). It never downloads. The ⬇ button always opens the app, or downloads it.
+  // decided when clicked: whether the app has been seen can change without this header redrawing
+  const wantApp = () => c.settings.desktopOverlay && !inDesktopApp() && (c.desktop.state === 'connected' || appSeen());
+  const [opening, setOpening] = useState(false);
+  const [noApp, setNoApp] = useState(false);
+  const launch = async () => {
+    setOpening(true);
+    if (c.desktop.state !== 'connected') toast('Opening the desktop overlay…');
+    const ok = await c.desktop.launch();
+    setOpening(false);
+    return ok;
+  };
+  const popOut = async () => {
+    if (opening) return;
+    if (!wantApp() || noApp) { void pip.toggle(); return; }
+    if (!(await launch())) { setNoApp(true); toast("The desktop overlay didn't open (not installed?). Click Pop-out overlay again for the browser one, or ⬇ to get the app."); }
+  };
+  const getApp = async () => {
+    if (opening) return;
+    if (await launch()) { setNoApp(false); return; }
+    toast("The desktop overlay isn't installed (or is older than 1.2.0): downloading it");
+    downloadApp();
+  };
   const [tab, setTab] = useState<Tab>('live');
   const pip = usePip();
   const s = c.sess;
@@ -42,10 +67,12 @@ export function App() {
         {/* easter egg: clicking the logo sets off the fireworks (once the last show has faded) */}
         <h1><img className="logo" src={import.meta.env.BASE_URL + 'favicon.svg'} alt="" onClick={playFireworks} /> MS Classic Training Tracker</h1>
         <span className="sp" />
-        <button onClick={pip.toggle} title="Always-on-top mini overlay">⧉ Pop-out overlay</button>
+        <button onClick={popOut} disabled={opening}
+          title={wantApp() && !noApp ? 'Opens the desktop overlay app' : 'Always-on-top mini overlay'}>⧉ {opening ? 'Opening…' : 'Pop-out overlay'}</button>
         {!inDesktopApp() && (
           <a className="iconbtn" href={DESKTOP_DOWNLOAD} aria-label="Download the overlay as a program"
-            title="Download the overlay as a Windows program: no address bar, always on top of the game. Then switch on Setup → Desktop overlay app.">
+            onClick={e => { e.preventDefault(); void getApp(); }}
+            title="Desktop overlay app: no address bar, always on top of the game. Opens it if it's installed, otherwise downloads it (then switch on Setup → Desktop overlay app).">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v11" /><path d="m7 10 5 5 5-5" /><path d="M5 20h14" /></svg>
           </a>
         )}

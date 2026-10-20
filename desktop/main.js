@@ -8,6 +8,8 @@ const { WebSocketServer } = require('ws');
 
 /** must match DESKTOP_PORT in the website (src/app/desktopLink.ts) */
 const PORT = 47821;
+/** the website opens the app with a mapleoverlay:// link (see launch() in src/app/desktopLink.ts) */
+const PROTOCOL = 'mapleoverlay';
 const SITE = 'https://mapleclassic.training/';
 
 const statePath = () => path.join(app.getPath('userData'), 'overlay.json');
@@ -67,6 +69,7 @@ function startLink() {
     ws.on('message', buf => {
       let m; try { m = JSON.parse(String(buf)); } catch { return; }
       if (m.type === 'stats') { sources.set(ws, { stats: m.stats, at: Date.now() }); pickSource(); }
+      else if (m.type === 'show') showOverlay();
     });
     ws.on('close', () => { sources.delete(ws); pickSource(); });
   });
@@ -127,9 +130,25 @@ ipcMain.on('close', confirmClose);
 ipcMain.on('cmd', (_e, cmd) => { if (shown && ['start', 'pause'].includes(cmd)) shown.send(JSON.stringify({ type: 'cmd', cmd })); });
 ipcMain.on('open-tracker', openTracker);
 
+/** Bring the overlay to the front (opened again from the website, or a second launch). */
+function showOverlay() {
+  if (!overlay) return;
+  if (overlay.isMinimized()) overlay.restore();
+  overlay.show(); overlay.focus(); overlay.moveTop();
+}
+
+/**
+ * Let the website open this app with a mapleoverlay:// link. A portable build runs from a temporary copy, so the link
+ * points at the downloaded exe itself (PORTABLE_EXECUTABLE_FILE); re-registered on every start, so a moved exe still opens.
+ */
+function registerProtocol() {
+  if (!app.isPackaged) return;
+  app.setAsDefaultProtocolClient(PROTOCOL, process.env.PORTABLE_EXECUTABLE_FILE || process.execPath, []);
+}
+
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', () => overlay?.show());
-  app.whenReady().then(() => { startLink(); handleCapture(); createOverlay(); });
+  app.on('second-instance', showOverlay);
+  app.whenReady().then(() => { registerProtocol(); startLink(); handleCapture(); createOverlay(); });
   app.on('window-all-closed', () => app.quit());
 }

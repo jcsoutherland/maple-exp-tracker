@@ -1,7 +1,7 @@
 {
   "name": "maple-tracker-overlay",
   "productName": "MS Classic Tracker Overlay",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Always-on-top overlay for the MS Classic Training Tracker (mapleclassic.training): linked to the website, or tracking on its own",
   "main": "main.js",
@@ -33,6 +33,14 @@
     },
     "directories": {
       "output": "release"
-    }
+    },
+    "protocols": [
+      {
+        "name": "MS Classic Tracker Overlay",
+        "schemes": [
+          "mapleoverlay"
+        ]
+      }
+    ]
   }
 }

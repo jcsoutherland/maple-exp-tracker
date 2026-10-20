@@ -13,6 +13,19 @@ export const DESKTOP_DOWNLOAD = 'https://github.com/jcsoutherland/maple-exp-trac
 export const inDesktopApp = () => new URLSearchParams(location.search).has('desktop');
 
 export type LinkState = 'off' | 'connecting' | 'connected';
+/** how long a launched app gets to connect before it's taken as not installed */
+const LAUNCH_WAIT_MS = 6000;
+
+const SEEN_KEY = 'desktopOverlaySeen';
+/** Has the desktop app ever connected from this browser? (A page can't see what's installed; this is the next best.) */
+export const appSeen = () => { try { return localStorage.getItem(SEEN_KEY) === '1'; } catch { return false; } };
+
+/** Start the app's download (the latest release). */
+export function downloadApp() {
+  const a = document.createElement('a');
+  a.href = DESKTOP_DOWNLOAD; a.rel = 'noopener';
+  document.body.append(a); a.click(); a.remove();
+}
 
 export class DesktopLink {
   private ws: WebSocket | null = null;
@@ -28,10 +41,38 @@ export class DesktopLink {
     if (on) this.connect();
     else { if (this.retry) clearTimeout(this.retry); this.retry = null; this.ws?.close(); this.ws = null; this.set('off'); }
   }
+  /**
+   * Open the app: already connected, bring it to the front; otherwise open it through its mapleoverlay:// link (Chrome
+   * asks first) and wait for it to connect. A page can't see what's installed, so a link that opens nothing looks just
+   * like an app that isn't there: false after the wait means not installed (or an app older than 1.2.0, before the link).
+   */
+  async launch(): Promise<boolean> {
+    if (this.state === 'connected') { this.ws?.send(JSON.stringify({ type: 'show' })); return true; }
+    // with stats switched off, connect just long enough to see whether the app came up
+    const probe = !this.wanted;
+    if (probe) this.enable(true);
+    const ok = await this.open();
+    if (probe) this.enable(false);
+    return ok;
+  }
+  private async open() {
+    location.href = 'mapleoverlay://open';
+    // while Chrome's "Open app?" question is up the page loses focus: give the user time to answer it
+    const start = Date.now(), quick = LAUNCH_WAIT_MS, slow = 30_000;
+    while (!this.isConnected()) {
+      const waited = Date.now() - start;
+      if (waited > slow || (waited > quick && document.hasFocus())) return false;
+      if (!this.ws) { if (this.retry) clearTimeout(this.retry); this.retry = null; this.connect(); }
+      await new Promise(r => setTimeout(r, 700));
+    }
+    return true;
+  }
   send(stats: unknown) {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'stats', stats }));
   }
 
+  // a call, not a field read: the state changes while launch() waits
+  private isConnected() { return this.state === 'connected'; }
   private set(s: LinkState) { if (s !== this.state) { this.state = s; this.onState(); } }
   private connect() {
     if (!this.wanted) return;
@@ -39,7 +80,7 @@ export class DesktopLink {
     let ws: WebSocket;
     try { ws = new WebSocket(`ws://127.0.0.1:${DESKTOP_PORT}`); } catch { this.later(); return; }
     this.ws = ws;
-    ws.onopen = () => this.set('connected');
+    ws.onopen = () => { this.set('connected'); try { localStorage.setItem(SEEN_KEY, '1'); } catch { /* private window */ } };
     ws.onmessage = e => {
       try {
         const m = JSON.parse(String(e.data));
