@@ -3,10 +3,11 @@ import { DropsTab } from './DropsTab';
 import { celebrateLevel, playFireworks } from './fireworks';
 import { HistoryTab } from './HistoryTab';
 import { LiveTab } from './LiveTab';
-import { MiniOverlay, usePip } from './MiniOverlay';
+import { MiniOverlay, useOverlayStats, usePip } from './MiniOverlay';
 import { PotionsTab } from './PotionsTab';
 import { SetupTab } from './SetupTab';
 import { useCtrl } from './hooks';
+import { DESKTOP_DOWNLOAD, inDesktopApp } from '../app/desktopLink';
 
 const TABS = { live: 'Live', pots: 'Potions', drops: 'Drops', hist: 'History', setup: 'Setup' } as const;
 type Tab = keyof typeof TABS;
@@ -42,6 +43,12 @@ export function App() {
         <h1><img className="logo" src={import.meta.env.BASE_URL + 'favicon.svg'} alt="" onClick={playFireworks} /> MS Classic Training Tracker</h1>
         <span className="sp" />
         <button onClick={pip.toggle} title="Always-on-top mini overlay">⧉ Pop-out overlay</button>
+        {!inDesktopApp() && (
+          <a className="iconbtn" href={DESKTOP_DOWNLOAD} aria-label="Download the overlay as a program"
+            title="Download the overlay as a Windows program: no address bar, always on top of the game. Then switch on Setup → Desktop overlay app.">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v11" /><path d="m7 10 5 5 5-5" /><path d="M5 20h14" /></svg>
+          </a>
+        )}
       </header>
       <nav className="ftabs">
         {(Object.keys(TABS) as Tab[]).map(k => (
@@ -62,7 +69,15 @@ export function App() {
         </div>
       </main>
       {pip.win && <MiniOverlay win={pip.win} />}
+      {c.desktop.state === 'connected' && <DesktopFeed />}
       <div id="toast" />
     </>
   );
+}
+
+/** Sends the overlay's numbers to the desktop overlay app while it's connected (on every render: about once a second). */
+function DesktopFeed() {
+  const c = useCtrl(), o = useOverlayStats();
+  useEffect(() => { c.desktop.send(o); });
+  return null;
 }

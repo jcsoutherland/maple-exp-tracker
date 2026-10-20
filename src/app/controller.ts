@@ -5,6 +5,7 @@ import { potionByName } from '../core/potions';
 import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { SlotWatch, slotStrip } from '../core/slotwatch';
 import { crossRead, readSlotSprite } from '../core/itemno';
+import { DesktopLink, inDesktopApp } from './desktopLink';
 import { HotbarAuto, loadPotionIcons, scanSlots, type IconTpl, type ScanMemo } from '../core/hotbarscan';
 /** how often the quickslot is checked for which potions it holds */
 const HOTBAR_SCAN_MS = 2000;
@@ -104,7 +105,11 @@ export class Controller {
   private lastSave = 0;
   private scratch = { sig: document.createElement('canvas'), gauge: document.createElement('canvas'), slots: document.createElement('canvas') };
 
+  /** the link to the desktop overlay app: on when switched on in Setup, or when this page runs inside the app */
+  desktop = new DesktopLink(cmd => { if (cmd === 'start') { if (!this.sess) void this.start(); } else this.togglePause(); }, () => this.notify());
+  private syncDesktop() { this.desktop.enable(this.settings.desktopOverlay || inDesktopApp()); }
   constructor() {
+    queueMicrotask(() => this.syncDesktop());
     const ch = store.loadChars(), last = store.loadSessions().slice(-1)[0];
     if (last) this.identity = { name: last.char, cls: ch[last.char]?.cls || last.cls, level: ch[last.char]?.level ?? last.level };
     // whatever the user last typed/confirmed wins over history
@@ -161,6 +166,7 @@ export class Controller {
   updateSettings(p: Partial<Settings>) {
     this.settings = { ...this.settings, ...p };
     store.saveSettings(this.settings);
+    this.syncDesktop();
     if (this.sess && !this.sess.paused) this.startTimers();
     this.notify();
   }

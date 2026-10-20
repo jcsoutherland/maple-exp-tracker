@@ -4,6 +4,7 @@ import { AUTO_PAUSE_OFF_WHY, canAutoPause, FEATURES, featureOn, REGION_DEFS, typ
 import { attachSelect, type FracRect } from './selectable';
 import { toast, useCtrl } from './hooks';
 import { NumberInput } from './NumberInput';
+import { DESKTOP_DOWNLOAD, inDesktopApp } from '../app/desktopLink';
 
 export function SetupTab() {
   const c = useCtrl();
@@ -120,6 +121,7 @@ export function SetupTab() {
           <span className="mut small">Plays a gameplay recording through the tracker as if it were live (recordings are compressed, so live capture reads better).</span>
         </div>
       </div>
+      <DesktopOverlayCard />
       <FeatureSwitches />
       <div className="card">
         <h3>Read schedule &amp; detection</h3>
@@ -164,6 +166,34 @@ function FeatureSwitches() {
           </label>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** The desktop overlay app: download it, and switch on sending it the overlay's numbers. */
+function DesktopOverlayCard() {
+  const c = useCtrl(), st = c.desktop.state, inApp = inDesktopApp();
+  return (
+    <div className="card">
+      <h3>Desktop overlay app</h3>
+      <div className="mut small" style={{ marginBottom: 10, maxWidth: 720 }}>
+        The overlay as its own small Windows app: borderless, always on top of the game, no address bar. Drag it by its top line;
+        right-click it for options. It shows this page's numbers, or tracks on its own without a browser (right-click → <b>Open the
+        tracker here</b>). {!inApp && <>Download it with the <a href={DESKTOP_DOWNLOAD}>⬇ button</a> next to Pop-out overlay. </>}Windows may warn that the app is unrecognised the first time: choose <b>More info → Run anyway</b>.
+      </div>
+      <div className="row">
+        <label className="featsw" title={inApp ? 'Always on inside the app' : 'Sends the overlay numbers to the app on this computer only (127.0.0.1)'}>
+          <input type="checkbox" role="switch" checked={inApp || c.settings.desktopOverlay} disabled={inApp} onChange={e => c.updateSettings({ desktopOverlay: e.target.checked })} />
+          <span className="sw" aria-hidden="true" />
+          <span>Send stats to the desktop overlay</span>
+        </label>
+        {(inApp || c.settings.desktopOverlay) && (
+          <span className={'pill' + (st === 'connected' ? ' on' : ' warn')}>{st === 'connected' ? 'Overlay connected' : 'Overlay app not running'}</span>
+        )}
+      </div>
+      {!inApp && c.settings.desktopOverlay && st !== 'connected' && (
+        <div className="mut small" style={{ marginTop: 8 }}>Start the app; it connects within a few seconds. If Chrome asks to let this site reach apps on your device, choose <b>Allow</b>.</div>
+      )}
     </div>
   );
 }

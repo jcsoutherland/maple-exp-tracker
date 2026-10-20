@@ -11,7 +11,7 @@ interface DocPip { requestWindow(o: { width: number; height: number }): Promise<
 /**
  * Opens the overlay as a Document Picture-in-Picture window (Chrome/Edge 116+): always on top of other windows, the game
  * included, with only a thin title strip (the browser always shows the site there; a page can't hide it). Browsers
- * without it get a normal popup, which can't stay on top.
+ * without it get a normal popup, which can't stay on top. The desktop overlay app has neither (see desktopLink.ts).
  */
 export function usePip() {
   const [win, setWin] = useState<Window | null>(null);
@@ -35,37 +35,67 @@ export function usePip() {
 
 const signed = (n: number, f = fmtK) => (n < 0 ? '−' : '+') + f(Math.abs(n));
 
-/** The always-on-top overlay: level and EXP bar, recent and session EXP, time to the level goal, and profit. */
-export function MiniOverlay({ win }: { win: Window }) {
+/** What the overlay shows, ready to display: the pop-out window and the desktop app show exactly this. */
+export interface OverlayStats {
+  state: 'idle' | 'paused' | 'on'; time: string; name: string; level: number | null; exp: string; pct: number;
+  tiles: { label: string; value: string; cls?: 'pos' | 'neg' }[];
+  /** the one play / pause button: what it does now, and whether it can */
+  action: 'start' | 'pause' | 'resume'; actionOk: boolean;
+}
+
+/** The overlay's numbers: level and EXP bar, recent and session EXP, time to the level goal, and profit. */
+export function useOverlayStats(): OverlayStats {
   const c = useCtrl();
   const s = c.sess, t = c.tracker, { el, hr, r10 } = c.rates(), rate = useRate(), { level, goal, remaining } = useGoal();
   const last5 = c.gainOver(5 * 60_000), money = s ? sessionNet(s, c.settings) : null;
-  const on = (f: Feature) => featureOn(c.settings, f);
-  const pct = t?.pct ?? null, state = !s ? 'idle' : s.paused ? 'paused' : 'on';
+  const on = (f: Feature) => featureOn(c.settings, f), pct = t?.pct ?? null;
+  const tiles: OverlayStats['tiles'] = [];
+  if (on('expGain')) tiles.push({ label: 'Last 5 min', value: last5 != null ? signed(last5) : '—', cls: 'pos' });
+  if (on('expRate')) tiles.push({ label: `EXP/h · ${r10 ? '10m' : 'all'}`, value: r10 || hr ? fmtK((r10 || hr)!) : '—' });
+  if (on('expGain')) tiles.push({ label: 'This session', value: s ? signed(s.exp) : '—', cls: 'pos' });
+  if (on('levelGoal')) tiles.push({ label: `To Lv. ${goal ?? '?'}`, value: remaining && rate ? fmtHM(remaining / rate * 3.6e6) : '—' });
+  if (on('mesos') || on('drops')) tiles.push({ label: 'Profit', value: money ? signed(money.net) : '—', cls: money && money.net < 0 ? 'neg' : 'pos' });
+  return {
+    state: !s ? 'idle' : s.paused ? 'paused' : 'on', time: s ? fmtDur(el) : '', name: c.identity.name || '', level,
+    exp: `${t?.exp != null ? fmtN(t.exp) : '—'} ${pct != null ? `[${pct.toFixed(2)}%]` : ''}`.trim(), pct: pct ?? 0, tiles,
+    action: !s ? 'start' : s.paused ? 'resume' : 'pause', actionOk: !!s || (c.capture.ready && c.ocrState === 'ready'),
+  };
+}
+
+const ACTION_TITLE = { start: 'Start session', pause: 'Pause', resume: 'Resume' } as const;
+/** Play and pause drawn as a pair: the same box, the same weight. */
+export function PlayPause({ action }: { action: OverlayStats['action'] }) {
+  return (
+    <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
+      {action === 'pause' ? <><rect x="1.8" y="1.2" width="2.3" height="7.6" rx=".5" fill="currentColor" /><rect x="5.9" y="1.2" width="2.3" height="7.6" rx=".5" fill="currentColor" /></>
+        : <path d="M2.4 1.4 8.6 5 2.4 8.6Z" fill="currentColor" stroke="currentColor" strokeWidth=".8" strokeLinejoin="round" />}
+    </svg>
+  );
+}
+
+/** The always-on-top pop-out overlay (in the browser). */
+export function MiniOverlay({ win }: { win: Window }) {
+  const c = useCtrl(), o = useOverlayStats();
   return createPortal(
     <div className="ov">
       <div className="ov-head">
-        <span className={'ov-dot ' + state} title={state === 'on' ? 'Tracking' : state === 'paused' ? 'Paused' : 'Not tracking'} />
+        <span className={'ov-dot ' + o.state} title={o.state === 'on' ? 'Tracking' : o.state === 'paused' ? 'Paused' : 'Not tracking'} />
         <b>EXP TRACKER</b>
-        <span className="ov-time">{s ? fmtDur(el) : ''}</span>
+        <span className="ov-time">{o.time}</span>
         <span className="sp" />
-        <span className="ov-name">{c.identity.name || ''}</span>
-        <button disabled={!!s || !c.capture.ready || c.ocrState !== 'ready'} onClick={() => c.start()} title="Start">▶</button>
-        <button disabled={!s} onClick={() => c.togglePause()} title={s?.paused ? 'Resume' : 'Pause'}>{s?.paused ? '▶' : '⏸'}</button>
+        <span className="ov-name">{o.name}</span>
+        <button className="ov-pp" disabled={!o.actionOk} title={ACTION_TITLE[o.action]}
+          onClick={() => (o.action === 'start' ? void c.start() : c.togglePause())}><PlayPause action={o.action} /></button>
       </div>
       <div className="ov-bar">
-        <span className="ov-lv">LV.<b>{level ?? '?'}</b></span>
+        <span className="ov-lv">LV.<b>{o.level ?? '?'}</b></span>
         <div className="ov-exp">
-          <div style={{ width: (pct ?? 0) + '%' }} />
-          <span><i>EXP</i> {t?.exp != null ? fmtN(t.exp) : '—'} {pct != null ? `[${pct.toFixed(2)}%]` : ''}</span>
+          <div style={{ width: o.pct + '%' }} />
+          <span><i>EXP</i> {o.exp}</span>
         </div>
       </div>
       <div className="ov-stats">
-        {on('expGain') && <div><span>Last 5 min</span><b className="pos">{last5 != null ? signed(last5) : '—'}</b></div>}
-        {on('expRate') && <div><span>EXP/h · {r10 ? '10m' : 'all'}</span><b>{r10 || hr ? fmtK((r10 || hr)!) : '—'}</b></div>}
-        {on('expGain') && <div><span>This session</span><b className="pos">{s ? signed(s.exp) : '—'}</b></div>}
-        {on('levelGoal') && <div><span>To Lv. {goal ?? '?'}</span><b>{remaining && rate ? fmtHM(remaining / rate * 3.6e6) : '—'}</b></div>}
-        {(on('mesos') || on('drops')) && <div><span>Profit</span><b className={money && money.net < 0 ? 'neg' : 'pos'}>{money ? signed(money.net) : '—'}</b></div>}
+        {o.tiles.map(t => <div key={t.label}><span>{t.label}</span><b className={t.cls}>{t.value}</b></div>)}
       </div>
     </div>,
     win.document.body,

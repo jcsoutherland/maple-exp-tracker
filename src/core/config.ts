@@ -102,6 +102,8 @@ export interface Settings {
   autoHotbar: boolean;
   /** which features run (see FEATURES); a feature switched off stops its screen reading and leaves the dashboard */
   features: Partial<Record<Feature, boolean>>;
+  /** send the overlay's numbers to the desktop overlay app on this computer (see app/desktopLink.ts) */
+  desktopOverlay: boolean;
 }
 
 /**
@@ -137,7 +139,7 @@ export const DEFAULT_SETTINGS: Settings = {
   v: 3, schedule: DEFAULT_SCHEDULE, hpMin: 40, mpMin: 25, idlePauseSec: 45, uiRatio: 'ideal',
   hpOrder: ['Meat', 'Red Potion', 'Orange Potion', 'White Potion'],
   mpOrder: ['Lemon', 'Blue Potion', 'Mana Elixir'],
-  hotbar: new Array(12).fill(null), autoHotbar: true, features: {},
+  hotbar: new Array(12).fill(null), autoHotbar: true, features: {}, desktopOverlay: false,
 };
 
 /**

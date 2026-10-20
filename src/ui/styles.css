@@ -99,6 +99,7 @@ canvas.spark{width:100%;height:70px;display:block}
 .ov-time{color:var(--mut);letter-spacing:0}
 .ov-name{color:var(--tx);font-weight:700;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
 .ov-head button{padding:1px 7px;font-size:10px;line-height:16px}
+.ov-pp{display:inline-flex;align-items:center;justify-content:center;width:26px;height:20px;padding:0!important}
 .ov-dot{width:7px;height:7px;border-radius:99px;background:var(--mut)}
 .ov-dot.on{background:var(--ok);box-shadow:0 0 6px var(--ok)}.ov-dot.paused{background:var(--warm)}
 .ov-bar{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}
@@ -338,3 +339,6 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 .featsw input:checked + .sw::after{transform:translateX(14px);background:#fff}
 .featsw input:focus-visible + .sw{box-shadow:0 0 0 3px rgba(139,123,255,.35)}
 .featsw small{display:block;color:var(--mut);font-size:11px}
+/* a small round icon button (the overlay download next to Pop-out overlay) */
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);color:var(--tx)}
+.iconbtn:hover{border-color:var(--acc);background:#2a2650}
