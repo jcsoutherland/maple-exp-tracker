@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('overlay', {
   menu: () => ipcRenderer.send('menu'),
   close: () => ipcRenderer.send('close'),
   onUpdate: fn => ipcRenderer.on('update', (_e, v) => fn(v)),
+  onUpdating: fn => ipcRenderer.on('updating', (_e, v) => fn(v)),
   installUpdate: () => ipcRenderer.send('install-update'),
   openTracker: () => ipcRenderer.send('open-tracker'),
 });

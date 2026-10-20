@@ -49,7 +49,10 @@ function createOverlay() {
   overlay.setAlwaysOnTop(true, 'screen-saver');
   overlay.setVisibleOnAllWorkspaces(true);
   overlay.loadFile(path.join(__dirname, 'overlay.html'));
-  overlay.webContents.on('did-finish-load', () => { if (updateReady) overlay.webContents.send('update', updateReady); });
+  overlay.webContents.on('did-finish-load', () => {
+    if (updatingTo) overlay.webContents.send('updating', updatingTo);
+    if (updateReady) overlay.webContents.send('update', updateReady);
+  });
   const remember = () => { if (overlay && !overlay.isDestroyed()) { const b = overlay.getBounds(); saveState({ x: b.x, y: b.y, w: b.width, h: b.height }); } };
   overlay.on('moved', remember); overlay.on('resized', remember);
   overlay.on('closed', () => { overlay = null; app.quit(); });
@@ -136,21 +139,36 @@ ipcMain.on('cmd', (_e, cmd) => { if (shown && ['start', 'pause'].includes(cmd)) 
 ipcMain.on('open-tracker', openTracker);
 
 /**
- * Updates itself from the GitHub releases: checked at start and every 6 hours, downloaded in the background, installed
- * when the app quits, or straight away from the overlay's Update button. No re-download from the website needed.
+ * Updates itself from the GitHub releases, only when it's opened (started, or opened again from the website): a newer
+ * version is downloaded and installed straight away, and the app reopens updated. If that takes longer than
+ * UPDATE_NOW_MS, the overlay carries on as it is and the update installs when the app is closed (or from its Update
+ * button), so it never cuts into a session.
  */
-let updateReady = null;
+const UPDATE_NOW_MS = 20_000;
+let updateReady = null, updatingTo = null, openedAt = 0;
+const updating = v => { updatingTo = v; overlay?.webContents.send('updating', v); };
 function startUpdates() {
   if (!app.isPackaged) return;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.on('update-downloaded', info => { updateReady = info.version; overlay?.webContents.send('update', updateReady); });
-  autoUpdater.on('error', () => { /* offline, or GitHub busy: try again later */ });
-  const check = () => autoUpdater.checkForUpdates().catch(() => undefined);
-  check();
-  setInterval(check, 6 * 3600_000);
+  autoUpdater.on('update-available', info => { if (Date.now() - openedAt < UPDATE_NOW_MS) updating(info.version); });
+  autoUpdater.on('update-not-available', () => updating(null));
+  autoUpdater.on('update-downloaded', info => {
+    updateReady = info.version;
+    if (Date.now() - openedAt < UPDATE_NOW_MS) { installUpdate(); return; }
+    updating(null);
+    overlay?.webContents.send('update', updateReady);
+  });
+  autoUpdater.on('error', () => updating(null)); // offline or GitHub busy: next time
+  checkUpdate();
 }
-function installUpdate() { if (updateReady) autoUpdater.quitAndInstall(false, true); }
+/** Look for a newer version now (on opening). */
+function checkUpdate() {
+  if (!app.isPackaged || updateReady) return;
+  openedAt = Date.now();
+  autoUpdater.checkForUpdates().catch(() => undefined);
+}
+function installUpdate() { if (updateReady) autoUpdater.quitAndInstall(true, true); }
 
 /** Bring the overlay to the front (opened again from the website, or a second launch). */
 function showOverlay() {
@@ -170,7 +188,7 @@ function registerProtocol() {
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', showOverlay);
+  app.on('second-instance', () => { showOverlay(); checkUpdate(); });
   app.whenReady().then(() => { registerProtocol(); startLink(); handleCapture(); createOverlay(); startUpdates(); });
   app.on('window-all-closed', () => app.quit());
 }
