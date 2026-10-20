@@ -14,9 +14,25 @@ const statePath = () => path.join(app.getPath('userData'), 'overlay.json');
 const loadState = () => { try { return JSON.parse(fs.readFileSync(statePath(), 'utf8')); } catch { return {}; } };
 const saveState = p => { try { fs.writeFileSync(statePath(), JSON.stringify({ ...loadState(), ...p })); } catch { /* not saved */ } };
 
+const ICON = path.join(__dirname, 'build', 'icon.png');
 let overlay = null, tracker = null, wss = null;
-/** the tracker page that last sent numbers: overlay buttons go back to it */
-let lastSender = null;
+/**
+ * Every tracker page connected (the website in a browser, the tracker inside this app): its latest numbers and when
+ * they came. The overlay shows one source, the one with a session running, and its buttons go back to that one: a
+ * second tracker sitting idle (the app's own, opened while the website tracks) never takes the overlay over.
+ */
+const sources = new Map();
+let shown = null;
+function pickSource() {
+  let best = null;
+  for (const [ws, s] of sources) {
+    const rank = s.stats?.state === 'on' ? 2 : s.stats?.state === 'paused' ? 1 : 0;
+    // a running session first; among equals, the one already shown (no flicker), then the newest
+    if (!best || rank > best.rank || (rank === best.rank && (ws === shown || (best.ws !== shown && s.at > best.at)))) best = { ws, rank, at: s.at };
+  }
+  shown = best?.ws ?? null;
+  overlay?.webContents.send('stats', shown ? sources.get(shown).stats : null);
+}
 
 function createOverlay() {
   const st = loadState(), area = screen.getPrimaryDisplay().workArea;
@@ -24,7 +40,7 @@ function createOverlay() {
     width: st.w || 380, height: st.h || 126, x: st.x ?? area.x + area.width - 400, y: st.y ?? area.y + 20,
     frame: false, resizable: true, minWidth: 260, minHeight: 90, alwaysOnTop: true, skipTaskbar: false,
     backgroundColor: '#13112a', title: 'EXP Tracker', fullscreenable: false, maximizable: false,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+    icon: ICON, webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   // above a borderless-fullscreen game too
   overlay.setAlwaysOnTop(true, 'screen-saver');
@@ -50,16 +66,16 @@ function startLink() {
     if (!/^https:\/\/mapleclassic\.training$|^http:\/\/localhost(:\d+)?$/.test(origin)) { ws.close(); return; }
     ws.on('message', buf => {
       let m; try { m = JSON.parse(String(buf)); } catch { return; }
-      if (m.type === 'stats' && overlay) { lastSender = ws; overlay.webContents.send('stats', m.stats); }
+      if (m.type === 'stats') { sources.set(ws, { stats: m.stats, at: Date.now() }); pickSource(); }
     });
-    ws.on('close', () => { if (lastSender === ws) { lastSender = null; overlay?.webContents.send('stats', null); } });
+    ws.on('close', () => { sources.delete(ws); pickSource(); });
   });
 }
 
 /** Standalone: the tracker in its own window, capturing the game window the user picks. */
 function openTracker() {
   if (tracker && !tracker.isDestroyed()) { tracker.show(); tracker.focus(); return; }
-  tracker = new BrowserWindow({ width: 1280, height: 860, title: 'MS Classic Training Tracker', backgroundColor: '#0f0e1c', autoHideMenuBar: true });
+  tracker = new BrowserWindow({ width: 1280, height: 860, title: 'MS Classic Training Tracker', backgroundColor: '#0f0e1c', autoHideMenuBar: true, icon: ICON });
   tracker.loadURL(SITE + '?desktop=1');
   tracker.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
   tracker.on('closed', () => { tracker = null; });
@@ -89,12 +105,26 @@ function menu() {
     { label: 'Always on top', type: 'checkbox', checked: overlay?.isAlwaysOnTop() ?? true, click: i => overlay?.setAlwaysOnTop(i.checked, 'screen-saver') },
     { label: 'Reset size and position', click: () => { const a = screen.getPrimaryDisplay().workArea; overlay?.setBounds({ x: a.x + a.width - 400, y: a.y + 20, width: 380, height: 126 }); } },
     { type: 'separator' },
-    { label: 'Quit', click: () => app.quit() },
+    { label: 'Close the overlay', click: confirmClose },
   ]);
 }
 
+/** Close the app, after asking: it ends the overlay, and the tracker inside the app with any session it's running. */
+async function confirmClose() {
+  const own = tracker && !tracker.isDestroyed();
+  const r = await dialog.showMessageBox(overlay ?? undefined, {
+    type: 'warning', title: 'Close the overlay?', buttons: ['Close', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
+    message: 'You are about to close the overlay.',
+    detail: own
+      ? 'The tracker open in this app closes too. If it is tracking, end the session there first so it is saved to History.'
+      : 'Tracking on the website keeps going; open the app again to bring the overlay back.',
+  });
+  if (r.response === 0) app.quit();
+}
+
 ipcMain.on('menu', () => menu().popup({ window: overlay }));
-ipcMain.on('cmd', (_e, cmd) => { if (lastSender && ['start', 'pause'].includes(cmd)) lastSender.send(JSON.stringify({ type: 'cmd', cmd })); });
+ipcMain.on('close', confirmClose);
+ipcMain.on('cmd', (_e, cmd) => { if (shown && ['start', 'pause'].includes(cmd)) shown.send(JSON.stringify({ type: 'cmd', cmd })); });
 ipcMain.on('open-tracker', openTracker);
 
 if (!app.requestSingleInstanceLock()) app.quit();
