@@ -4,7 +4,7 @@ import { HOTBAR_COLS, HOTBAR_ROWS, hudScale, REGION_DEFS, type Region, type Regi
 import { potionByName } from '../core/potions';
 import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { SlotWatch, slotStrip } from '../core/slotwatch';
-import { HotbarAuto, loadPotionIcons, scanSlots, type IconTpl } from '../core/hotbarscan';
+import { HotbarAuto, loadPotionIcons, scanSlots, type IconTpl, type ScanMemo } from '../core/hotbarscan';
 /** how often the quickslot is checked for which potions it holds */
 const HOTBAR_SCAN_MS = 2000;
 /** a potion sighting that isn't confirmed by then is dropped */
@@ -713,7 +713,7 @@ export class Controller {
    * its uses (newUsed) are credited once it's confirmed; the slot's old potion's uses meanwhile (oldUsed) are credited
    * instead if it isn't (a tooltip, a window over the quickslot). Nothing drunk while confirming is lost or counted twice.
    */
-  private pending = new Map<number, { name: string; since: number; sc: SlotCounter; w: { w: SlotWatch; changedAt: number }; newUsed: number; oldUsed: number }>();
+  private pending = new Map<number, { name: string; since: number; sc: SlotCounter; w: { w: SlotWatch; changedAt: number }; newUsed: number; oldUsed: number; shown: number | null }>();
   /** Settle a pending slot: credit the uses of whichever potion it turned out to be. */
   private settlePending(i: number, confirmed: boolean) {
     const pend = this.pending.get(i), t = this.tracker;
@@ -727,6 +727,8 @@ export class Controller {
   private potionIcons: { scale: number; icons: IconTpl[] } | null = null;
   private iconsLoading = false;
   private hotbarScanAt = 0;
+  /** each slot's last picture and what it was recognised as: an unchanged slot isn't matched again */
+  private scanCache = new Map<number, ScanMemo>();
   /**
    * Every 2 s, recognise which potion is in each quickslot slot by its icon and, once a change is steady,
    * update the hotbar (as if dragged on the Potions tab). A new potion is counted from the moment it's first seen
@@ -742,18 +744,18 @@ export class Controller {
     if (this.potionIcons?.scale !== scale) {
       if (!this.iconsLoading) {
         this.iconsLoading = true;
-        loadPotionIcons(scale).then(icons => { this.potionIcons = { scale, icons }; this.hotbarScanAt = 0; }).catch(() => undefined).finally(() => { this.iconsLoading = false; });
+        loadPotionIcons(scale).then(icons => { this.potionIcons = { scale, icons }; this.hotbarScanAt = 0; this.scanCache.clear(); }).catch(() => undefined).finally(() => { this.iconsLoading = false; });
       }
       return;
     }
-    const scan = scanSlots(v, this.qsFit?.region ?? this.regions.quickslot, HOTBAR_COLS, HOTBAR_ROWS, this.potionIcons.icons, scale, this.scratch.slots);
+    const scan = scanSlots(v, this.qsFit?.region ?? this.regions.quickslot, HOTBAR_COLS, HOTBAR_ROWS, this.potionIcons.icons, scale, this.scratch.slots, false, this.scanCache);
     const bar = this.settings.hotbar;
     scan.forEach((n, i) => {
       const pend = this.pending.get(i);
       // a different potion (or the old one back) ends a sighting; an empty read (something over the slot) doesn't
       if (pend && ((n && n !== pend.name) || now - pend.since > PENDING_MAX_MS)) this.settlePending(i, false);
       if (n && n !== bar[i] && !this.pending.has(i) && potionByName(n))
-        this.pending.set(i, { name: n, since: now, sc: new SlotCounter(), w: { w: new SlotWatch(), changedAt: -Infinity }, newUsed: 0, oldUsed: 0 });
+        this.pending.set(i, { name: n, since: now, sc: new SlotCounter(), w: { w: new SlotWatch(), changedAt: -Infinity }, newUsed: 0, oldUsed: 0, shown: this.counts.get(i)?.val ?? null });
     });
     // a slot whose count still reads still holds its potion, whatever its icon looked like
     const counted = bar.map((_, i) => now - (this.counts.get(i)?.at ?? -Infinity) < 3000);
@@ -788,7 +790,12 @@ export class Controller {
     return false;
   }
   /** The confirmed count on a hotbar slot (null until read). */
-  slotCount(i: number) { return this.counts.get(i)?.val ?? null; }
+  slotCount(i: number) {
+    // while a swap there is unconfirmed, keep showing the count from before it (the new potion's number would otherwise
+    // appear under the old potion for a few seconds)
+    const pend = this.pending.get(i);
+    return pend ? pend.shown : this.counts.get(i)?.val ?? null;
+  }
 
   private async tickExp() {
     if (!this.canRun || this.busy.exp) return;
@@ -853,6 +860,15 @@ export class Controller {
   }
 
   /** EXP/hr over the whole session and over the last 10 minutes. */
+  /** EXP gained over the last `ms` of session time (null until the session is that old). */
+  gainOver(ms: number) {
+    const r = this.recent, s = this.sess;
+    if (!s || r.length < 2) return null;
+    const now = r[r.length - 1];
+    if (now[0] - r[0][0] < ms * 0.95) return null;
+    const from = r.find(p => p[0] >= now[0] - ms) ?? r[0];
+    return now[1] - from[1];
+  }
   rates() {
     const s = this.sess, el = elapsed(s);
     const hr = s && el > 60000 ? s.exp / (el / 3.6e6) : null;

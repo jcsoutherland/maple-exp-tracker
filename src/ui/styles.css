@@ -92,11 +92,27 @@ header h1{display:flex;align-items:center;gap:10px}
 canvas.spark{width:100%;height:70px;display:block}
 .bar{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:var(--exp)}
 /* mini overlay (PiP) */
-.mini{padding:8px 10px;font-size:12px;background:#12112aee;color:var(--tx);height:100vh}
-.mini .big{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
-.mini .r{display:flex;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
-.mini .r span:first-child{color:var(--mut)}
-.mini button{padding:3px 8px;font-size:11px}
+/* the always-on-top overlay (MiniOverlay): a compact card in the site's colours */
+.ov{height:100vh;display:flex;flex-direction:column;gap:8px;padding:8px 10px 10px;background:linear-gradient(#1d1a38,#13112a);color:var(--tx);font-size:12px;font-variant-numeric:tabular-nums;overflow:hidden}
+.ov-head{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.6px}
+.ov-head b{color:var(--acc)}
+.ov-time{color:var(--mut);letter-spacing:0}
+.ov-name{color:var(--tx);font-weight:700;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
+.ov-head button{padding:1px 7px;font-size:10px;line-height:16px}
+.ov-dot{width:7px;height:7px;border-radius:99px;background:var(--mut)}
+.ov-dot.on{background:var(--ok);box-shadow:0 0 6px var(--ok)}.ov-dot.paused{background:var(--warm)}
+.ov-bar{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}
+.ov-lv{display:flex;align-items:baseline;gap:2px;padding:1px 7px;border-radius:7px;background:var(--acc);color:#fff;font-size:10px;font-weight:800;white-space:nowrap}
+.ov-lv b{font-size:15px}
+.ov-exp{position:relative;flex:1;height:20px;border-radius:6px;background:#0d0c1d;border:1px solid var(--line);overflow:hidden}
+.ov-exp div{position:absolute;inset:0 auto 0 0;background:linear-gradient(#c3f07c,var(--exp))}
+.ov-exp span{position:relative;display:block;text-align:center;font-size:11px;line-height:18px;font-weight:700;text-shadow:0 1px 2px #000}
+.ov-exp i{color:#ffd76b;font-style:italic}
+.ov-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:6px 8px}
+.ov-stats div{display:flex;flex-direction:column;min-width:0}
+.ov-stats span{color:var(--mut);font-size:9.5px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+.ov-stats b{font-size:15px;white-space:nowrap}
+.ov .pos{color:var(--exp)}.ov .neg{color:var(--bad)}
 code{background:var(--panel2);padding:1px 5px;border-radius:4px}
 ol.help li{margin-bottom:4px}
 /* additions for the React app */

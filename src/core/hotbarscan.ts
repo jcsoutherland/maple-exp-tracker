@@ -52,7 +52,28 @@ export async function loadPotionIcons(scale = 1, smooth = scale !== 1): Promise<
 }
 
 /** The potion in each slot (null = none recognised: a skill, empty, or not sure). */
-export function scanSlots(src: FrameSource, r: Region, cols: number, rows: number, icons: IconTpl[], scale = 1, scratch = document.createElement('canvas'), detail = false): (string | null)[] {
+/** a slot's picture, as a cheap fingerprint, and what it was recognised as */
+export interface ScanMemo { sig: Uint8Array; name: string | null }
+
+/** A coarse fingerprint of a slot: 8×8 cells of average brightness. Two pictures within a few levels are the same. */
+function fingerprint(s: Uint8ClampedArray, w: number, h: number): Uint8Array {
+  const out = new Uint8Array(64);
+  for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) {
+    let sum = 0, n = 0;
+    for (let y = Math.floor(j * h / 8); y < Math.floor((j + 1) * h / 8); y += 2) for (let x = Math.floor(i * w / 8); x < Math.floor((i + 1) * w / 8); x += 2) {
+      const k = (y * w + x) * 4; sum += s[k] + s[k + 1] + s[k + 2]; n += 3;
+    }
+    out[j * 8 + i] = n ? Math.round(sum / n) : 0;
+  }
+  return out;
+}
+const samePicture = (a: Uint8Array, b: Uint8Array) => a.every((v, k) => Math.abs(v - b[k]) <= 6);
+
+/**
+ * `cache` (optional) remembers each slot's picture: a slot that looks as it did last time keeps its answer without
+ * being matched again, so a quickslot that isn't changing costs almost nothing.
+ */
+export function scanSlots(src: FrameSource, r: Region, cols: number, rows: number, icons: IconTpl[], scale = 1, scratch = document.createElement('canvas'), detail = false, cache?: Map<number, ScanMemo>): (string | null)[] {
   const { W, H } = frameSize(src), cw = r.w * W / cols, ch = r.h * H / rows, M = Math.round(4 * scale);
   const out: (string | null)[] = [];
   for (let i = 0; i < cols * rows; i++) {
@@ -62,6 +83,8 @@ export function scanSlots(src: FrameSource, r: Region, cols: number, rows: numbe
     const g = scratch.getContext('2d', { willReadFrequently: true })!;
     g.drawImage(src, x0, y0, w, h, 0, 0, w, h);
     const s = g.getImageData(0, 0, w, h).data;
+    const sig = cache ? fingerprint(s, w, h) : null, memo = cache?.get(i);
+    if (sig && memo && !detail && memo.sig.length === sig.length && samePicture(memo.sig, sig)) { out.push(memo.name); continue; }
     const scores = new Map<string, { sc: number; shape: number; std: number }>();
     for (const ic of icons) {
       // the icon sits about centred in its slot: try it within a few pixels of that
@@ -94,7 +117,9 @@ export function scanSlots(src: FrameSource, r: Region, cols: number, rows: numbe
     const ranked = [...scores].map(([n, v]) => [n, v.sc, v.shape, v.std] as const).sort((a, b) => b[1] - a[1]);
     const [top, next] = ranked;
     if (detail) { out.push(`${top?.[0]} ${top?.[1].toFixed(2)} (shape ${top?.[2].toFixed(2)} std ${top?.[3].toFixed(0)}) / ${next?.[0]} ${next?.[1].toFixed(2)}`); continue; }
-    out.push(top && top[2] >= MIN_SHAPE && top[3] >= MIN_STD && top[1] >= MIN_SCORE && (!next || top[1] - next[1] >= MARGIN) ? top[0] : null);
+    const name = top && top[2] >= MIN_SHAPE && top[3] >= MIN_STD && top[1] >= MIN_SCORE && (!next || top[1] - next[1] >= MARGIN) ? top[0] : null;
+    if (sig) cache!.set(i, { sig, name });
+    out.push(name);
   }
   return out;
 }

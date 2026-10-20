@@ -7,13 +7,13 @@ import { useCtrl } from './hooks';
 import { NumberInput } from './NumberInput';
 
 /** The rate to plan with: the last 10 minutes when there is one, else the whole session. */
-function useRate() {
+export function useRate() {
   const c = useCtrl(), { hr, r10 } = c.rates();
   return r10 || hr || null;
 }
 
 /** Level, EXP into it, and the saved target level for the character on screen. */
-function useGoal() {
+export function useGoal() {
   const c = useCtrl(), s = c.sess ?? c.lastFinished, id = c.identity;
   const level = s?.level ?? id.level ?? null, t = c.sess ? c.tracker : null, levelExp = level ? expToNext(level) : null;
   // EXP into the level: the read number, but never more than the level takes; if it disagrees with the bar's % (a

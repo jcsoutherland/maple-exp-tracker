@@ -1,5 +1,6 @@
 import { itemByName } from '../core/data/osms';
-import { elapsed, potCost } from '../core/session';
+import type { Settings } from '../core/config';
+import { elapsed, potCost, type Session } from '../core/session';
 import { fmtK, fmtN } from '../core/util';
 import { useCtrl, useItemIcon } from './hooks';
 
@@ -10,6 +11,13 @@ interface Entry { key: string; name: string; got: number; used: number; value: n
  * Loot & profit for the session: mesos picked up, drops at their NPC sell value, potions at shop price, and the net
  * (also per hour), plus the ten biggest money makers and costs.
  */
+/** The session's net: mesos plus drops at NPC value, minus potions at shop price; and the hours it took. */
+export function sessionNet(s: Session, settings: Settings) {
+  const pc = potCost(s, settings);
+  const loot = Object.entries(s.drops).reduce((a, [name, d]) => a + (itemByName(name)?.price ?? 0) * d.qty, 0);
+  return { net: s.mesos + loot - pc.total, loot, pots: pc.total, hrs: (s.end ? s.activeMs : elapsed(s)) / 3.6e6 };
+}
+
 export function LootProfit() {
   const c = useCtrl(), s = c.sess ?? c.lastFinished;
   if (!s) return null;
