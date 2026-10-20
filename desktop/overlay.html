@@ -18,6 +18,8 @@
   .ov-name{font-weight:700;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
   button{-webkit-app-region:no-drag;background:var(--panel2);color:var(--tx);border:1px solid var(--line);border-radius:99px;padding:1px 7px;font:inherit;font-size:10px;line-height:16px;cursor:pointer}
   button:hover:not(:disabled){border-color:var(--acc)}button:disabled{opacity:.4;cursor:default}
+  .upd{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:700}
+  .upd[hidden]{display:none}
   .x{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0}
   .x:hover{border-color:var(--bad);color:var(--bad)}
   .pp{display:inline-flex;align-items:center;justify-content:center;width:26px;height:20px;padding:0}
@@ -46,6 +48,7 @@
     <span class="ov-dot" id="dot"></span><b>EXP TRACKER</b><span class="ov-time" id="time"></span>
     <span class="sp"></span><span class="ov-name" id="name"></span>
     <button id="pp" class="live pp" title="Start session"></button>
+    <button id="upd" class="upd" hidden>Update</button>
     <button id="more" title="Menu">⋯</button>
     <button id="close" class="x" title="Close the overlay"><svg viewBox="0 0 10 10" width="9" height="9"><path d="M2 2 8 8M8 2 2 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
   </div>
@@ -64,6 +67,8 @@
   const text = (el, v) => { el.textContent = v ?? ''; };
   $('more').onclick = () => window.overlay.menu();
   $('close').onclick = () => window.overlay.close();
+  $('upd').onclick = () => window.overlay.installUpdate();
+  window.overlay.onUpdate(v => { $('upd').hidden = false; $('upd').title = 'Version ' + v + ' is ready: click to restart into it (it also installs when you quit)'; });
   $('here').onclick = () => window.overlay.openTracker();
   // one button, play or pause by state; the same two icons as the website's overlay
   const ICON = {

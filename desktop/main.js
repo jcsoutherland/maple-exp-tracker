@@ -5,6 +5,7 @@ const { app, BrowserWindow, Menu, desktopCapturer, dialog, ipcMain, screen, sess
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
+const { autoUpdater } = require('electron-updater');
 
 /** must match DESKTOP_PORT in the website (src/app/desktopLink.ts) */
 const PORT = 47821;
@@ -48,6 +49,7 @@ function createOverlay() {
   overlay.setAlwaysOnTop(true, 'screen-saver');
   overlay.setVisibleOnAllWorkspaces(true);
   overlay.loadFile(path.join(__dirname, 'overlay.html'));
+  overlay.webContents.on('did-finish-load', () => { if (updateReady) overlay.webContents.send('update', updateReady); });
   const remember = () => { if (overlay && !overlay.isDestroyed()) { const b = overlay.getBounds(); saveState({ x: b.x, y: b.y, w: b.width, h: b.height }); } };
   overlay.on('moved', remember); overlay.on('resized', remember);
   overlay.on('closed', () => { overlay = null; app.quit(); });
@@ -108,6 +110,8 @@ function menu() {
     { label: 'Always on top', type: 'checkbox', checked: overlay?.isAlwaysOnTop() ?? true, click: i => overlay?.setAlwaysOnTop(i.checked, 'screen-saver') },
     { label: 'Reset size and position', click: () => { const a = screen.getPrimaryDisplay().workArea; overlay?.setBounds({ x: a.x + a.width - 400, y: a.y + 20, width: 380, height: 126 }); } },
     { type: 'separator' },
+    ...(updateReady ? [{ label: `Restart to update to ${updateReady}`, click: installUpdate }] : []),
+    { label: `Version ${app.getVersion()}`, enabled: false },
     { label: 'Close the overlay', click: confirmClose },
   ]);
 }
@@ -127,8 +131,26 @@ async function confirmClose() {
 
 ipcMain.on('menu', () => menu().popup({ window: overlay }));
 ipcMain.on('close', confirmClose);
+ipcMain.on('install-update', installUpdate);
 ipcMain.on('cmd', (_e, cmd) => { if (shown && ['start', 'pause'].includes(cmd)) shown.send(JSON.stringify({ type: 'cmd', cmd })); });
 ipcMain.on('open-tracker', openTracker);
+
+/**
+ * Updates itself from the GitHub releases: checked at start and every 6 hours, downloaded in the background, installed
+ * when the app quits, or straight away from the overlay's Update button. No re-download from the website needed.
+ */
+let updateReady = null;
+function startUpdates() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-downloaded', info => { updateReady = info.version; overlay?.webContents.send('update', updateReady); });
+  autoUpdater.on('error', () => { /* offline, or GitHub busy: try again later */ });
+  const check = () => autoUpdater.checkForUpdates().catch(() => undefined);
+  check();
+  setInterval(check, 6 * 3600_000);
+}
+function installUpdate() { if (updateReady) autoUpdater.quitAndInstall(false, true); }
 
 /** Bring the overlay to the front (opened again from the website, or a second launch). */
 function showOverlay() {
@@ -149,6 +171,6 @@ function registerProtocol() {
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', showOverlay);
-  app.whenReady().then(() => { registerProtocol(); startLink(); handleCapture(); createOverlay(); });
+  app.whenReady().then(() => { registerProtocol(); startLink(); handleCapture(); createOverlay(); startUpdates(); });
   app.on('window-all-closed', () => app.quit());
 }

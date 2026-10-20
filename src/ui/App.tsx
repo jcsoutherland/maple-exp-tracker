@@ -45,7 +45,7 @@ export function App() {
   const getApp = async () => {
     if (opening) return;
     if (await launch()) { setNoApp(false); return; }
-    toast("The desktop overlay isn't installed (or is older than 1.3.0): downloading the installer");
+    toast("The desktop overlay isn't installed: downloading the installer (once installed, it keeps itself up to date)");
     downloadApp();
   };
   const [tab, setTab] = useState<Tab>('live');

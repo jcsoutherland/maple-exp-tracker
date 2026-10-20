@@ -1,15 +1,16 @@
 {
   "name": "maple-tracker-overlay",
   "productName": "MS Classic Tracker Overlay",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
-  "description": "Always-on-top overlay for the MS Classic Training Tracker (mapleclassic.training): linked to the website, or tracking on its own",
+  "description": "MS Classic Tracker Overlay",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win nsis --publish never"
   },
   "dependencies": {
+    "electron-updater": "6.3.9",
     "ws": "8.18.0"
   },
   "devDependencies": {
@@ -51,6 +52,13 @@
       "artifactName": "MapleTrackerOverlay-Setup.exe",
       "deleteAppDataOnUninstall": false,
       "include": "build/installer.nsh"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "jcsoutherland",
+        "repo": "maple-exp-tracker"
+      }
+    ]
   }
 }

@@ -6,5 +6,7 @@ contextBridge.exposeInMainWorld('overlay', {
   cmd: c => ipcRenderer.send('cmd', c),
   menu: () => ipcRenderer.send('menu'),
   close: () => ipcRenderer.send('close'),
+  onUpdate: fn => ipcRenderer.on('update', (_e, v) => fn(v)),
+  installUpdate: () => ipcRenderer.send('install-update'),
   openTracker: () => ipcRenderer.send('open-tracker'),
 });
