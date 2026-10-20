@@ -26,6 +26,9 @@ const MIN_SHAPE = 0.65, MIN_SCORE = 0.5, MARGIN = 0.2;
 const MIN_STD = 40;
 /** how much a colour cast off from the icon's lowers its score */
 const CAST_WEIGHT = 2;
+/** a cast this small is forgiven: video compression shifts a bright icon's colours that much (a captured Lemon lost 0.2
+ *  to it), while look-alikes differ by far more (Orange in a Red slot: about 0.27) */
+const CAST_FREE = 0.1;
 
 /** The icons of every recovery item, at the HUD's scale (1 at Ideal ratio), with the overdrawn corners left out. */
 export async function loadPotionIcons(scale = 1, smooth = scale !== 1): Promise<IconTpl[]> {
@@ -109,7 +112,7 @@ export function scanSlots(src: FrameSource, r: Region, cols: number, rows: numbe
         // shape alone can't tell look-alikes apart (Red and Orange Potion): the icon's colour cast must match too, though
         // not its brightness (a slot on cooldown is drawn darker)
         const px = n / 3, m = (dr + dg + db) / 3, cast = (Math.abs(dr - m) + Math.abs(dg - m) + Math.abs(db - m)) / px / 255;
-        const sc = ncc - CAST_WEIGHT * cast;
+        const sc = ncc - CAST_WEIGHT * Math.max(0, cast - CAST_FREE);
         if (sc > best) { best = sc; shape = ncc; std = Math.sqrt(vb / n); }
       }
       if (best > (scores.get(ic.name)?.sc ?? -Infinity)) scores.set(ic.name, { sc: best, shape, std });
