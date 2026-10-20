@@ -124,7 +124,17 @@ function follow(s: Float32Array, first: { d: number; score: number; x: number; y
   const digits = [first.d];
   let x = first.x + advance(first.d, adv), y = first.y, min = first.score;
   while (digits.length < 4) {
-    const b = bestDigit(s, x, y, glyphs[Math.min(digits.length, glyphs.length - 1)], 1, NEXT_SCORE);
+    // the digit's own position's templates first; failing those, any position's. At the Ideal UI ratio the font isn't
+    // scaled, so a digit looks the same wherever it sits, and a position's set can lack a digit it never saw in
+    // training (a 3rd-place 9: "209" read as 20)
+    const own = Math.min(digits.length, glyphs.length - 1);
+    let b = bestDigit(s, x, y, glyphs[own], 1, NEXT_SCORE);
+    // (and a pixel further either way: at Ideal ratio the spacing rounds differently, so by the 3rd digit it's off by 2)
+    if (!b) for (let k = 1; k < glyphs.length; k++) {
+      if (k === own) continue;
+      const o = bestDigit(s, x, y, glyphs[k], 2, NEXT_SCORE);
+      if (o && (!b || o.score > b.score)) b = o;
+    }
     if (!b) break;
     digits.push(b.d); min = Math.min(min, b.score);
     x = b.x + advance(b.d, adv); y = b.y;
