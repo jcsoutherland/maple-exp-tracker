@@ -4,6 +4,17 @@ import * as store from '../core/storage';
 import { fmtHM, fmtK, fmtN } from '../core/util';
 import { DropTable } from './DropsTab';
 import { toast, useCtrl } from './hooks';
+import { appSeen } from '../app/desktopLink';
+
+/** For players with the desktop overlay: sessions it tracked come in when it's open alongside this page. */
+function SyncNote() {
+  if (!appSeen()) return null;
+  return (
+    <div className="note" style={{ marginBottom: 12 }}>
+      <span>Using the desktop overlay and don't see a session? Open the overlay while this page is open and it syncs by itself.</span>
+    </div>
+  );
+}
 
 /** History is only re-read from storage when a session is saved/imported/deleted (historyVersion changes). */
 export function HistoryTab() {
@@ -16,7 +27,7 @@ export function HistoryTab() {
 
   const [clearArmed, setClearArmed] = useState(false);
   const names = [...new Set(all.map(s => s.char))];
-  if (!names.length) return <div className="card mut">No sessions yet.</div>;
+  if (!names.length) return <section><SyncNote /><div className="card mut">No sessions yet.</div></section>;
   const cur = sel && names.includes(sel) ? sel : names[names.length - 1];
   const list = all.filter(s => s.char === cur).sort((a, b) => b.start - a.start), ch = chars[cur] || {};
   const totExp = list.reduce((a, s) => a + s.exp, 0), totMs = list.reduce((a, s) => a + s.activeMs, 0), totMeso = list.reduce((a, s) => a + s.mesos, 0);
@@ -46,6 +57,7 @@ export function HistoryTab() {
 
   return (
     <section>
+      <SyncNote />
       <div className="row" style={{ marginBottom: 12 }}>
         <div className="ctabs">{names.map(n => <button key={n} className={n === cur ? 'act' : ''} onClick={() => setSel(n)}>{n}</button>)}</div>
         <span className="sp" />

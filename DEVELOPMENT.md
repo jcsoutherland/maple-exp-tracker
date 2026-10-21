@@ -34,7 +34,7 @@ dev/           replay / debug harnesses (drive the real app in headless Chrome),
 prototype/     the original single-file version, kept for reference
 ```
 
-`src/core` has no React dependency, so a desktop shell (Electron) can reuse it later.
+`src/core` has no React dependency. `desktop/` is the overlay app (Electron), described below.
 
 ## How it reads the screen
 
@@ -65,6 +65,25 @@ To keep traffic to those community sites tiny, the app doesn't download from the
 - publishes them with the site at `/data/` (kept between runs in the Actions cache; never committed).
 
 The app reads `/data/` first and only asks the original site for a file the mirror doesn't have yet (`src/core/mirror.ts`); each device also keeps what it loaded in IndexedDB.
+
+## Desktop overlay app
+
+`desktop/` is a small Electron app: the overlay window (`overlay.html`), the main process (`main.js`: windows, menu, buttons, updates), the link (`link.js`), what it keeps on disk (`store.js`: `overlay.json`, `outbox.json`, `setup.json`, `overlay.log` in its userData folder) and the game lookup (`game.js`).
+
+- **Two kinds of tracker page connect to it** over a WebSocket on 127.0.0.1:47821 (only the site's own origins): the website in a browser, and the app's own tracker. The app's tracker is the live site loaded with `?desktop=1` in a hidden window. It tracks when the game is shared through Windows, and gets the MapleStory window with no picker.
+- **The website is home**: full stats, History and Setup. It connects by itself once the app has connected from that browser (`appSeen()`); before that, only on Pop-out or ⬇.
+- **Messages** (`src/app/desktopLink.ts` ↔ `desktop/link.js`):
+  - `stats`: the overlay's numbers, once a second.
+  - `setup`: from the website, its Setup as raw storage entries. The app saves it and passes it to its tracker.
+  - `saved`: from the app's tracker, a finished session. It goes into `outbox.json` straight away.
+  - `sessions` / `ack`: the outbox goes to the website, which merges it into History by id, and the app then drops it.
+  - `mirror`: the app's tracker's session, relayed to the website once a second. The controller's `remote` shows it, and the website's buttons then go back as `cmd`.
+  - `pendingIdle` / `idleResolved`: an auto-pause time set on the overlay while the app tracked. The website wins only if it changed its own since the last sync (`resolveIdle`).
+  - `diag`: diagnostics lines from the app's tracker, written to `overlay.log`.
+- **One tracker at a time**: the overlay shows the tracker with a running session, then a paused one, then one sharing. The website greys out sharing while the app tracks.
+- **Diagnostics**: `src/core/diaglog.ts` keeps a heartbeat a minute while sharing or tracking (each timer's last run, busy reads, capture, OCR, link), plus events and errors. Setup → Save diagnostics downloads it.
+- **Previewing the next version**: close the installed app, run `npm run dev`, then `npm run overlay`. Run from the project, the app's tracker loads localhost:5173 (or `MAPLE_SITE`), its files go to a separate "(preview)" folder (or `OVERLAY_USER_DATA`), it never updates itself, and ⋯ shows "(preview)" by the version. Dev hooks `OVERLAY_SHOT`, `OVERLAY_TEST_START` and `OVERLAY_TEST_CMD` are described in `main.js`.
+- **Releases**: the app's tracker loads the live site, so a site change the app depends on must deploy with the app release. Build with `npm run dist` and publish a release tagged `overlay-vX.Y.Z` with Setup.exe, its .blockmap, latest.yml, and the installer again as MapleTrackerOverlay.exe.
 
 ## Deploy
 

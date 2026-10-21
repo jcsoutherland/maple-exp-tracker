@@ -20,17 +20,19 @@ const C_EXP = '#199e70', C_MESO = '#c98500', C_RATE = '#3987e5';
 export function LiveTab() {
   const c = useCtrl();
   const s = c.sess, t = c.tracker, id = c.identity, loading = c.loading;
-  const { el, hr, r10 } = c.rates();
-  const pc = s ? potCost(s, c.settings) : null;
+  // with no session running, the last one stays up for review until the next one starts
+  const last = s ? null : c.lastFinished, d = s ?? last;
+  const { el, hr, r10 } = last ? { el: last.activeMs, hr: last.activeMs > 60000 ? last.exp / (last.activeMs / 3.6e6) : null, r10: null } : c.rates();
+  const pc = d ? potCost(d, c.settings) : null;
   const rate = r10 || hr;
   // features switched off on the Setup tab leave the dashboard
   const on = (f: Feature) => featureOn(c.settings, f);
   const toGo = t?.total && t.exp != null ? t.total - t.exp : null;
-  const mesoHr = s && el > 60000 ? s.mesos / (el / 3.6e6) : null;
+  const mesoHr = d && el > 60000 ? d.mesos / (el / 3.6e6) : null;
   const xpPct = Math.max(0, Math.min(100, t?.pct ?? 0)), xpText = t?.pct != null ? `EXP ${t.pct.toFixed(2)}%` : 'EXP —';
 
   // series from the 30 s timeline plus the live point
-  const tl = useMemo(() => (s ? [...s.timeline, [el / 60000, s.exp, s.mesos] as [number, number, number]] : []), [s, el, s?.exp, s?.mesos]);
+  const tl = useMemo(() => (d ? [...d.timeline, ...(s ? [[el / 60000, s.exp, s.mesos] as [number, number, number]] : [])] : []), [d, s, el, s?.exp, s?.mesos]);
   const expPts = tl.map(p => [p[0], p[1]] as [number, number]);
   const mesoPts = tl.map(p => [p[0], p[2] ?? 0] as [number, number]);
   const ratePts = tl.flatMap((p, i) => {
@@ -98,19 +100,20 @@ export function LiveTab() {
         <div className="sheet-right">
         <SessionBar />
         <div className="sheet-stats">
-          <Stat k="Session" v={fmtDur(el)} s={s ? (s.paused ? 'paused' : 'since ' + new Date(s.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) : ''} />
-          {on('expGain') && <Stat k="EXP gained" v={fmtN(s?.exp ?? 0)} s={s?.levelUps ? `${s.levelUps} level-up${s.levelUps > 1 ? 's' : ''} 🎉` : ''} accent={C_EXP}
-            onSub={s?.levelUps && s.level ? () => celebrateLevel(s.level! - 1, s.level!) : undefined} subTitle="Click to see the level-up animation again" />}
+          <Stat k={last ? 'Last session' : 'Session'} v={fmtDur(el)} s={s ? (s.paused ? 'paused' : 'since ' + new Date(s.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+            : last ? 'ended ' + new Date(last.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''} />
+          {on('expGain') && <Stat k="EXP gained" v={fmtN(d?.exp ?? 0)} s={d?.levelUps ? `${d.levelUps} level-up${d.levelUps > 1 ? 's' : ''} 🎉` : ''} accent={C_EXP}
+            onSub={d?.levelUps && d.level ? () => celebrateLevel(d.level! - 1, d.level!) : undefined} subTitle="Click to see the level-up animation again" />}
           {on('expRate') && <Stat k="EXP / hr" v={hr != null ? fmtK(hr) : '—'} s={'last 10 min ' + (r10 != null ? fmtK(r10) : '—')} accent={C_RATE} />}
-          {on('mesos') && <Stat k="Mesos" v={fmtN(s?.mesos ?? 0)} s={(mesoHr != null ? fmtK(mesoHr) : '—') + ' / hr'} accent={C_MESO} />}
+          {on('mesos') && <Stat k="Mesos" v={fmtN(d?.mesos ?? 0)} s={(mesoHr != null ? fmtK(mesoHr) : '—') + ' / hr'} accent={C_MESO} />}
           {on('potions') && <Stat k="Potions" v={pc?.total ? '-' + fmtN(pc.total) : '0'} s={pc ? `${fmtN(pc.items.reduce((a, i) => a + i.count, 0))} used` : ''} />}
-          {on('mesos') && <Stat k="Net mesos" v={s && pc ? fmtN(s.mesos - pc.total) : '0'} s="after potions" />}
+          {on('mesos') && <Stat k="Net mesos" v={d && pc ? fmtN(d.mesos - pc.total) : '0'} s="after potions" />}
           {on('potions') && <div className="stat">
             <div className="k">HP / MP</div>
             <div className="v sm">{t ? <><span style={{ color: 'var(--hp)' }}>{t.hp.cur ?? '?'}/{t.hp.max ?? '?'}</span> · <span style={{ color: 'var(--mp)' }}>{t.mp.cur ?? '?'}/{t.mp.max ?? '?'}</span></> : '—'}</div>
             <div className="s">&nbsp;</div>
           </div>}
-          {on('expLost') && <Stat k="EXP lost" v={s?.expLost ? '-' + fmtN(s.expLost) : '0'} s={s?.deaths ? `${s.deaths} death${s.deaths > 1 ? 's' : ''} · net ${fmtN(s.exp - s.expLost)}` : 'no deaths'} bad={!!s?.expLost} />}
+          {on('expLost') && <Stat k="EXP lost" v={d?.expLost ? '-' + fmtN(d.expLost) : '0'} s={d?.deaths ? `${d.deaths} death${d.deaths > 1 ? 's' : ''} · net ${fmtN(d.exp - d.expLost)}` : 'no deaths'} bad={!!d?.expLost} />}
         </div>
         {on('potions') && <PotionPanel />}
         {(on('levelGoal') || on('kills')) && <div className="sheet-extra">
@@ -132,8 +135,8 @@ export function LiveTab() {
           <table>
             <thead><tr><th>Map</th><th className="n">EXP</th><th className="n">%</th></tr></thead>
             <tbody>
-              {s && Object.keys(s.maps).length ? Object.entries(s.maps).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
-                <tr key={k} className={v < MAP_MIN_EXP ? 'dim' : ''}><td>{k}</td><td className="n">{fmtN(v)}</td><td className="n">{(v / (s.exp || 1) * 100).toFixed(1)}</td></tr>
+              {d && Object.keys(d.maps).length ? Object.entries(d.maps).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+                <tr key={k} className={v < MAP_MIN_EXP ? 'dim' : ''}><td>{k}</td><td className="n">{fmtN(v)}</td><td className="n">{(v / (d.exp || 1) * 100).toFixed(1)}</td></tr>
               )) : <tr><td colSpan={3} className="mut">No EXP yet.</td></tr>}
             </tbody>
           </table>

@@ -1,10 +1,12 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Controller } from './app/controller';
+import { captureErrors } from './core/diaglog';
 import { App } from './ui/App';
 import { CtrlContext } from './ui/hooks';
 import './ui/styles.css';
 
+captureErrors();
 const ctrl = new Controller();
 window.addEventListener('beforeunload', () => ctrl.persistNow());
 // exposed for the headless replay harness and console debugging

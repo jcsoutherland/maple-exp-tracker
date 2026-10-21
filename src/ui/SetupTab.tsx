@@ -5,6 +5,7 @@ import { attachSelect, type FracRect } from './selectable';
 import { toast, useCtrl } from './hooks';
 import { NumberInput } from './NumberInput';
 import { DESKTOP_DOWNLOAD, inDesktopApp } from '../app/desktopLink';
+import { downloadDiag } from '../core/diaglog';
 
 export function SetupTab() {
   const c = useCtrl();
@@ -122,6 +123,7 @@ export function SetupTab() {
         </div>
       </div>
       <DesktopOverlayCard />
+      <DiagnosticsCard />
       <FeatureSwitches />
       <div className="card">
         <h3>Read schedule &amp; detection</h3>
@@ -170,7 +172,7 @@ function FeatureSwitches() {
   );
 }
 
-/** The desktop overlay app: download it, and switch on sending it the overlay's numbers. */
+/** The desktop overlay app: what it is, how to get it, and whether it's linked. */
 function DesktopOverlayCard() {
   const c = useCtrl(), st = c.desktop.state, inApp = inDesktopApp();
   return (
@@ -178,23 +180,30 @@ function DesktopOverlayCard() {
       <h3>Desktop overlay app</h3>
       <div className="mut small" style={{ marginBottom: 10, maxWidth: 720 }}>
         The overlay as its own small Windows app: borderless, always on top of the game, no address bar. Drag it by its top line;
-        right-click it for options. It shows this page's numbers, or tracks on its own without a browser (right-click → <b>Open the
-        tracker here</b>). {!inApp && <>Download it with the <a href={DESKTOP_DOWNLOAD}>⬇ button</a> next to Pop-out overlay. </>}It installs in a few seconds, just for you (no admin), with a Start menu and desktop shortcut. Windows may warn that it's
-        unrecognised (the app isn't code-signed): choose <b>More info → Run anyway</b>.
+        its <b>⋯</b> menu has the options. It can share the game through Windows and track without this page; your sessions then
+        come into History here, and this page shows the session live while it runs. Your Setup here is what the app uses.{' '}
+        {!inApp && <>Download it with the <a href={DESKTOP_DOWNLOAD}>⬇ button</a> next to Pop-out overlay. </>}It installs in a few
+        seconds, just for you (no admin), with a Start menu and desktop shortcut. Windows may warn that it's unrecognised (the app
+        isn't code-signed): choose <b>More info → Run anyway</b>.
       </div>
-      <div className="row">
-        <label className="featsw" title={inApp ? 'Always on inside the app' : 'Sends the overlay numbers to the app on this computer only (127.0.0.1)'}>
-          <input type="checkbox" role="switch" checked={inApp || c.settings.desktopOverlay} disabled={inApp} onChange={e => c.updateSettings({ desktopOverlay: e.target.checked })} />
-          <span className="sw" aria-hidden="true" />
-          <span>Send stats to the desktop overlay</span>
-        </label>
-        {(inApp || c.settings.desktopOverlay) && (
-          <span className={'pill' + (st === 'connected' ? ' on' : ' warn')}>{st === 'connected' ? 'Overlay connected' : 'Overlay app not running'}</span>
-        )}
-      </div>
-      {!inApp && c.settings.desktopOverlay && st !== 'connected' && (
-        <div className="mut small" style={{ marginTop: 8 }}>Start the app; it connects within a few seconds. If Chrome asks to let this site reach apps on your device, choose <b>Allow</b>.</div>
+      <span className={'pill' + (st === 'connected' ? ' on' : '')}>{st === 'connected' ? 'Overlay app linked' : 'Overlay app not running'}</span>
+      {!inApp && st !== 'connected' && (
+        <div className="mut small" style={{ marginTop: 8 }}>Open the app and it links within a few seconds. If Chrome asks to let this site reach apps on your device, choose <b>Allow</b>.</div>
       )}
+    </div>
+  );
+}
+
+/** A file with what the tracker did lately, to share when something goes wrong. */
+function DiagnosticsCard() {
+  return (
+    <div className="card">
+      <h3>Something not working?</h3>
+      <div className="mut small" style={{ marginBottom: 10, maxWidth: 720 }}>
+        The tracker keeps a short log on this computer: once a minute how each screen reading is doing, plus session events
+        and errors from the last few hours. No pictures of your game, and it never leaves your computer unless you share the file.
+      </div>
+      <button onClick={downloadDiag}>Save diagnostics</button>
     </div>
   );
 }

@@ -23,11 +23,11 @@ const ICONS: Record<Tab, JSX.Element> = {
 
 export function App() {
   const c = useCtrl();
-  // Pop-out overlay: the desktop app when "Send stats to the desktop overlay" is on and the app is installed (it has
-  // connected from this browser before), else the browser pop-out on the same click (which has to come straight from the
-  // click, so it can't wait to find out). It never downloads. The ⬇ button always opens the app, or downloads it.
+  // Pop-out overlay: the desktop app when it's installed (it has connected from this browser before), else the browser
+  // pop-out on the same click (which has to come straight from the click, so it can't wait to find out). It never
+  // downloads. The ⬇ button always opens the app, or downloads it.
   // decided when clicked: whether the app has been seen can change without this header redrawing
-  const wantApp = () => c.settings.desktopOverlay && !inDesktopApp() && (c.desktop.state === 'connected' || appSeen());
+  const wantApp = () => !inDesktopApp() && (c.desktop.state === 'connected' || appSeen());
   const [opening, setOpening] = useState(false);
   const [noApp, setNoApp] = useState(false);
   const launch = async () => {
@@ -72,7 +72,7 @@ export function App() {
         {!inDesktopApp() && (
           <a className="iconbtn" href={DESKTOP_DOWNLOAD} aria-label="Download the overlay as a program"
             onClick={e => { e.preventDefault(); void getApp(); }}
-            title="Desktop overlay app: no address bar, always on top of the game. Opens it if it's installed, otherwise downloads it (then switch on Setup → Desktop overlay app).">
+            title="Desktop overlay app: no address bar, always on top of the game. Opens it if it's installed, otherwise downloads it .">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v11" /><path d="m7 10 5 5 5-5" /><path d="M5 20h14" /></svg>
           </a>
         )}
@@ -102,9 +102,18 @@ export function App() {
   );
 }
 
-/** Sends the overlay's numbers to the desktop overlay app while it's connected (on every render: about once a second). */
+/**
+ * Sends the overlay's numbers to the desktop overlay app while it's connected (on every render: about once a second).
+ * Inside the app, the tracker's session goes too, for the website to show live; while the website shows that session,
+ * its numbers are the app's own and only say so.
+ */
 function DesktopFeed() {
-  const c = useCtrl(), o = useOverlayStats();
-  useEffect(() => { c.desktop.send(o); });
+  const c = useCtrl(), o = useOverlayStats(), lastMirror = useRef(0);
+  useEffect(() => {
+    c.desktop.send(c.remote ? { ...o, mirroring: true } : o);
+    if (!inDesktopApp() || Date.now() - lastMirror.current < 900) return;
+    lastMirror.current = Date.now();
+    c.desktop.sendMirror(c.mirrorSnapshot());
+  });
   return null;
 }

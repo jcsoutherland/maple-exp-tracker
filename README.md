@@ -42,15 +42,31 @@ Each potion's count is then read live: when it goes down you drank one, and poti
 ## Tips
 
 - **Auto-pause**: after 45 seconds without EXP or loot the session pauses itself (idle time isn't counted) and resumes the moment you fight again. Change the time on the Live tab (0 = off).
-- **⧉ Pop-out overlay** opens a small always-on-top window with your key stats, to keep next to the game.
-- **⏹ Stop capture** stops sharing your game window.
+- **⧉ Pop-out overlay** opens a small always-on-top window with your key stats, to keep next to the game (or the desktop overlay app, once you have it).
+- **⏹ Stop sharing** stops sharing your game window. A session that's running is ended and saved to History first.
+- After a session ends, its numbers stay on the Live tab until you start the next one.
 - Number boxes: type a value and press Enter, or click a box and use the mouse wheel.
 - The 🎲 on your character picks a different look; your gear always matches your class and level.
 - Your history lives in this browser. If you clear your browser's site data it's gone, so use **Export JSON** on the History tab to keep a backup.
 
+## Desktop overlay app
+
+The ⬇ button next to Pop-out overlay gets the overlay as its own small Windows app: always on top of the game, with no address bar.
+
+- **Start session (▶)** shares the game and starts tracking in one click. It asks whether to share **With Windows** (the app reads the game, no browser needed) or **In the browser** (this website reads it).
+- **⏸ / ▶** pause and resume, and the red **■** ends the session and saves it. The game stays shared, ready for the next one.
+- **Super compact**: the small button in the bottom-right corner shrinks the overlay to one row with just EXP/h, time to level and pause/resume. The same button (or right-click → ⋯ menu) brings everything back, and the overlay remembers which you used last.
+- The **⋯** menu has **Open full stats** (this website), **Share game window** or **Stop sharing**, auto-pause, always on top, tips and more.
+- **Your full stats and history are on this website.** Sessions tracked through Windows come into History by themselves whenever the app and this page are open at the same time. While some are waiting, ⋯ shows **Sync stats**.
+- While the app tracks, this page shows the same session live, and its buttons work on it too.
+- The app uses your Setup from this website (open the website once while the app is running and it copies it over). Change Setup here, and the app picks it up the next time both are open.
+
 ## Something not right?
 
+- **Save diagnostics** (Setup tab) saves a small log of what the tracker did over the last few hours. Share it when you report a problem.
+
 - **Nothing is being read**: make sure you shared the game window (not a browser tab or your whole screen) and that the game isn't minimized.
+- **The overlay says MapleStory is minimized**: Windows can't share a minimized window. Bring the game back up and press Start session again.
 - **A number is read wrong**: run **Setup → Test OCR** and check that box sits on the right spot.
 - **Drops missed in a busy party**: the pickup log can scroll faster than it can be read; solo and small parties are the most accurate.
 

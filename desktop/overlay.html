@@ -6,118 +6,208 @@
 <title>EXP Tracker</title>
 <style>
   /* the website's overlay (src/ui/styles.css .ov), as a window of its own */
-  :root{--tx:#eeecf8;--mut:#9c97b9;--acc:#8b7bff;--warm:#ffb257;--exp:#a6e05a;--ok:#5ccf86;--bad:#ff6b78;--panel2:#221f3c;--line:#2f2b50}
+  :root{--tx:#eeecf8;--mut:#9c97b9;--acc:#8b7bff;--warm:#ffb257;--exp:#a6e05a;--ok:#5ccf86;--bad:#ff6b78;--panel2:#221f3c;--line:#2f2b50;--tip:#7d78a0}
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:#13112a;overflow:hidden;user-select:none}
+  html,body{margin:0;background:#13112a;overflow:hidden;user-select:none}
   body{font:12px/1.4 system-ui,Segoe UI,sans-serif;color:var(--tx)}
-  .ov{height:100vh;display:flex;flex-direction:column;gap:8px;padding:8px 10px 10px;background:linear-gradient(#1d1a38,#13112a);font-variant-numeric:tabular-nums;border:1px solid var(--line)}
-  .ov-head{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.6px;-webkit-app-region:drag;cursor:move}
+  .ov{display:flex;flex-direction:column;gap:6px;padding:8px 10px;background:linear-gradient(#1d1a38,#13112a);font-variant-numeric:tabular-nums;border:1px solid var(--line)}
+  .ov-head{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.6px;white-space:nowrap;-webkit-app-region:drag;cursor:move}
   .ov-head b{color:var(--acc)}
   .ov-time{color:var(--mut);letter-spacing:0}
   .sp{flex:1}
-  .ov-name{font-weight:700;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
-  button{-webkit-app-region:no-drag;background:var(--panel2);color:var(--tx);border:1px solid var(--line);border-radius:99px;padding:1px 7px;font:inherit;font-size:10px;line-height:16px;cursor:pointer}
+  .ov-name{font-weight:700;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;max-width:110px}
+  button{-webkit-app-region:no-drag;background:var(--panel2);color:var(--tx);border:1px solid var(--line);border-radius:99px;padding:0;font:inherit;font-size:10px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;height:20px;min-width:24px;white-space:nowrap;flex:none}
   button:hover:not(:disabled){border-color:var(--acc)}button:disabled{opacity:.4;cursor:default}
-  .upd{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:700}
-  .upd[hidden],.updating[hidden]{display:none}
-  .notice{position:fixed;left:10px;right:10px;bottom:8px;padding:5px 8px;border-radius:8px;background:#2a1f12;border:1px solid rgba(255,178,87,.4);color:var(--warm);font-size:11px}
-  .notice[hidden]{display:none}
-  .updating{color:var(--warm);font-size:10px;letter-spacing:0;white-space:nowrap}
-  .x{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0}
+  .pp.go{gap:4px;padding:0 10px;font-size:10.5px;font-weight:700;background:var(--acc);border-color:var(--acc);color:#fff}
   .x:hover{border-color:var(--bad);color:var(--bad)}
-  .pp.wide{width:auto;gap:4px;padding:0 9px;font-size:10.5px;font-weight:700}
-  .pp.go{background:var(--acc);border-color:var(--acc);color:#fff}
-  .pp{display:inline-flex;align-items:center;justify-content:center;width:26px;height:20px;padding:0}
-  .ov-dot{width:7px;height:7px;border-radius:99px;background:var(--mut)}
+  .upd{padding:0 8px;background:var(--acc);border-color:var(--acc);color:#fff;font-weight:700}
+  [hidden]{display:none!important}
+  .ov-dot{width:7px;height:7px;border-radius:99px;background:var(--mut);flex:none}
   .ov-dot.on{background:var(--ok);box-shadow:0 0 6px var(--ok)}.ov-dot.paused{background:var(--warm)}
-  .ov-bar{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}
+  .ov-bar{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:10px;background:var(--panel2);border:1px solid var(--line)}
   .ov-lv{display:flex;align-items:baseline;gap:2px;padding:1px 7px;border-radius:7px;background:var(--acc);color:#fff;font-size:10px;font-weight:800;white-space:nowrap}
-  .ov-lv b{font-size:15px}
-  .ov-exp{position:relative;flex:1;height:20px;border-radius:6px;background:#0d0c1d;border:1px solid var(--line);overflow:hidden}
+  .ov-lv b{font-size:14px}
+  .ov-exp{position:relative;flex:1;height:18px;border-radius:6px;background:#0d0c1d;border:1px solid var(--line);overflow:hidden}
   .ov-exp div{position:absolute;inset:0 auto 0 0;background:linear-gradient(#c3f07c,var(--exp))}
-  .ov-exp span{position:relative;display:block;text-align:center;font-size:11px;line-height:18px;font-weight:700;text-shadow:0 1px 2px #000}
+  .ov-exp span{position:relative;display:block;text-align:center;font-size:11px;line-height:16px;font-weight:700;text-shadow:0 1px 2px #000}
   .ov-exp i{color:#ffd76b;font-style:italic}
-  .ov-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:6px 8px}
+  .ov-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:4px 8px}
   .ov-stats div{display:flex;flex-direction:column;min-width:0}
-  .ov-stats span{color:var(--mut);font-size:9.5px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
-  .ov-stats b{font-size:15px;white-space:nowrap}
+  .ov-stats span{color:var(--mut);font-size:9.5px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ov-stats b{font-size:14px;white-space:nowrap}
   .pos{color:var(--exp)}.neg{color:var(--bad)}
-  .wait{display:none;flex:1;flex-direction:column;justify-content:center;gap:6px;color:var(--mut);font-size:11px}
-  .wait button{align-self:flex-start;font-size:11px;padding:2px 10px}
-  .waiting .wait{display:flex}.waiting .live{display:none}
+  .tip{font-size:10px;line-height:13px;height:13px;padding-right:24px;color:var(--tip);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity .6s}
+  /* always its full width, so its height is the same however wide the window is (e.g. right after compact) */
+  .ov{position:relative;width:418px}.ov.no-tips .ov-stats{padding-right:22px}
+  .tg{-webkit-app-region:no-drag;position:absolute;right:8px;bottom:7px;width:18px;height:16px;min-width:0;border-radius:5px;color:var(--mut)}
+  /* super compact: one row with the status dot, EXP/h, time to level, play / pause and the expand button */
+  .mini{display:inline-flex;align-items:center;gap:10px;padding:5px 7px;background:#1a1734;border:1px solid var(--line);font-variant-numeric:tabular-nums;-webkit-app-region:drag;cursor:move;white-space:nowrap}
+  .mini .v{display:flex;flex-direction:column;min-width:52px}.mini .v span{color:var(--mut);font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;line-height:1.1}.mini .v b{font-size:15px;line-height:1.15}
+  .mini .tg{position:static;height:18px}
+  .mini .pp.go{padding:0;min-width:24px}
+  body.compact .ov,body:not(.compact) .mini{display:none}
+  .tip.warm{color:#c99458}.tip.fade{opacity:0}
+  .updating{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#2a2357;z-index:5}
+  .updating .track{width:220px;height:6px;border-radius:99px;background:#13112a;overflow:hidden}
+  .updating .fill{height:100%;width:0;background:var(--acc);transition:width .3s}
+  .updating small{color:#b9b3e6;font-size:11px}
 </style>
 </head>
 <body>
-<div class="ov waiting" id="ov">
+<div class="ov" id="ov">
   <div class="ov-head">
     <span class="ov-dot" id="dot"></span><b>EXP TRACKER</b><span class="ov-time" id="time"></span>
     <span class="sp"></span><span class="ov-name" id="name"></span>
     <button id="pp" class="pp"></button>
-    <button id="stop" class="pp" title="End the session (saved to History)" disabled><svg viewBox="0 0 10 10" width="10" height="10"><rect x="1.8" y="1.8" width="6.4" height="6.4" rx="1" fill="currentColor"/></svg></button>
-    <span id="updating" class="updating" hidden></span>
+    <button id="stop" title="End the session (saved to History)" disabled><svg viewBox="0 0 10 10" width="10" height="10"><rect x="1.5" y="1.5" width="7" height="7" rx="1.2" fill="#ff6b78"/></svg></button>
     <button id="upd" class="upd" hidden>Update</button>
     <button id="more" title="Menu">⋯</button>
     <button id="close" class="x" title="Close the overlay"><svg viewBox="0 0 10 10" width="9" height="9"><path d="M2 2 8 8M8 2 2 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
   </div>
-  <div class="wait">
-    <span>Press <b>▶ Start tracking</b> to share the MapleStory window through Windows (this app tracks it) or through your browser (the website).</span>
-  </div>
-  <div class="ov-bar live">
+  <div class="ov-bar">
     <span class="ov-lv">LV.<b id="lv">?</b></span>
     <div class="ov-exp"><div id="fill" style="width:0"></div><span><i>EXP</i> <span id="exp" style="display:inline">—</span></span></div>
   </div>
-  <div class="ov-stats live" id="stats"></div>
-  <div class="notice" id="notice" hidden></div>
+  <div class="ov-stats" id="stats"></div>
+  <div class="tip" id="tip"></div>
+  <button class="tg" id="shrink" title="Super compact: just EXP/h and time to level"><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5 10.5 1.5M7 2v3h3M5 7 1.5 10.5M5 10V7H2"/></svg></button>
+</div>
+<div class="mini" id="mini">
+  <span class="ov-dot" id="miniDot"></span>
+  <div class="v" id="miniRate"><span>EXP/h</span><b>—</b></div>
+  <div class="v" id="miniLevel"><span>To Lv. ?</span><b>—</b></div>
+  <button id="miniPp" class="pp"></button>
+  <button class="tg" id="grow" title="Show everything"><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5 10.5 1.5M7.5 1.5h3v3M5 7 1.5 10.5M1.5 7.5v3h3"/></svg></button>
+</div>
+<div class="updating" id="updating" hidden>
+  <div id="updText" style="font-size:13px">Updating…</div>
+  <div class="track"><div class="fill" id="updFill"></div></div>
+  <small>Back in a few seconds</small>
 </div>
 <script>
   const $ = id => document.getElementById(id);
   const text = (el, v) => { el.textContent = v ?? ''; };
+  // the window takes the size of what's shown: the full overlay (fixed width), or the compact row
+  let compact = false;
+  const fit = () => {
+    const box = (compact ? $('mini') : $('ov')).getBoundingClientRect();
+    window.overlay.fit(compact ? box.width : null, box.height);
+  };
+  function setCompact(on, save = true) {
+    compact = on;
+    document.body.classList.toggle('compact', on);
+    if (save) window.overlay.setCompact(on);
+    fit();
+  }
+  $('shrink').onclick = () => setCompact(true);
+  $('grow').onclick = () => setCompact(false);
   $('more').onclick = () => window.overlay.menu();
   $('close').onclick = () => window.overlay.close();
   $('upd').onclick = () => window.overlay.installUpdate();
-  let noticeT = 0;
-  window.overlay.onNotice(text => { const n = $('notice'); n.textContent = text; n.hidden = false; clearTimeout(noticeT); noticeT = setTimeout(() => { n.hidden = true; }, 7000); });
-  window.overlay.onUpdating(v => { $('updating').hidden = !v; $('updating').textContent = v ? 'Updating to ' + v + '…' : ''; });
-  window.overlay.onUpdate(v => { $('upd').hidden = false; $('upd').title = 'Version ' + v + ' is ready: click to restart into it (it also installs when you quit)'; });
-  // one button, play or pause by state; the same two icons as the website's overlay
+  document.addEventListener('contextmenu', e => { e.preventDefault(); window.overlay.menu(); });
+
   const ICON = {
     pause: '<svg viewBox="0 0 10 10" width="10" height="10"><rect x="1.8" y="1.2" width="2.3" height="7.6" rx=".5" fill="currentColor"/><rect x="5.9" y="1.2" width="2.3" height="7.6" rx=".5" fill="currentColor"/></svg>',
     play: '<svg viewBox="0 0 10 10" width="10" height="10"><path d="M2.4 1.4 8.6 5 2.4 8.6Z" fill="currentColor" stroke="currentColor" stroke-width=".8" stroke-linejoin="round"/></svg>',
   };
-  // the main button, by state: Start tracking (share the game) → Start session → ⏸ → ▶ (resume); ■ ends it all
+  // the main button: Start session (sharing first when nothing is shared) → ⏸ → ▶ (resume)
   const MODE = {
-    share: { html: ICON.play + 'Start tracking', wide: true, title: 'Share the MapleStory window: through Windows (this app) or your browser (the website)', cmd: 'share' },
-    start: { html: ICON.play + 'Start session', wide: true, title: 'Start a session', cmd: 'start' },
+    start: { html: ICON.play + 'Start session', go: true, title: 'Start a session (shares the MapleStory window first if it isn\'t shared)', cmd: 'start' },
     pause: { html: ICON.pause, title: 'Pause', cmd: 'pause' },
-    resume: { html: ICON.play, title: 'Resume (shares the game window again first if sharing stopped)', cmd: 'start' },
+    resume: { html: ICON.play, title: 'Resume', cmd: 'start' },
   };
   let mode = '';
   const setMode = m => {
     if (m === mode) return;
     mode = m; const d = MODE[m], b = $('pp');
-    b.innerHTML = d.html; b.title = d.title; b.classList.toggle('wide', !!d.wide); b.classList.toggle('go', !!d.wide);
+    b.innerHTML = d.html; b.title = d.title; b.classList.toggle('go', !!d.go);
+    // compact: the icon alone
+    const mini = $('miniPp');
+    mini.innerHTML = d.go ? ICON.play : d.html; mini.title = d.title; mini.classList.toggle('go', !!d.go);
   };
-  setMode('share');
   $('pp').onclick = () => window.overlay.cmd(MODE[mode].cmd);
+  $('miniPp').onclick = () => window.overlay.cmd(MODE[mode].cmd);
   $('stop').onclick = () => window.overlay.stop();
-  document.addEventListener('contextmenu', e => { e.preventDefault(); window.overlay.menu(); });
-  window.overlay.onStats(s => {
-    $('ov').classList.toggle('waiting', !s);
-    if (!s) { setMode('share'); $('pp').disabled = false; $('stop').disabled = true; return; }
-    $('dot').className = 'ov-dot ' + s.state;
-    $('dot').title = s.state === 'on' ? 'Tracking' : s.state === 'paused' ? 'Paused' : 'Not tracking';
-    text($('time'), s.time); text($('name'), s.name); text($('lv'), s.level ?? '?'); text($('exp'), s.exp);
-    $('fill').style.width = Math.max(0, Math.min(100, s.pct || 0)) + '%';
-    setMode(s.state === 'on' ? 'pause' : s.state === 'paused' ? 'resume' : s.sharing ? 'start' : 'share');
-    $('pp').disabled = mode === 'start' && !s.actionOk;
-    $('stop').disabled = !s.canStop;
+
+  // with nothing to show yet, the same layout with blank numbers
+  const BLANK = ['Last 5 min', 'EXP/h · all', 'This session', 'To Lv. ?', 'Profit'].map(label => ({ label, value: '—' }));
+  let stats = null;
+  function render(s) {
+    stats = s;
+    $('dot').className = 'ov-dot ' + (s?.state ?? '');
+    $('dot').title = s?.state === 'on' ? 'Tracking' : s?.state === 'paused' ? 'Paused' : 'Not tracking';
+    text($('time'), s?.time); text($('name'), s?.name); text($('lv'), s?.level ?? '?');
+    text($('exp'), s && !s.last ? s.exp : '—');
+    $('fill').style.width = (s && !s.last ? Math.max(0, Math.min(100, s.pct || 0)) : 0) + '%';
+    setMode(s?.state === 'on' ? 'pause' : s?.state === 'paused' ? 'resume' : 'start');
+    $('pp').disabled = $('miniPp').disabled = mode === 'start' && s?.actionOk === false;
+    renderMini(s);
+    $('stop').disabled = !s?.canStop;
     const box = $('stats'); box.replaceChildren();
-    for (const t of s.tiles || []) {
+    for (const t of s?.tiles?.length ? s.tiles : BLANK) {
       const d = document.createElement('div'), k = document.createElement('span'), v = document.createElement('b');
       k.textContent = t.label; v.textContent = t.value; if (t.cls) v.className = t.cls;
       d.append(k, v); box.append(d);
     }
+    if (s?.last && !endedAt) { endedAt = Date.now(); showTip(); }
+    if (!s?.last) endedAt = 0;
+  }
+  /** compact: EXP/h and time to level, each only while its feature is on */
+  function renderMini(s) {
+    $('miniDot').className = $('dot').className; $('miniDot').title = $('dot').title;
+    const tiles = s?.tiles?.length ? s.tiles : BLANK;
+    for (const [id, prefix] of [['miniRate', 'EXP/h'], ['miniLevel', 'To Lv']]) {
+      const t = tiles.find(x => x.label.startsWith(prefix)), box = $(id);
+      box.hidden = !t;
+      if (!t) continue;
+      box.firstElementChild.textContent = t.label.replace(/ · .*/, '');
+      box.lastElementChild.textContent = t.value;
+    }
+    if (compact) fit();
+  }
+  window.overlay.onStats(render);
+  window.overlay.onCompact(on => setCompact(on, false));
+
+  // tips: one short line under the stats, fading from one to the next; the ones that matter now come first
+  const TIPS = {
+    idle: ['Press Start session to share MapleStory and begin.', 'Share with Windows or your browser from ⋯ → Share game window.'],
+    on: ['The website shows this session live: ⋯ → Open full stats.', 'Auto-pause stops the clock when you idle: set it in ⋯.'],
+    any: ['Full stats, drops and history: ⋯ → Open full stats.', 'Your Setup on the website is what this app uses.',
+      'Stop sharing any time from ⋯: a running session is saved first.', 'Drag the overlay by its top line to move it.', 'Turn these tips off in ⋯ → Show tips.'],
+  };
+  const TIP_MS = 9000, ENDED_MS = 60_000;
+  let tipsOn = true, sync = 0, tipIndex = 0, endedAt = 0, notice = null;
+  function nextTip() {
+    if (notice && Date.now() < notice.until) return { text: notice.text, warm: true };
+    if (endedAt && Date.now() - endedAt < ENDED_MS) return { text: 'Saved. Full stats and history: ⋯ → Open full stats.', warm: true };
+    const running = stats?.state === 'on' || stats?.state === 'paused';
+    const pool = [...(running ? TIPS.on : TIPS.idle), ...TIPS.any];
+    if (sync && !running) pool.unshift(`${sync} session${sync > 1 ? 's' : ''} waiting for History: ⋯ → Sync stats.`);
+    return { text: pool[tipIndex++ % pool.length], warm: false };
+  }
+  function showTip() {
+    const el = $('tip'), t = nextTip();
+    el.hidden = !tipsOn && !(notice && Date.now() < notice.until);
+    $('ov').classList.toggle('no-tips', el.hidden);
+    el.classList.add('fade');
+    setTimeout(() => { el.textContent = t.text; el.classList.toggle('warm', t.warm); el.classList.remove('fade'); }, 300);
+    fit();
+  }
+  setInterval(showTip, TIP_MS);
+  window.overlay.onTips(on => { tipsOn = on; tipIndex = 0; showTip(); });
+  window.overlay.onSync(n => { sync = n; });
+  window.overlay.onNotice(t => { notice = { text: t, until: Date.now() + 8000 }; showTip(); setTimeout(showTip, 8100); });
+
+  window.overlay.onUpdating(v => {
+    $('updating').hidden = !v;
+    if (!v) return;
+    text($('updText'), `Updating to ${v.version}…`);
+    $('updFill').style.width = Math.max(4, Math.min(100, v.percent || 0)) + '%';
   });
+  window.overlay.onUpdate(v => { $('upd').hidden = false; $('upd').title = 'Version ' + v + ' is ready: click to restart into it (it also installs when you quit)'; });
+
+  render(null);
+  showTip();
 </script>
 </body>
 </html>

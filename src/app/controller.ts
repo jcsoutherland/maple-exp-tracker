@@ -5,7 +5,10 @@ import { potionByName } from '../core/potions';
 import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { SlotWatch, slotStrip } from '../core/slotwatch';
 import { crossRead, readSlotSprite } from '../core/itemno';
-import { DesktopLink, inDesktopApp, type OverlayCmd } from './desktopLink';
+import { appSeen, DesktopLink, inDesktopApp, type OverlayCmd } from './desktopLink';
+import { linkHandlers } from './desktopBridge';
+import { applySetupBundle, mergeSessions, type SetupBundle } from './desktopSync';
+import { applyTrackerView, trackerView, type MirrorSnapshot } from './mirror';
 import { HotbarAuto, loadPotionIcons, scanSlots, type IconTpl, type ScanMemo } from '../core/hotbarscan';
 /** how often the quickslot is checked for which potions it holds */
 const HOTBAR_SCAN_MS = 2000;
@@ -24,6 +27,7 @@ import { PaddleEngine } from '../core/ocr/paddle';
 import { cleanMap, cleanName, lineAmount, lineKind, lineQuality, matchClass, parseExp, parseLevel, parsePair } from '../core/parse';
 import { elapsed, finalize, newSession, type SavedSession, type Session } from '../core/session';
 import * as store from '../core/storage';
+import { diag, onDiag } from '../core/diaglog';
 import { Ticker } from '../core/ticker';
 import { Tracker } from '../core/tracker';
 import { median, normLine, sim } from '../core/util';
@@ -105,15 +109,19 @@ export class Controller {
   private lastSave = 0;
   private scratch = { sig: document.createElement('canvas'), gauge: document.createElement('canvas'), slots: document.createElement('canvas') };
 
-  /** the link to the desktop overlay app: on when switched on in Setup, or when this page runs inside the app */
-  desktop = new DesktopLink((cmd, value) => this.overlayCmd(cmd, value), () => this.notify());
-  /** A button on the desktop overlay (see desktopLink.ts): share, start / resume, pause, stop, or set the idle time. */
+  /** the link to the desktop overlay app: on once the app has connected from this browser, and inside the app */
+  desktop = new DesktopLink(linkHandlers(this), () => this.notify());
+  /**
+   * A button on the desktop overlay (see desktopLink.ts): share, start / resume, pause, stop, stop sharing, or set the
+   * idle time.
+   */
   overlayCmd(cmd: OverlayCmd, value?: unknown) {
     if (cmd === 'pause') { if (this.sess && !this.sess.paused) this.togglePause(); }
     else if (cmd === 'stop') this.stopFromOverlay();
+    else if (cmd === 'stopShare') this.stopCapture();
     else if (cmd === 'share') void this.shareFromOverlay();
     else if (cmd === 'idle') { const v = Number(value); if (Number.isFinite(v) && v >= 0 && v <= 3600) this.updateSettings({ idlePauseSec: Math.round(v) }); }
-    else void this.startFromOverlay().then(why => { if (why === 'needs-click') this.askToShare(); });
+    else void this.startFromOverlay().then(why => { if (why === 'needs-click') this.askToShare(true); });
   }
   /**
    * The overlay's ▶ with no session: share the game window first when it isn't shared yet, then start once frames come
@@ -142,21 +150,31 @@ export class Controller {
     if (this.sess) this.stop();
     this.notify();
   }
-  private syncDesktop() { this.desktop.enable(this.settings.desktopOverlay || inDesktopApp()); }
+  private syncDesktop() { this.desktop.enable(inDesktopApp() || appSeen()); }
   /**
    * When the desktop overlay's ▶ asked this tab to share the game window and start (Share game window is highlighted
    * meanwhile): the picker opens only from a click in this tab, so the session starts once the user has shared here.
    */
   shareAsked = 0;
+  /** the overlay's ▶ asked to share: the session starts once the game window is shared here */
+  private startAfterShare = false;
   async shareFromOverlay() {
     if (this.capture.sharing) return;
     const clicked = navigator.userActivation?.isActive ?? true;
-    try { await this.shareScreen(); } catch { if (!clicked && !inDesktopApp()) this.askToShare(); }
+    try { await this.shareScreen(); } catch { if (!clicked && !inDesktopApp()) this.askToShare(false); }
   }
   /** The overlay's click can't open this tab's picker: highlight Share game window here, and say so on the overlay. */
-  private askToShare() {
-    this.shareAsked = Date.now(); this.notify();
+  private askToShare(thenStart: boolean) {
+    this.shareAsked = Date.now(); this.startAfterShare = thenStart; this.notify();
     this.desktop.notice('Click "Share game window" in your browser tab (it is highlighted there)');
+  }
+  /** opened by the overlay to share through the browser (?overlay=share, or =start to start the session after) */
+  private takeOverlayRequest() {
+    const url = new URL(location.href), ask = url.searchParams.get('overlay');
+    if (ask !== 'share' && ask !== 'start') return;
+    url.searchParams.delete('overlay');
+    history.replaceState(null, '', url);
+    this.shareAsked = Date.now(); this.startAfterShare = ask === 'start';
   }
   /** inside the desktop app, the overlay's buttons arrive as real clicks (so the window picker may open) through this */
   private exposeOverlayCmd() {
@@ -164,6 +182,8 @@ export class Controller {
   }
   constructor() {
     queueMicrotask(() => { this.syncDesktop(); this.exposeOverlayCmd(); });
+    this.takeOverlayRequest();
+    this.startHeartbeat();
     const ch = store.loadChars(), last = store.loadSessions().slice(-1)[0];
     if (last) this.identity = { name: last.char, cls: ch[last.char]?.cls || last.cls, level: ch[last.char]?.level ?? last.level };
     // whatever the user last typed/confirmed wins over history
@@ -175,9 +195,10 @@ export class Controller {
       this.sess = act;
       this.tracker = this.makeTracker(act);
       this.tracker.event('info', 'Recovered unfinished session (paused)');
-    }
+    } else this.lastFinished = last ?? null; // the last session stays up for review until a new one starts
+    // sharing ended (the window closed, or the browser's own Stop sharing): the session ends and is saved
     this.capture.onEnded = () => {
-      if (this.sess && !this.sess.paused) { this.togglePause(); this.tracker?.event('info', 'Window sharing ended: share it again and press Resume'); }
+      if (this.sess) { this.tracker?.event('info', 'Window sharing ended'); this.stop(); }
       this.notify();
     };
     this.capture.onChange = () => this.notify();
@@ -200,16 +221,19 @@ export class Controller {
     try { await Promise.all([this.engine.init(), log]); this.ocrState = 'ready'; } catch (e) { console.error(e); this.ocrState = 'error'; }
     this.notify();
   }
-  /** Stop sharing the game window (pauses a running session). */
+  /** Stop sharing the game window: a session running is ended and saved first. */
   stopCapture() {
-    if (this.sess && !this.sess.paused) this.togglePause();
+    if (this.remote) { this.desktop.sendCmd('stopShare'); return; }
+    if (this.sess) this.stop();
     this.capture.stop();
     this.notify();
   }
   async shareScreen() {
     const ok = await this.capture.startScreen(); this.reloadRegions(); this.initOcr();
     this.shareAsked = 0;
-    this.notify(); return ok;
+    this.notify();
+    if (this.startAfterShare) { this.startAfterShare = false; void this.startFromOverlay(); }
+    return ok;
   }
   async useVideo(file: File, rate: number) { const ok = await this.capture.useFile(file, rate); this.reloadRegions(); this.initOcr(); this.notify(); return ok; }
   setRegion(k: RegionKey, r: Partial<Region>) { this.regions = { ...this.regions, [k]: { ...this.regions[k], ...r } }; store.saveRegions(this.regions, this.settings.uiRatio); this.notify(); }
@@ -222,6 +246,7 @@ export class Controller {
     this.regions = store.loadRegions(this.settings.uiRatio, ok ? v.videoWidth : undefined, ok ? v.videoHeight : undefined);
   }
   updateSettings(p: Partial<Settings>) {
+    if (p.idlePauseSec != null && p.idlePauseSec !== this.settings.idlePauseSec) p = { ...p, idleChangedAt: Date.now() };
     this.settings = { ...this.settings, ...p };
     store.saveSettings(this.settings);
     this.syncDesktop();
@@ -244,6 +269,7 @@ export class Controller {
     return new Tracker(s, {
       hpMin: () => this.settings.hpMin, mpMin: () => this.settings.mpMin,
       canonItem: raw => canonItem(raw), canonMap: raw => canonMap(raw), itemsKnown: osmsReady, mapsKnown: mapsReady, maxMobExp, potsCounted: k => this.potsCounted(k), mobForDrop: (item, map) => mobForItem(item, map)?.name ?? null,
+      onEvent: (type, text) => { if (type === 'info' || type === 'level' || type === 'death') diag('event', text); },
     });
   }
   private get canRun() { return !!this.sess && !this.sess.paused && this.capture.ready && this.ocrState === 'ready'; }
@@ -336,6 +362,7 @@ export class Controller {
 
   // ---------- session ----------
   async start() {
+    if (this.remote) { this.desktop.sendCmd('start'); return; }
     this.starting = { label: 'Reading name, class and level', at: Date.now() }; this.notify();
     setTimeout(() => this.notify(), START_MAX_MS + 50);
     await this.identify().catch(e => console.error(e)); // name / class / level once per session
@@ -356,6 +383,7 @@ export class Controller {
   togglePause() {
     const s = this.sess;
     if (!s) return;
+    if (this.remote) { this.desktop.sendCmd(s.paused ? 'start' : 'pause'); return; }
     if (s.paused) { s.paused = false; s.resumeAt = Date.now(); this.tracker?.rebaseline(); this.resetWatchers(); this.tracker?.event('info', 'Resumed'); this.startTimers(); }
     else { s.activeMs += Date.now() - s.resumeAt; s.paused = true; this.autoPaused = false; this.tracker?.event('info', 'Paused'); this.ticker.set({ ui: [1000, () => this.notify()] }); }
     this.persist(true);
@@ -364,6 +392,7 @@ export class Controller {
   stop(): SavedSession | null {
     const s = this.sess;
     if (!s) return null;
+    if (this.remote) { this.desktop.sendCmd('stop'); return null; }
     this.ticker.stop();
     s.char = this.identity.name || s.char; s.cls = this.identity.cls || s.cls;
     const out = finalize(s, this.settings);
@@ -374,16 +403,100 @@ export class Controller {
     store.saveActive(null);
     this.sess = null; this.tracker = null; this.lastFinished = out; this.historyVersion++;
     if (out.level) this.identity.level = out.level;
+    if (inDesktopApp()) this.desktop.sendSaved(out); // for the website's History
     this.notify();
     return out;
   }
   private persist(force = false) {
     const s = this.sess;
-    if (!s || (!force && Date.now() - this.lastSave < 30000)) return;
+    if (!s || this.remote || (!force && Date.now() - this.lastSave < 30000)) return;
     this.lastSave = Date.now();
     store.saveActive(s.paused ? s : { ...s, activeMs: elapsed(s), paused: true });
   }
   persistNow() { this.persist(true); }
+
+  // ---------- diagnostics log ----------
+  /**
+   * Once a minute while sharing or tracking: how each screen reading is doing (its timer's last run, whether a read is
+   * still in progress), the capture, the text reader and the link to the desktop app. Inside the app the lines also
+   * go to the app's own log.
+   */
+  private startHeartbeat() {
+    if (inDesktopApp()) onDiag(line => this.desktop.sendDiag(line));
+    window.setInterval(() => {
+      const s = this.sess;
+      if (!s && !this.capture.sharing) return;
+      const busy = Object.entries(this.busy).filter(([, v]) => v).map(([k]) => k).join(',') || 'none';
+      diag('heartbeat', [
+        `session=${!s ? 'none' : s.paused ? (this.autoPaused ? 'auto-paused' : 'paused') : 'on'}`,
+        `capture=${this.capture.ready ? 'ready' : this.capture.sharing ? 'no-frames' : 'off'}`, `ocr=${this.ocrState}`,
+        `busy=${busy}`, `level-busy=${this.levelBusy}`, `log-queue=${this.logQueue.length}`, `reading=${this.reading}`,
+        `timers=${this.ticker.describe()}`, `exp=${s?.exp ?? '-'}`, `link=${this.desktop.state}`, `mirror=${!!this.remote}`,
+      ].join(' '));
+    }, 60_000);
+  }
+
+  // ---------- the desktop app ----------
+  /** the app's tracker, shown here while the game is shared through Windows (this page then tracks nothing itself) */
+  remote: MirrorSnapshot | null = null;
+  /** Show the app's session live (null: the app stopped tracking). One tracker at a time: never while this page tracks. */
+  applyMirror(snap: MirrorSnapshot | null) {
+    if (!snap) { if (this.remote) this.leaveMirror(); return; }
+    if (!this.remote && (this.sess || this.capture.sharing)) return;
+    this.remote = snap;
+    this.sess = snap.sess; this.recent = snap.recent; this.autoPaused = snap.autoPaused;
+    this.identity = { ...this.identity, ...snap.identity };
+    if (snap.lastFinished) this.lastFinished = snap.lastFinished;
+    this.tracker = snap.sess && snap.tracker ? this.mirrorTracker(snap.sess, snap.tracker) : null;
+    this.notify();
+  }
+  private mirrorTracker(s: Session, view: NonNullable<MirrorSnapshot['tracker']>) {
+    const t = this.tracker?.sess.id === s.id ? this.tracker : this.makeTracker(s);
+    t.sess = s;
+    applyTrackerView(t, view);
+    return t;
+  }
+  private leaveMirror() {
+    this.remote = null; this.sess = null; this.tracker = null; this.recent = []; this.autoPaused = false;
+    const saved = store.loadIdentity();
+    if (saved?.name) this.identity = { ...this.identity, ...saved };
+    this.notify();
+  }
+  /** What the website shows while this page (the app's tracker) tracks. */
+  mirrorSnapshot(): MirrorSnapshot | null {
+    if (!this.sess && !this.capture.sharing) return null;
+    return {
+      sess: this.sess, lastFinished: this.lastFinished, identity: this.identity, tracker: this.tracker ? trackerView(this.tracker) : null,
+      recent: this.recent, slots: this.settings.hotbar.map((_, i) => this.slotCount(i)), fighting: this.fighting,
+      autoPaused: this.autoPaused, sharing: this.capture.sharing,
+    };
+  }
+  /** Sessions the app tracked: into History, each once. */
+  importSessions(list: SavedSession[]) {
+    const { list: merged, added } = mergeSessions(store.loadSessions(), list);
+    if (!added.length) return;
+    store.saveSessions(merged);
+    const ch = store.loadChars();
+    for (const s of [...added].sort((a, b) => a.end - b.end)) {
+      if ((ch[s.char]?.last ?? 0) > s.end) continue;
+      ch[s.char] = { ...ch[s.char], cls: s.cls || ch[s.char]?.cls, level: s.level ?? ch[s.char]?.level, last: s.end };
+    }
+    store.saveChars(ch);
+    // the newest one stays up on the dashboard (this page shows no session of its own, or the app's that just ended)
+    if (!this.sess || this.remote) this.lastFinished = merged[merged.length - 1];
+    this.historyVersion++;
+    this.notify();
+  }
+  /** The website's Setup (in the app's tracker): taken as this page's own. */
+  applySetup(bundle: SetupBundle) {
+    try { applySetupBundle(localStorage, bundle); } catch (e) { console.error('could not take the website\'s Setup', e); return; }
+    this.settings = store.loadSettings();
+    this.reloadRegions();
+    const saved = store.loadIdentity();
+    if (saved?.name) this.identity = { ...this.identity, ...saved };
+    if (this.sess && !this.sess.paused) this.startTimers();
+    this.notify();
+  }
 
   // ---------- scheduling ----------
   private startTimers() {
@@ -880,6 +993,7 @@ export class Controller {
   }
   /** The confirmed count on a hotbar slot (null until read). */
   slotCount(i: number) {
+    if (this.remote) return this.remote.slots[i] ?? null;
     // while a swap there is unconfirmed, keep showing the count from before it (the new potion's number would otherwise
     // appear under the old potion for a few seconds)
     const pend = this.pending.get(i);
@@ -1058,6 +1172,7 @@ export class Controller {
    * flicker back to idle between reads), or MP was just spent on a skill (seen on the gauge 10×/s).
    */
   get fighting() {
+    if (this.remote) return this.remote.fighting;
     const now = Date.now();
     return !!this.sess && !this.sess.paused
       && (now - this.lastActive < this.settings.schedule.expMs + 2000 || now - (this.tracker?.lastDrop('mp') ?? -Infinity) < 3000);

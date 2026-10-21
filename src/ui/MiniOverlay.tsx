@@ -5,6 +5,7 @@ import { fmtDur, fmtHM, fmtK, fmtN } from '../core/util';
 import { useGoal, useRate } from './GoalPanel';
 import { toast, useCtrl } from './hooks';
 import { sessionNet } from './LootProfit';
+import { appSeen } from '../app/desktopLink';
 
 interface DocPip { requestWindow(o: { width: number; height: number }): Promise<Window> }
 
@@ -19,7 +20,7 @@ export function usePip() {
     if (win) { win.close(); return; }
     try {
       const dp = (window as unknown as { documentPictureInPicture?: DocPip }).documentPictureInPicture;
-      const w = dp ? await dp.requestWindow({ width: 380, height: 126 }) : window.open('', 'mapleMini', 'width=380,height=170,popup');
+      const w = dp ? await dp.requestWindow({ width: 418, height: 142 }) : window.open('', 'mapleMini', 'width=418,height=186,popup');
       if (!w) return;
       if (!dp) toast("This browser can't keep a window on top of the game: open the site in Chrome or Edge for that");
       w.document.title = 'EXP Tracker';
@@ -47,28 +48,35 @@ export interface OverlayStats {
   canStop: boolean;
   /** auto-pause after this many idle seconds (0 = off), and whether it can work with the features switched on */
   idleSec: number; idleOk: boolean;
+  /** no session running: the numbers are the last session's, kept up for review until the next one starts */
+  last: boolean;
 }
 
-/** The overlay's numbers: level and EXP bar, recent and session EXP, time to the level goal, and profit. */
+/**
+ * The overlay's numbers: level and EXP bar, recent and session EXP, time to the level goal, and profit. With no session
+ * running, the last session's (until the next one starts).
+ */
 export function useOverlayStats(): OverlayStats {
   const c = useCtrl();
-  const s = c.sess, t = c.tracker, { el, hr, r10 } = c.rates(), rate = useRate(), { level, goal, remaining } = useGoal();
-  const last5 = c.gainOver(5 * 60_000), money = s ? sessionNet(s, c.settings) : null;
+  const s = c.sess, t = c.tracker, f = s ? null : c.lastFinished, rate = useRate(), { level, goal, remaining } = useGoal();
+  const { el, hr, r10 } = f ? { el: f.activeMs, hr: f.activeMs > 60000 ? f.exp / (f.activeMs / 3.6e6) : null, r10: null } : c.rates();
+  const last5 = c.gainOver(5 * 60_000), done = s ?? f, money = done ? sessionNet(done, c.settings) : null;
   const on = (f: Feature) => featureOn(c.settings, f), pct = t?.pct ?? null;
   const tiles: OverlayStats['tiles'] = [];
   if (on('expGain')) tiles.push({ label: 'Last 5 min', value: last5 != null ? signed(last5) : '—', cls: 'pos' });
   if (on('expRate')) tiles.push({ label: `EXP/h · ${r10 ? '10m' : 'all'}`, value: r10 || hr ? fmtK((r10 || hr)!) : '—' });
-  if (on('expGain')) tiles.push({ label: 'This session', value: s ? signed(s.exp) : '—', cls: 'pos' });
-  if (on('levelGoal')) tiles.push({ label: `To Lv. ${goal ?? '?'}`, value: remaining && rate ? fmtHM(remaining / rate * 3.6e6) : '—' });
+  if (on('expGain')) tiles.push({ label: f ? 'Last session' : 'This session', value: done ? signed(done.exp) : '—', cls: 'pos' });
+  if (on('levelGoal')) tiles.push({ label: `To Lv. ${goal ?? '?'}`, value: s && remaining && rate ? fmtHM(remaining / rate * 3.6e6) : '—' });
   if (on('mesos') || on('drops')) tiles.push({ label: 'Profit', value: money ? signed(money.net) : '—', cls: money && money.net < 0 ? 'neg' : 'pos' });
   return {
-    state: !s ? 'idle' : s.paused ? 'paused' : 'on', time: s ? fmtDur(el) : '', name: c.identity.name || '', level,
+    state: !s ? 'idle' : s.paused ? 'paused' : 'on', time: s ? fmtDur(el) : f ? `Last session · ${fmtDur(el)}` : '', name: c.identity.name || '', level,
     exp: `${t?.exp != null ? fmtN(t.exp) : '—'} ${pct != null ? `[${pct.toFixed(2)}%]` : ''}`.trim(), pct: pct ?? 0, tiles,
     // with no session, ▶ shares the game window first when needed (see controller.startFromOverlay)
     action: !s ? 'start' : s.paused ? 'resume' : 'pause', actionOk: !!s || c.ocrState !== 'error',
     sharing: c.capture.sharing || (c.capture.kind === 'file' && c.capture.ready),
     canStop: !!s,
     idleSec: c.settings.idlePauseSec, idleOk: canAutoPause(c.settings),
+    last: !!f,
   };
 }
 
@@ -83,9 +91,24 @@ export function PlayPause({ action }: { action: OverlayStats['action'] }) {
   );
 }
 
+const TIP_MS = 9000;
+/** Short usage tips for the pop-out, one at a time; the desktop app is suggested until it has been used here. */
+function useTip(o: OverlayStats) {
+  const [n, setN] = useState(0);
+  useEffect(() => { const t = setInterval(() => setN(x => x + 1), TIP_MS); return () => clearInterval(t); }, []);
+  const running = o.state !== 'idle';
+  const pool = [
+    ...(appSeen() ? [] : ['Get the desktop overlay: no address bar, always on top.']),
+    running ? 'Pause and resume here; End & save is on the tracker page.' : 'Press ▶ to start a session.',
+    'Full stats, drops and history are on the tracker page.',
+    'Auto-pause stops the clock when you idle: set it on Setup.',
+  ];
+  return o.last && n < 3 ? 'Saved. Full stats and history are on the tracker page.' : pool[n % pool.length];
+}
+
 /** The always-on-top pop-out overlay (in the browser). */
 export function MiniOverlay({ win }: { win: Window }) {
-  const c = useCtrl(), o = useOverlayStats();
+  const c = useCtrl(), o = useOverlayStats(), tip = useTip(o);
   return createPortal(
     <div className="ov">
       <div className="ov-head">
@@ -110,6 +133,7 @@ export function MiniOverlay({ win }: { win: Window }) {
       <div className="ov-stats">
         {o.tiles.map(t => <div key={t.label}><span>{t.label}</span><b className={t.cls}>{t.value}</b></div>)}
       </div>
+      <div className="ov-tip" key={tip}>{tip}</div>
     </div>,
     win.document.body,
   );

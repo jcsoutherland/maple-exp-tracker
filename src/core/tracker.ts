@@ -22,6 +22,8 @@ export interface TrackerDeps {
   /** the monster an etc drop comes from (null = not known) */
   mobForDrop?: (item: string, map: string | null) => string | null;
   now?: () => number;
+  /** every event also goes here (the diagnostics log) */
+  onEvent?: (type: EventType, text: string) => void;
 }
 
 /** What one EXP read did: a confirmed level-up, a suspected one (confirm with the level number), or nothing special. */
@@ -111,6 +113,7 @@ export class Tracker {
     const s = this.sess;
     s.events.unshift({ t: elapsed(s, this.now()), type, text });
     if (s.events.length > 60) s.events.length = 60;
+    this.deps.onEvent?.(type, text);
   }
   get mapName() { return this.mapCur || UNKNOWN_MAP; }
 

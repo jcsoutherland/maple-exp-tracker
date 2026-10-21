@@ -13,6 +13,9 @@ function Gate({ why, children }: { why: string | null; children: ReactNode }) {
 export function SessionBar() {
   const c = useCtrl();
   const s = c.sess, cap = c.capture;
+  // the desktop app tracks (the game shared through Windows): this page shows its session, and the buttons go to it
+  const app = c.remote;
+  const sharing = app ? app.sharing : cap.sharing, ready = app ? app.sharing : cap.ready;
 
   const share = async () => {
     try { toast((await c.shareScreen()) ? 'Capturing ✓' : 'No frames received from the shared window yet'); }
@@ -21,27 +24,29 @@ export function SessionBar() {
   const stop = () => { c.stop(); toast('Session ended and saved to History'); };
 
   // why each button is off right now (null = it's on)
-  const startWhy = s ? 'A session is already running' : !cap.sharing ? 'Share your game window first'
-    : !cap.ready ? 'Waiting for the first frames from the shared window…'
-    : c.ocrState === 'error' ? 'The text reader failed to load: reload the page' : c.ocrState !== 'ready' ? 'Getting ready…' : null;
-  const sessWhy = s ? null : !cap.sharing ? 'Share your game window, then start a session' : 'Start a session first';
+  const startWhy = s ? 'A session is already running' : !sharing ? 'Share your game window first'
+    : !ready ? 'Waiting for the first frames from the shared window…'
+    : app ? null : c.ocrState === 'error' ? 'The text reader failed to load: reload the page' : c.ocrState !== 'ready' ? 'Getting ready…' : null;
+  const sessWhy = s ? null : !sharing ? 'Share your game window, then start a session' : 'Start a session first';
 
   // the desktop overlay asked this tab to share (its picker only opens from a click here)
-  const asked = !cap.sharing && Date.now() - c.shareAsked < 120_000;
+  const asked = !sharing && Date.now() - c.shareAsked < 120_000;
   return (
     <div className="ctlbar">
       {asked && <div className="note warnnote" style={{ width: '100%', margin: '0 0 8px' }}><span>The desktop overlay asked to share the game window through this tab: click <b>Share game window</b>, then start the session (here or on the overlay).</span></div>}
-      <span className={'pill' + (cap.ready ? ' on' : cap.sharing ? ' warn' : '')}>{cap.ready ? (cap.kind === 'file' ? 'Video: ' + cap.label : 'Capturing') : cap.sharing ? 'Waiting for frames' : 'No capture'}</span>
+      {app
+        ? <span className={'pill' + (app.sharing ? ' on' : '')}>{app.sharing ? 'Tracking in the desktop overlay (Windows)' : 'Desktop overlay'}</span>
+        : <span className={'pill' + (cap.ready ? ' on' : cap.sharing ? ' warn' : '')}>{cap.ready ? (cap.kind === 'file' ? 'Video: ' + cap.label : 'Capturing') : cap.sharing ? 'Waiting for frames' : 'No capture'}</span>}
       <span className={'pill' + (s ? (s.paused ? ' warn' : ' on') : '')}>{!s ? 'Idle' : s.paused ? (c.autoPaused ? 'Paused (idle)' : 'Paused') : 'Tracking'}</span>
       <div className="btns">
-        {cap.sharing
-          ? <button onClick={() => { c.stopCapture(); toast('Stopped capturing'); }} title="Stop sharing the game window (pauses a running session)">⏹ Stop capture</button>
+        {sharing
+          ? <button onClick={() => { c.stopCapture(); toast(s ? 'Stopped sharing: the session is saved to History' : 'Stopped sharing'); }} title="Stop sharing the game window (a running session is ended and saved first)">⏹ Stop sharing</button>
           : <button className={(s ? '' : 'pri') + (asked ? ' pulse' : '')} onClick={share} title="Pick your MapleStory window to start tracking">Share game window</button>}
         <Gate why={startWhy}><button className={cap.sharing ? 'pri' : ''} disabled={!!startWhy} onClick={() => c.start()}>▶ Start session</button></Gate>
         <Gate why={sessWhy}><button disabled={!!sessWhy} onClick={() => c.togglePause()}>{s?.paused ? '▶ Resume' : '⏸ Pause'}</button></Gate>
         <Gate why={sessWhy}><button className="danger" disabled={!!sessWhy} onClick={stop} title="End this session: save it to History and clear the dashboard for a fresh start">■ End &amp; save</button></Gate>
       </div>
-      {!cap.sharing && !s && <div className="ctlhint">Start, Pause and End unlock once you share your game window.</div>}
+      {!sharing && !s && <div className="ctlhint">Start, Pause and End unlock once you share your game window.</div>}
     </div>
   );
 }

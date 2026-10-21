@@ -41,6 +41,7 @@ enough that they never need to read instructions.
 npm run dev      # run locally at http://localhost:5173
 npm test         # unit tests
 npm run build    # type-check + production build
+npm run overlay  # preview the desktop overlay app's next version against npm run dev (close the installed app first)
 $env:MAPLE_VIDEO = "C:\path\to\recording.mp4"; npm run replay   # replay a recording through the app
 ```
 

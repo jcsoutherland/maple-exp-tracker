@@ -11,7 +11,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "replay": "node dev/replay.mjs",
-    "mirror": "node dev/mirror-data.mjs"
+    "mirror": "node dev/mirror-data.mjs",
+    "overlay": "npm --prefix desktop start"
   },
   "dependencies": {
     "idb-keyval": "6.2.1",
