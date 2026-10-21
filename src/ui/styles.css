@@ -342,3 +342,6 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 /* a small round icon button (the overlay download next to Pop-out overlay) */
 .iconbtn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);color:var(--tx)}
 .iconbtn:hover{border-color:var(--acc);background:#2a2650}
+/* a button the desktop overlay asked the user to press */
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(139,123,255,.7)}50%{box-shadow:0 0 0 7px rgba(139,123,255,0)}}
+button.pulse{animation:pulse 1.2s ease-in-out infinite}

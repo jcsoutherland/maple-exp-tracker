@@ -51,13 +51,14 @@
     <span class="ov-dot" id="dot"></span><b>EXP TRACKER</b><span class="ov-time" id="time"></span>
     <span class="sp"></span><span class="ov-name" id="name"></span>
     <button id="pp" class="live pp" title="Start session"></button>
+    <button id="stop" class="live pp" title="End the session and stop sharing the game window" disabled><svg viewBox="0 0 10 10" width="10" height="10"><rect x="1.8" y="1.8" width="6.4" height="6.4" rx="1" fill="currentColor"/></svg></button>
     <span id="updating" class="updating" hidden></span>
     <button id="upd" class="upd" hidden>Update</button>
     <button id="more" title="Menu">⋯</button>
     <button id="close" class="x" title="Close the overlay"><svg viewBox="0 0 10 10" width="9" height="9"><path d="M2 2 8 8M8 2 2 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
   </div>
   <div class="wait">
-    <span>Press <b>▶ Start tracking</b> and pick the MapleStory window, or track on <b>mapleclassic.training</b> with <b>Send stats to the desktop overlay</b> on (Setup tab).</span>
+    <span>Press <b>▶ Start tracking</b>, then share the MapleStory window through Windows (this app tracks it) or through the browser (the website).</span>
     <button id="here">▶ Start tracking</button>
   </div>
   <div class="ov-bar live">
@@ -83,10 +84,12 @@
     pause: '<svg viewBox="0 0 10 10" width="10" height="10"><rect x="1.8" y="1.2" width="2.3" height="7.6" rx=".5" fill="currentColor"/><rect x="5.9" y="1.2" width="2.3" height="7.6" rx=".5" fill="currentColor"/></svg>',
     play: '<svg viewBox="0 0 10 10" width="10" height="10"><path d="M2.4 1.4 8.6 5 2.4 8.6Z" fill="currentColor" stroke="currentColor" stroke-width=".8" stroke-linejoin="round"/></svg>',
   };
-  const TITLE = { start: 'Start session', pause: 'Pause', resume: 'Resume' };
+  const TITLE = { start: 'Start a session (asks how to share the game window if it is not shared yet)', pause: 'Pause', resume: 'Resume (asks to share the game window again if it is not shared)' };
   let action = 'start';
   $('pp').innerHTML = ICON.play;
-  $('pp').onclick = () => window.overlay.cmd(action === 'start' ? 'start' : 'pause');
+  // ▶ starts or resumes (sharing first when needed), ⏸ pauses
+  $('pp').onclick = () => window.overlay.cmd(action === 'pause' ? 'pause' : 'start');
+  $('stop').onclick = () => window.overlay.stop();
   document.addEventListener('contextmenu', e => { e.preventDefault(); window.overlay.menu(); });
   window.overlay.onStats(s => {
     $('ov').classList.toggle('waiting', !s);
@@ -97,6 +100,7 @@
     $('fill').style.width = Math.max(0, Math.min(100, s.pct || 0)) + '%';
     if (s.action !== action) { action = s.action; $('pp').innerHTML = action === 'pause' ? ICON.pause : ICON.play; }
     $('pp').disabled = !s.actionOk; $('pp').title = TITLE[action];
+    $('stop').disabled = !s.canStop;
     const box = $('stats'); box.replaceChildren();
     for (const t of s.tiles || []) {
       const d = document.createElement('div'), k = document.createElement('span'), v = document.createElement('b');

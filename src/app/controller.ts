@@ -107,8 +107,9 @@ export class Controller {
 
   /** the link to the desktop overlay app: on when switched on in Setup, or when this page runs inside the app */
   desktop = new DesktopLink(cmd => {
-    if (cmd === 'pause') { this.togglePause(); return; }
-    void this.startFromOverlay().then(why => { if (why === 'needs-click') this.desktop.notice('Click "Share game window" in your browser tab first, then ▶ again'); });
+    if (cmd === 'pause') { if (this.sess && !this.sess.paused) this.togglePause(); return; }
+    if (cmd === 'stop') { this.stopFromOverlay(); return; }
+    void this.shareFromOverlay();
   }, () => this.notify());
   /**
    * The overlay's ▶ with no session: share the game window first when it isn't shared yet, then start once frames come
@@ -116,7 +117,8 @@ export class Controller {
    * click the app passes through): a click on the desktop overlay linked to a browser tab can't open it ('needs-click').
    */
   async startFromOverlay(): Promise<'started' | 'needs-click' | 'cancelled' | 'not-ready' | null> {
-    if (this.sess) { this.togglePause(); return null; }
+    // ⏸ while running; ▶ starts a session or resumes a paused one, sharing the game window first only if it isn't
+    if (this.sess && !this.sess.paused) { this.togglePause(); return null; }
     if (!this.capture.sharing && this.capture.kind !== 'file') {
       // without a click in this page the browser refuses the picker outright; with one, a failure is the user cancelling
       const clicked = navigator.userActivation?.isActive ?? true;
@@ -127,15 +129,37 @@ export class Controller {
       if (Date.now() - t0 > 60_000 || this.ocrState === 'error') return 'not-ready';
       await new Promise(r => setTimeout(r, 250));
     }
-    if (this.sess) return null;
+    if (this.sess) { if (this.sess.paused) this.togglePause(); return null; }
     await this.start();
     return 'started';
   }
+  /** The overlay's ■: end the session (saved to History) and stop sharing the game window. */
+  stopFromOverlay() {
+    if (this.sess) this.stop();
+    this.stopCapture();
+    this.shareAsked = 0;
+    this.notify();
+  }
   private syncDesktop() { this.desktop.enable(this.settings.desktopOverlay || inDesktopApp()); }
+  /**
+   * When the desktop overlay's ▶ asked this tab to share the game window and start (Share game window is highlighted
+   * meanwhile): the picker opens only from a click in this tab, so the session starts once the user has shared here.
+   */
+  shareAsked = 0;
+  async shareFromOverlay() {
+    if (this.capture.sharing) { void this.startFromOverlay(); return; }
+    try { await this.shareScreen(); } catch {
+      this.shareAsked = Date.now(); this.notify();
+      this.desktop.notice('Click "Share game window" in your browser tab: the session starts once it\'s shared');
+      return;
+    }
+    void this.startFromOverlay();
+  }
   /** inside the desktop app, the overlay's buttons arrive as real clicks (so the window picker may open) through this */
   private exposeOverlayCmd() {
     if (inDesktopApp()) (window as unknown as { __overlayCmd?: (c: string) => void }).__overlayCmd = c => {
-      if (c === 'pause') this.togglePause();
+      if (c === 'pause') { if (this.sess && !this.sess.paused) this.togglePause(); }
+      else if (c === 'stop') this.stopFromOverlay();
       else void this.startFromOverlay();
     };
   }
@@ -183,7 +207,12 @@ export class Controller {
     this.capture.stop();
     this.notify();
   }
-  async shareScreen() { const ok = await this.capture.startScreen(); this.reloadRegions(); this.initOcr(); this.notify(); return ok; }
+  async shareScreen() {
+    const ok = await this.capture.startScreen(); this.reloadRegions(); this.initOcr();
+    // shared after the desktop overlay's ▶ asked for it: start the session it wanted
+    if (this.shareAsked && Date.now() - this.shareAsked < 120_000) { this.shareAsked = 0; void this.startFromOverlay(); }
+    this.notify(); return ok;
+  }
   async useVideo(file: File, rate: number) { const ok = await this.capture.useFile(file, rate); this.reloadRegions(); this.initOcr(); this.notify(); return ok; }
   setRegion(k: RegionKey, r: Partial<Region>) { this.regions = { ...this.regions, [k]: { ...this.regions[k], ...r } }; store.saveRegions(this.regions, this.settings.uiRatio); this.notify(); }
   resetRegions() { store.clearRegions(this.settings.uiRatio); this.reloadRegions(); this.notify(); }

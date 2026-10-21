@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('overlay', {
   onStats: fn => ipcRenderer.on('stats', (_e, s) => fn(s)),
   cmd: c => ipcRenderer.send('cmd', c),
+  stop: () => ipcRenderer.send('stop'),
   menu: () => ipcRenderer.send('menu'),
   close: () => ipcRenderer.send('close'),
   onUpdate: fn => ipcRenderer.on('update', (_e, v) => fn(v)),

@@ -36,7 +36,7 @@ export class DesktopLink {
   private retry: ReturnType<typeof setTimeout> | null = null;
   private wanted = false;
   state: LinkState = 'off';
-  constructor(private onCmd: (cmd: 'start' | 'pause') => void, private onState: () => void) {}
+  constructor(private onCmd: (cmd: 'start' | 'pause' | 'stop') => void, private onState: () => void) {}
 
   /** Connect (and keep reconnecting every 5 s while the app isn't running), or disconnect. */
   enable(on: boolean) {
@@ -96,7 +96,7 @@ export class DesktopLink {
     ws.onmessage = e => {
       try {
         const m = JSON.parse(String(e.data));
-        if (m.type === 'cmd' && (m.cmd === 'start' || m.cmd === 'pause')) this.onCmd(m.cmd);
+        if (m.type === 'cmd' && ['start', 'pause', 'stop'].includes(m.cmd)) this.onCmd(m.cmd);
       } catch { /* not ours */ }
     };
     ws.onclose = () => { if (this.ws === ws) { this.ws = null; this.set(this.wanted ? 'connecting' : 'off'); this.later(); } };

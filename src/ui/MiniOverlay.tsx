@@ -41,6 +41,10 @@ export interface OverlayStats {
   tiles: { label: string; value: string; cls?: 'pos' | 'neg' }[];
   /** the one play / pause button: what it does now, and whether it can */
   action: 'start' | 'pause' | 'resume'; actionOk: boolean;
+  /** the game window is being shared with this tracker */
+  sharing: boolean;
+  /** ■ has something to end: a session, or a shared window */
+  canStop: boolean;
 }
 
 /** The overlay's numbers: level and EXP bar, recent and session EXP, time to the level goal, and profit. */
@@ -60,6 +64,8 @@ export function useOverlayStats(): OverlayStats {
     exp: `${t?.exp != null ? fmtN(t.exp) : '—'} ${pct != null ? `[${pct.toFixed(2)}%]` : ''}`.trim(), pct: pct ?? 0, tiles,
     // with no session, ▶ shares the game window first when needed (see controller.startFromOverlay)
     action: !s ? 'start' : s.paused ? 'resume' : 'pause', actionOk: !!s || c.ocrState !== 'error',
+    sharing: c.capture.sharing || (c.capture.kind === 'file' && c.capture.ready),
+    canStop: !!s || c.capture.sharing,
   };
 }
 

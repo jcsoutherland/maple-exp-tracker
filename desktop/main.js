@@ -146,21 +146,63 @@ ipcMain.on('install-update', installUpdate);
  * userGesture flag), so ▶ can open the window picker before starting; a browser tab gets a message instead.
  */
 ipcMain.on('cmd', (_e, cmd) => sendCmd(cmd));
+/** ■ ends the session (saved to History) and stops sharing, after asking. */
+ipcMain.on('stop', async () => {
+  const r = await dialog.showMessageBox(overlay ?? undefined, {
+    type: 'question', title: 'End the session?', buttons: ['End session', 'Cancel'], defaultId: 0, cancelId: 1, noLink: true,
+    message: 'End the session and stop sharing the game window?', detail: 'The session is saved to History.',
+  });
+  if (r.response === 0) sendCmd('stop');
+});
 const hasSession = s => s?.stats?.state === 'on' || s?.stats?.state === 'paused';
 /**
  * ▶ with no session anywhere tracks right here, no browser needed: this app's own tracker (opened hidden if it isn't
  * open) gets a real click, so it shows the window picker, then starts once the game window is shared.
  */
-async function startHere() {
+async function startHere(cmd = 'start') {
   openTracker(false);
   const inAppSource = () => [...sources].find(([, s]) => s.inApp)?.[0];
   for (const t0 = Date.now(); !inAppSource() && Date.now() - t0 < 30_000; ) await new Promise(r => setTimeout(r, 300));
   if (!tracker || tracker.isDestroyed()) return;
-  tracker.webContents.executeJavaScript(`window.__overlayCmd && window.__overlayCmd('start')`, true).catch(() => undefined);
+  tracker.webContents.executeJavaScript(`window.__overlayCmd && window.__overlayCmd(${JSON.stringify(cmd)})`, true).catch(() => undefined);
 }
+const webSource = () => [...sources].find(([, s]) => !s.inApp);
+const appSource = () => [...sources].find(([, s]) => s.inApp);
+/**
+ * ▶ with the game shared nowhere yet asks how to share it: through Windows (this app tracks it: its picker, then the
+ * session starts), or through the browser (the website tab tracks it; Chrome's picker only opens from a click in that
+ * tab, so the tab highlights Share game window and starts once it's clicked, or the website opens when no tab is
+ * connected).
+ */
+function shareChoice() {
+  const web = webSource();
+  Menu.buildFromTemplate([
+    { label: 'Share with Windows (track in this app)', click: () => void startHere('start') },
+    { label: web ? 'Share in the browser (the website tab)' : 'Share in the browser (opens the website)', click: shareInBrowser },
+  ]).popup({ window: overlay });
+}
+function shareInBrowser() {
+  const web = webSource();
+  if (web) {
+    web[0].send(JSON.stringify({ type: 'cmd', cmd: 'start' }));
+    overlay?.webContents.send('notice', 'Click "Share game window" in your browser tab (it is highlighted there)');
+  } else {
+    shell.openExternal(SITE);
+    overlay?.webContents.send('notice', 'Opened the website: switch on "Send stats to the desktop overlay" (Setup), then Share game window');
+  }
+}
+/**
+ * ▶ / ⏸ / ■ go to the tracker the overlay shows. ▶ with no session anywhere starts where the game is already shared, or
+ * asks how to share it; ▶ on a paused session resumes it there (that tracker shares first only if it isn't sharing).
+ */
 function sendCmd(cmd) {
-  if (!['start', 'pause'].includes(cmd)) return;
-  if (cmd === 'start' && !hasSession(sources.get(shown))) { void startHere(); return; }
+  if (!['start', 'pause', 'stop'].includes(cmd)) return;
+  if (cmd === 'start' && !hasSession(sources.get(shown))) {
+    const web = webSource(), own = appSource();
+    if (own?.[1].stats?.sharing) { void startHere('start'); return; }
+    if (web?.[1].stats?.sharing) { web[0].send(JSON.stringify({ type: 'cmd', cmd: 'start' })); return; }
+    shareChoice(); return;
+  }
   if (!shown) return;
   if (sources.get(shown)?.inApp && tracker && !tracker.isDestroyed()) {
     tracker.webContents.executeJavaScript(`window.__overlayCmd && window.__overlayCmd(${JSON.stringify(cmd)})`, true).catch(() => undefined);
@@ -223,8 +265,10 @@ else {
   app.on('second-instance', () => { showOverlay(); checkUpdate(); });
   app.whenReady().then(() => {
     registerProtocol(); startLink(); handleCapture(); createOverlay(); startUpdates();
-    // development: OVERLAY_TEST_START=<ms> presses the overlay's ▶ that long after start
-    if (process.env.OVERLAY_TEST_START) setTimeout(() => sendCmd('start'), +process.env.OVERLAY_TEST_START);
+    // development: OVERLAY_TEST_START=<ms> presses the overlay's ▶ (with OVERLAY_TEST_CMD=windows, picks "Share with Windows")
+    if (process.env.OVERLAY_TEST_START) setTimeout(() => (process.env.OVERLAY_TEST_CMD === 'windows' ? startHere('start') : sendCmd('start')), +process.env.OVERLAY_TEST_START);
+    // development: OVERLAY_TEST_STOP=<ms> presses ■ (without its confirmation) that long after start
+    if (process.env.OVERLAY_TEST_STOP) setTimeout(() => sendCmd('stop'), +process.env.OVERLAY_TEST_STOP);
   });
   app.on('window-all-closed', () => app.quit());
 }
