@@ -25,6 +25,8 @@
   .updating{color:var(--warm);font-size:10px;letter-spacing:0;white-space:nowrap}
   .x{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0}
   .x:hover{border-color:var(--bad);color:var(--bad)}
+  .pp.wide{width:auto;gap:4px;padding:0 9px;font-size:10.5px;font-weight:700}
+  .pp.go{background:var(--acc);border-color:var(--acc);color:#fff}
   .pp{display:inline-flex;align-items:center;justify-content:center;width:26px;height:20px;padding:0}
   .ov-dot{width:7px;height:7px;border-radius:99px;background:var(--mut)}
   .ov-dot.on{background:var(--ok);box-shadow:0 0 6px var(--ok)}.ov-dot.paused{background:var(--warm)}
@@ -50,16 +52,15 @@
   <div class="ov-head">
     <span class="ov-dot" id="dot"></span><b>EXP TRACKER</b><span class="ov-time" id="time"></span>
     <span class="sp"></span><span class="ov-name" id="name"></span>
-    <button id="pp" class="live pp" title="Start session"></button>
-    <button id="stop" class="live pp" title="End the session and stop sharing the game window" disabled><svg viewBox="0 0 10 10" width="10" height="10"><rect x="1.8" y="1.8" width="6.4" height="6.4" rx="1" fill="currentColor"/></svg></button>
+    <button id="pp" class="pp"></button>
+    <button id="stop" class="pp" title="End the session (saved to History)" disabled><svg viewBox="0 0 10 10" width="10" height="10"><rect x="1.8" y="1.8" width="6.4" height="6.4" rx="1" fill="currentColor"/></svg></button>
     <span id="updating" class="updating" hidden></span>
     <button id="upd" class="upd" hidden>Update</button>
     <button id="more" title="Menu">⋯</button>
     <button id="close" class="x" title="Close the overlay"><svg viewBox="0 0 10 10" width="9" height="9"><path d="M2 2 8 8M8 2 2 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
   </div>
   <div class="wait">
-    <span>Press <b>▶ Start tracking</b>, then share the MapleStory window through Windows (this app tracks it) or through the browser (the website).</span>
-    <button id="here">▶ Start tracking</button>
+    <span>Press <b>▶ Start tracking</b> to share the MapleStory window through Windows (this app tracks it) or through your browser (the website).</span>
   </div>
   <div class="ov-bar live">
     <span class="ov-lv">LV.<b id="lv">?</b></span>
@@ -78,28 +79,37 @@
   window.overlay.onNotice(text => { const n = $('notice'); n.textContent = text; n.hidden = false; clearTimeout(noticeT); noticeT = setTimeout(() => { n.hidden = true; }, 7000); });
   window.overlay.onUpdating(v => { $('updating').hidden = !v; $('updating').textContent = v ? 'Updating to ' + v + '…' : ''; });
   window.overlay.onUpdate(v => { $('upd').hidden = false; $('upd').title = 'Version ' + v + ' is ready: click to restart into it (it also installs when you quit)'; });
-  $('here').onclick = () => window.overlay.cmd('start');
   // one button, play or pause by state; the same two icons as the website's overlay
   const ICON = {
     pause: '<svg viewBox="0 0 10 10" width="10" height="10"><rect x="1.8" y="1.2" width="2.3" height="7.6" rx=".5" fill="currentColor"/><rect x="5.9" y="1.2" width="2.3" height="7.6" rx=".5" fill="currentColor"/></svg>',
     play: '<svg viewBox="0 0 10 10" width="10" height="10"><path d="M2.4 1.4 8.6 5 2.4 8.6Z" fill="currentColor" stroke="currentColor" stroke-width=".8" stroke-linejoin="round"/></svg>',
   };
-  const TITLE = { start: 'Start a session (asks how to share the game window if it is not shared yet)', pause: 'Pause', resume: 'Resume (asks to share the game window again if it is not shared)' };
-  let action = 'start';
-  $('pp').innerHTML = ICON.play;
-  // ▶ starts or resumes (sharing first when needed), ⏸ pauses
-  $('pp').onclick = () => window.overlay.cmd(action === 'pause' ? 'pause' : 'start');
+  // the main button, by state: Start tracking (share the game) → Start session → ⏸ → ▶ (resume); ■ ends it all
+  const MODE = {
+    share: { html: ICON.play + 'Start tracking', wide: true, title: 'Share the MapleStory window: through Windows (this app) or your browser (the website)', cmd: 'share' },
+    start: { html: ICON.play + 'Start session', wide: true, title: 'Start a session', cmd: 'start' },
+    pause: { html: ICON.pause, title: 'Pause', cmd: 'pause' },
+    resume: { html: ICON.play, title: 'Resume (shares the game window again first if sharing stopped)', cmd: 'start' },
+  };
+  let mode = '';
+  const setMode = m => {
+    if (m === mode) return;
+    mode = m; const d = MODE[m], b = $('pp');
+    b.innerHTML = d.html; b.title = d.title; b.classList.toggle('wide', !!d.wide); b.classList.toggle('go', !!d.wide);
+  };
+  setMode('share');
+  $('pp').onclick = () => window.overlay.cmd(MODE[mode].cmd);
   $('stop').onclick = () => window.overlay.stop();
   document.addEventListener('contextmenu', e => { e.preventDefault(); window.overlay.menu(); });
   window.overlay.onStats(s => {
     $('ov').classList.toggle('waiting', !s);
-    if (!s) return;
+    if (!s) { setMode('share'); $('pp').disabled = false; $('stop').disabled = true; return; }
     $('dot').className = 'ov-dot ' + s.state;
     $('dot').title = s.state === 'on' ? 'Tracking' : s.state === 'paused' ? 'Paused' : 'Not tracking';
     text($('time'), s.time); text($('name'), s.name); text($('lv'), s.level ?? '?'); text($('exp'), s.exp);
     $('fill').style.width = Math.max(0, Math.min(100, s.pct || 0)) + '%';
-    if (s.action !== action) { action = s.action; $('pp').innerHTML = action === 'pause' ? ICON.pause : ICON.play; }
-    $('pp').disabled = !s.actionOk; $('pp').title = TITLE[action];
+    setMode(s.state === 'on' ? 'pause' : s.state === 'paused' ? 'resume' : s.sharing ? 'start' : 'share');
+    $('pp').disabled = mode === 'start' && !s.actionOk;
     $('stop').disabled = !s.canStop;
     const box = $('stats'); box.replaceChildren();
     for (const t of s.tiles || []) {

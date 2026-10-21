@@ -13,6 +13,9 @@ export const DESKTOP_DOWNLOAD = 'https://github.com/jcsoutherland/maple-exp-trac
 export const inDesktopApp = () => new URLSearchParams(location.search).has('desktop');
 
 export type LinkState = 'off' | 'connecting' | 'connected';
+/** what the desktop overlay's buttons ask of a tracker */
+export const OVERLAY_CMDS = ['share', 'start', 'pause', 'stop', 'idle'] as const;
+export type OverlayCmd = (typeof OVERLAY_CMDS)[number];
 /**
  * How long a launched app gets to connect before it's taken as not installed: briefly when nothing happened at all (an
  * unknown link opens nothing, silently), much longer once the page lost focus, since then Chrome asked "Open app?" or the
@@ -36,7 +39,7 @@ export class DesktopLink {
   private retry: ReturnType<typeof setTimeout> | null = null;
   private wanted = false;
   state: LinkState = 'off';
-  constructor(private onCmd: (cmd: 'start' | 'pause' | 'stop') => void, private onState: () => void) {}
+  constructor(private onCmd: (cmd: OverlayCmd, value?: unknown) => void, private onState: () => void) {}
 
   /** Connect (and keep reconnecting every 5 s while the app isn't running), or disconnect. */
   enable(on: boolean) {
@@ -96,7 +99,7 @@ export class DesktopLink {
     ws.onmessage = e => {
       try {
         const m = JSON.parse(String(e.data));
-        if (m.type === 'cmd' && ['start', 'pause', 'stop'].includes(m.cmd)) this.onCmd(m.cmd);
+        if (m.type === 'cmd' && (OVERLAY_CMDS as readonly string[]).includes(m.cmd)) this.onCmd(m.cmd, m.value);
       } catch { /* not ours */ }
     };
     ws.onclose = () => { if (this.ws === ws) { this.ws = null; this.set(this.wanted ? 'connecting' : 'off'); this.later(); } };

@@ -30,9 +30,9 @@ let shown = null;
 function pickSource() {
   let best = null;
   for (const [ws, s] of sources) {
-    // a running session first; with none anywhere, this app's own tracker (what ▶ starts); then the one already shown
+    // a running session first, then a tracker sharing the game; with neither, this app's own; then the one already shown
     // (no flicker), then the newest
-    const rank = s.stats?.state === 'on' ? 3 : s.stats?.state === 'paused' ? 2 : s.inApp ? 1 : 0;
+    const rank = s.stats?.state === 'on' ? 4 : s.stats?.state === 'paused' ? 3 : s.stats?.sharing ? 2 : s.inApp ? 1 : 0;
     if (!best || rank > best.rank || (rank === best.rank && (ws === shown || (best.ws !== shown && s.at > best.at)))) best = { ws, rank, at: s.at };
   }
   shown = best?.ws ?? null;
@@ -94,25 +94,28 @@ function openTracker(show = true) {
   tracker.on('closed', () => { tracker = null; });
 }
 
-/** "Share game window" inside the app: list the open windows and let the user pick (MapleStory first). */
+/** Sharing through Windows: the MapleStory window, found by its title; when the game isn't running, say so. */
 function handleCapture() {
   session.defaultSession.setDisplayMediaRequestHandler(async (_req, callback) => {
-    const sources = await desktopCapturer.getSources({ types: ['window', 'screen'], thumbnailSize: { width: 0, height: 0 } });
-    const windows = sources.filter(s => s.name && !/MS Classic Tracker Overlay|EXP Tracker|MS Classic Training Tracker/.test(s.name));
-    windows.sort((a, b) => (/maple/i.test(b.name) ? 1 : 0) - (/maple/i.test(a.name) ? 1 : 0));
-    const list = windows.slice(0, 8);
-    if (process.env.OVERLAY_TEST_PICK && list.length) { callback({ video: list[0] }); return; } // development: no dialog
-    const r = await dialog.showMessageBox(tracker?.isVisible() ? tracker : overlay ?? undefined, {
-      type: 'question', title: 'Share a window', message: 'Which window should the tracker read?',
-      buttons: [...list.map(s => s.name.slice(0, 60)), 'Cancel'], cancelId: list.length, defaultId: 0, noLink: true,
-    });
-    if (r.response >= list.length) { callback({}); return; }
-    callback({ video: list[r.response] });
+    const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } });
+    const game = sources.find(s => /^maplestory/i.test(s.name.trim())) ?? sources.find(s => /maplestory/i.test(s.name) && !/tracker|overlay/i.test(s.name));
+    if (game) { callback({ video: game }); return; }
+    callback({});
+    dialog.showMessageBox(overlay ?? undefined, { type: 'error', title: 'MapleStory not found', message: 'MapleStory is not currently running.', detail: 'Start the game, then press ▶ Start tracking again.', noLink: true });
   });
 }
 
+const IDLE_CHOICES = [[0, 'Off'], [30, '30 seconds'], [45, '45 seconds'], [60, '1 minute'], [120, '2 minutes'], [300, '5 minutes']];
 function menu() {
+  const st = shown ? sources.get(shown)?.stats : null, idle = st?.idleSec;
   return Menu.buildFromTemplate([
+    {
+      label: 'Auto-pause when idle', enabled: !!st && st.idleOk !== false,
+      sublabel: st && st.idleOk === false ? 'Off: no EXP or loot is being read' : undefined,
+      submenu: IDLE_CHOICES.map(([v, label]) => ({ label, type: 'radio', checked: idle === v, click: () => sendCmd('idle', v) }))
+        .concat(idle != null && !IDLE_CHOICES.some(([v]) => v === idle) ? [{ label: `${idle} seconds (set on the website)`, type: 'radio', checked: true, enabled: false }] : []),
+    },
+    { type: 'separator' },
     { label: 'Open the tracker here (no browser needed)', click: openTracker },
     { label: 'Open the website in my browser', click: () => shell.openExternal(SITE) },
     { type: 'separator' },
@@ -145,12 +148,12 @@ ipcMain.on('install-update', installUpdate);
  * The overlay's ▶ / ⏸ go to the tracker it shows. To the tracker inside this app they go as a real click (the
  * userGesture flag), so ▶ can open the window picker before starting; a browser tab gets a message instead.
  */
-ipcMain.on('cmd', (_e, cmd) => sendCmd(cmd));
-/** ■ ends the session (saved to History) and stops sharing, after asking. */
+ipcMain.on('cmd', (_e, cmd, value) => sendCmd(cmd, value));
+/** ■ ends the session (saved to History), after asking. */
 ipcMain.on('stop', async () => {
   const r = await dialog.showMessageBox(overlay ?? undefined, {
     type: 'question', title: 'End the session?', buttons: ['End session', 'Cancel'], defaultId: 0, cancelId: 1, noLink: true,
-    message: 'End the session and stop sharing the game window?', detail: 'The session is saved to History.',
+    message: 'End the session?', detail: 'It is saved to History. The game window stays shared, ready for the next session.',
   });
   if (r.response === 0) sendCmd('stop');
 });
@@ -159,32 +162,31 @@ const hasSession = s => s?.stats?.state === 'on' || s?.stats?.state === 'paused'
  * ▶ with no session anywhere tracks right here, no browser needed: this app's own tracker (opened hidden if it isn't
  * open) gets a real click, so it shows the window picker, then starts once the game window is shared.
  */
-async function startHere(cmd = 'start') {
+async function startHere(cmd = 'start', value) {
   openTracker(false);
   const inAppSource = () => [...sources].find(([, s]) => s.inApp)?.[0];
   for (const t0 = Date.now(); !inAppSource() && Date.now() - t0 < 30_000; ) await new Promise(r => setTimeout(r, 300));
   if (!tracker || tracker.isDestroyed()) return;
-  tracker.webContents.executeJavaScript(`window.__overlayCmd && window.__overlayCmd(${JSON.stringify(cmd)})`, true).catch(() => undefined);
+  tracker.webContents.executeJavaScript(`window.__overlayCmd && window.__overlayCmd(${JSON.stringify(cmd)}, ${JSON.stringify(value ?? null)})`, true).catch(() => undefined);
 }
 const webSource = () => [...sources].find(([, s]) => !s.inApp);
 const appSource = () => [...sources].find(([, s]) => s.inApp);
 /**
- * ▶ with the game shared nowhere yet asks how to share it: through Windows (this app tracks it: its picker, then the
- * session starts), or through the browser (the website tab tracks it; Chrome's picker only opens from a click in that
- * tab, so the tab highlights Share game window and starts once it's clicked, or the website opens when no tab is
- * connected).
+ * "▶ Start tracking" asks how to share the game: through Windows (this app tracks it; MapleStory is found by itself),
+ * or through the browser (the website tab tracks it; Chrome's picker only opens from a click in that tab, so the tab
+ * highlights Share game window, or the website opens when no tab is connected). Then the button reads Start session.
  */
 function shareChoice() {
   const web = webSource();
   Menu.buildFromTemplate([
-    { label: 'Share with Windows (track in this app)', click: () => void startHere('start') },
+    { label: 'Share with Windows (track in this app)', click: () => void startHere('share') },
     { label: web ? 'Share in the browser (the website tab)' : 'Share in the browser (opens the website)', click: shareInBrowser },
   ]).popup({ window: overlay });
 }
 function shareInBrowser() {
   const web = webSource();
   if (web) {
-    web[0].send(JSON.stringify({ type: 'cmd', cmd: 'start' }));
+    web[0].send(JSON.stringify({ type: 'cmd', cmd: 'share' }));
     overlay?.webContents.send('notice', 'Click "Share game window" in your browser tab (it is highlighted there)');
   } else {
     shell.openExternal(SITE);
@@ -192,11 +194,13 @@ function shareInBrowser() {
   }
 }
 /**
- * ▶ / ⏸ / ■ go to the tracker the overlay shows. ▶ with no session anywhere starts where the game is already shared, or
- * asks how to share it; ▶ on a paused session resumes it there (that tracker shares first only if it isn't sharing).
+ * The overlay's buttons, by what the main button reads: Start tracking ('share': ask how to share), Start session
+ * ('start': in the tracker that's sharing), ⏸ / ▶ ('pause' / 'start': pause or resume the shown session; resuming shares
+ * again first only if sharing stopped), and ■ ('stop'). 'idle' sets the shown tracker's auto-pause time.
  */
-function sendCmd(cmd) {
-  if (!['start', 'pause', 'stop'].includes(cmd)) return;
+function sendCmd(cmd, value) {
+  if (!['share', 'start', 'pause', 'stop', 'idle'].includes(cmd)) return;
+  if (cmd === 'share') { shareChoice(); return; }
   if (cmd === 'start' && !hasSession(sources.get(shown))) {
     const web = webSource(), own = appSource();
     if (own?.[1].stats?.sharing) { void startHere('start'); return; }
@@ -204,11 +208,8 @@ function sendCmd(cmd) {
     shareChoice(); return;
   }
   if (!shown) return;
-  if (sources.get(shown)?.inApp && tracker && !tracker.isDestroyed()) {
-    tracker.webContents.executeJavaScript(`window.__overlayCmd && window.__overlayCmd(${JSON.stringify(cmd)})`, true).catch(() => undefined);
-    return;
-  }
-  shown.send(JSON.stringify({ type: 'cmd', cmd }));
+  if (sources.get(shown)?.inApp && tracker && !tracker.isDestroyed()) { void startHere(cmd, value); return; }
+  shown.send(JSON.stringify({ type: 'cmd', cmd, value }));
 }
 ipcMain.on('open-tracker', openTracker);
 
@@ -266,7 +267,7 @@ else {
   app.whenReady().then(() => {
     registerProtocol(); startLink(); handleCapture(); createOverlay(); startUpdates();
     // development: OVERLAY_TEST_START=<ms> presses the overlay's ▶ (with OVERLAY_TEST_CMD=windows, picks "Share with Windows")
-    if (process.env.OVERLAY_TEST_START) setTimeout(() => (process.env.OVERLAY_TEST_CMD === 'windows' ? startHere('start') : sendCmd('start')), +process.env.OVERLAY_TEST_START);
+    if (process.env.OVERLAY_TEST_START) setTimeout(() => (process.env.OVERLAY_TEST_CMD === 'windows' ? startHere('start') : process.env.OVERLAY_TEST_CMD === 'share' ? startHere('share') : process.env.OVERLAY_TEST_CMD === 'stop' ? startHere('stop') : sendCmd('start')), +process.env.OVERLAY_TEST_START);
     // development: OVERLAY_TEST_STOP=<ms> presses ■ (without its confirmation) that long after start
     if (process.env.OVERLAY_TEST_STOP) setTimeout(() => sendCmd('stop'), +process.env.OVERLAY_TEST_STOP);
   });

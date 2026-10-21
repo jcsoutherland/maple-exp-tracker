@@ -30,7 +30,7 @@ export function SessionBar() {
   const asked = !cap.sharing && Date.now() - c.shareAsked < 120_000;
   return (
     <div className="ctlbar">
-      {asked && <div className="note warnnote" style={{ width: '100%', margin: '0 0 8px' }}><span>The desktop overlay asked to track through this tab: click <b>Share game window</b> and the session starts.</span></div>}
+      {asked && <div className="note warnnote" style={{ width: '100%', margin: '0 0 8px' }}><span>The desktop overlay asked to share the game window through this tab: click <b>Share game window</b>, then start the session (here or on the overlay).</span></div>}
       <span className={'pill' + (cap.ready ? ' on' : cap.sharing ? ' warn' : '')}>{cap.ready ? (cap.kind === 'file' ? 'Video: ' + cap.label : 'Capturing') : cap.sharing ? 'Waiting for frames' : 'No capture'}</span>
       <span className={'pill' + (s ? (s.paused ? ' warn' : ' on') : '')}>{!s ? 'Idle' : s.paused ? (c.autoPaused ? 'Paused (idle)' : 'Paused') : 'Tracking'}</span>
       <div className="btns">

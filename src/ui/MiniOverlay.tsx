@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { featureOn, type Feature } from '../core/config';
+import { canAutoPause, featureOn, type Feature } from '../core/config';
 import { fmtDur, fmtHM, fmtK, fmtN } from '../core/util';
 import { useGoal, useRate } from './GoalPanel';
 import { toast, useCtrl } from './hooks';
@@ -43,8 +43,10 @@ export interface OverlayStats {
   action: 'start' | 'pause' | 'resume'; actionOk: boolean;
   /** the game window is being shared with this tracker */
   sharing: boolean;
-  /** ■ has something to end: a session, or a shared window */
+  /** ■ has a session to end */
   canStop: boolean;
+  /** auto-pause after this many idle seconds (0 = off), and whether it can work with the features switched on */
+  idleSec: number; idleOk: boolean;
 }
 
 /** The overlay's numbers: level and EXP bar, recent and session EXP, time to the level goal, and profit. */
@@ -65,7 +67,8 @@ export function useOverlayStats(): OverlayStats {
     // with no session, ▶ shares the game window first when needed (see controller.startFromOverlay)
     action: !s ? 'start' : s.paused ? 'resume' : 'pause', actionOk: !!s || c.ocrState !== 'error',
     sharing: c.capture.sharing || (c.capture.kind === 'file' && c.capture.ready),
-    canStop: !!s || c.capture.sharing,
+    canStop: !!s,
+    idleSec: c.settings.idlePauseSec, idleOk: canAutoPause(c.settings),
   };
 }
 

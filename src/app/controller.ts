@@ -5,7 +5,7 @@ import { potionByName } from '../core/potions';
 import { fitQuickslot, GLYPHS, readSlotCount, SlotCounter } from '../core/potcount';
 import { SlotWatch, slotStrip } from '../core/slotwatch';
 import { crossRead, readSlotSprite } from '../core/itemno';
-import { DesktopLink, inDesktopApp } from './desktopLink';
+import { DesktopLink, inDesktopApp, type OverlayCmd } from './desktopLink';
 import { HotbarAuto, loadPotionIcons, scanSlots, type IconTpl, type ScanMemo } from '../core/hotbarscan';
 /** how often the quickslot is checked for which potions it holds */
 const HOTBAR_SCAN_MS = 2000;
@@ -106,11 +106,15 @@ export class Controller {
   private scratch = { sig: document.createElement('canvas'), gauge: document.createElement('canvas'), slots: document.createElement('canvas') };
 
   /** the link to the desktop overlay app: on when switched on in Setup, or when this page runs inside the app */
-  desktop = new DesktopLink(cmd => {
-    if (cmd === 'pause') { if (this.sess && !this.sess.paused) this.togglePause(); return; }
-    if (cmd === 'stop') { this.stopFromOverlay(); return; }
-    void this.shareFromOverlay();
-  }, () => this.notify());
+  desktop = new DesktopLink((cmd, value) => this.overlayCmd(cmd, value), () => this.notify());
+  /** A button on the desktop overlay (see desktopLink.ts): share, start / resume, pause, stop, or set the idle time. */
+  overlayCmd(cmd: OverlayCmd, value?: unknown) {
+    if (cmd === 'pause') { if (this.sess && !this.sess.paused) this.togglePause(); }
+    else if (cmd === 'stop') this.stopFromOverlay();
+    else if (cmd === 'share') void this.shareFromOverlay();
+    else if (cmd === 'idle') { const v = Number(value); if (Number.isFinite(v) && v >= 0 && v <= 3600) this.updateSettings({ idlePauseSec: Math.round(v) }); }
+    else void this.startFromOverlay().then(why => { if (why === 'needs-click') this.askToShare(); });
+  }
   /**
    * The overlay's ▶ with no session: share the game window first when it isn't shared yet, then start once frames come
    * in. Sharing asks the browser's window picker, which only opens from a click in this page (or, in the desktop app, a
@@ -133,11 +137,9 @@ export class Controller {
     await this.start();
     return 'started';
   }
-  /** The overlay's ■: end the session (saved to History) and stop sharing the game window. */
+  /** The overlay's ■: end the session, saved to History (the game window stays shared, ready for the next one). */
   stopFromOverlay() {
     if (this.sess) this.stop();
-    this.stopCapture();
-    this.shareAsked = 0;
     this.notify();
   }
   private syncDesktop() { this.desktop.enable(this.settings.desktopOverlay || inDesktopApp()); }
@@ -147,21 +149,18 @@ export class Controller {
    */
   shareAsked = 0;
   async shareFromOverlay() {
-    if (this.capture.sharing) { void this.startFromOverlay(); return; }
-    try { await this.shareScreen(); } catch {
-      this.shareAsked = Date.now(); this.notify();
-      this.desktop.notice('Click "Share game window" in your browser tab: the session starts once it\'s shared');
-      return;
-    }
-    void this.startFromOverlay();
+    if (this.capture.sharing) return;
+    const clicked = navigator.userActivation?.isActive ?? true;
+    try { await this.shareScreen(); } catch { if (!clicked && !inDesktopApp()) this.askToShare(); }
+  }
+  /** The overlay's click can't open this tab's picker: highlight Share game window here, and say so on the overlay. */
+  private askToShare() {
+    this.shareAsked = Date.now(); this.notify();
+    this.desktop.notice('Click "Share game window" in your browser tab (it is highlighted there)');
   }
   /** inside the desktop app, the overlay's buttons arrive as real clicks (so the window picker may open) through this */
   private exposeOverlayCmd() {
-    if (inDesktopApp()) (window as unknown as { __overlayCmd?: (c: string) => void }).__overlayCmd = c => {
-      if (c === 'pause') { if (this.sess && !this.sess.paused) this.togglePause(); }
-      else if (c === 'stop') this.stopFromOverlay();
-      else void this.startFromOverlay();
-    };
+    if (inDesktopApp()) (window as unknown as { __overlayCmd?: (c: OverlayCmd, v?: unknown) => void }).__overlayCmd = (c, v) => this.overlayCmd(c, v);
   }
   constructor() {
     queueMicrotask(() => { this.syncDesktop(); this.exposeOverlayCmd(); });
@@ -209,8 +208,7 @@ export class Controller {
   }
   async shareScreen() {
     const ok = await this.capture.startScreen(); this.reloadRegions(); this.initOcr();
-    // shared after the desktop overlay's ▶ asked for it: start the session it wanted
-    if (this.shareAsked && Date.now() - this.shareAsked < 120_000) { this.shareAsked = 0; void this.startFromOverlay(); }
+    this.shareAsked = 0;
     this.notify(); return ok;
   }
   async useVideo(file: File, rate: number) { const ok = await this.capture.useFile(file, rate); this.reloadRegions(); this.initOcr(); this.notify(); return ok; }
