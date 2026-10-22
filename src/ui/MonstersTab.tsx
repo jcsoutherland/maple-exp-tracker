@@ -6,7 +6,7 @@ import { fmtHM, fmtN } from '../core/util';
 import { toast, useCtrl } from './hooks';
 
 /** monsters show up once they have this many kills */
-const MIN_KILLS = 100;
+const MIN_KILLS = 50;
 type SortKey = 'kills' | 'level' | 'exp' | 'ms';
 const COLUMNS: [SortKey, string][] = [['level', 'Lv'], ['kills', '≈ Kills'], ['exp', 'EXP'], ['ms', 'Time']];
 

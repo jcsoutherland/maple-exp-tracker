@@ -7,9 +7,10 @@ const LIVES: Record<string, string[]> = { 'Jr. Necki': ['Subway'], Stirge: ['Sub
 const lookup: MobLookup = {
   livesOn: (mob, map) => LIVES[mob]?.includes(map) ?? false,
   soleMob: map => { const here = Object.keys(LIVES).filter(m => LIVES[m].includes(map)); return here.length === 1 ? here[0] : null; },
+  baseExp: m => baseExp(m),
 };
 const BASE: Record<string, number> = { 'Jr. Necki': 50, Stirge: 40, Ligator: 60 };
-const baseExp = (m: string) => BASE[m] ?? null;
+function baseExp(m: string) { return BASE[m] ?? null; }
 
 const session = (id: number, p: Partial<SavedSession> = {}) => ({
   id, char: 'Flynny', start: id, end: id + 3_600_000, activeMs: 3_600_000, exp: 0, maps: {}, ...p,
@@ -28,6 +29,11 @@ describe('estimating a session\'s kills', () => {
     const k = sessionKills(session(1, { exp: 6000, maps: { Swamp: 6000 } }), lookup);
     expect(k.mobs.Ligator.exp).toBe(6000);
   });
+  it('splits a map\'s EXP between the monsters that dropped there, as if each drops alike', () => {
+    // 30 Jr. Necki and 10 Stirge drops: kills 3:1, so EXP 30×50 : 10×40 = 1500 : 400
+    const k = sessionKills(session(1, { exp: 19000, maps: { Subway: 19000 }, mobs: { 'Jr. Necki': { n: 30, last: 0 }, Stirge: { n: 10, last: 0 } } }), lookup);
+    expect(k.mobs.Stirge.exp).toBe(4000);
+  });
   it('splits an old session\'s time by each map\'s share of the EXP', () => {
     const k = sessionKills(session(1, { exp: 8000, maps: { Swamp: 2000, Subway: 6000 }, mobs: { 'Jr. Necki': { n: 1, last: 0 } } }), lookup);
     expect(k.mobs.Ligator.ms).toBe(900_000);
@@ -43,6 +49,10 @@ describe('the leaderboard', () => {
   it('counts each session once', () => {
     const once = foldSessions({}, [s1], lookup).board;
     expect(foldSessions(once, [s1], lookup).added).toBe(0);
+  });
+  it('re-checks a session counted under an older rule', () => {
+    const old = { Flynny: { sessions: { [s1.id]: { start: s1.start, end: s1.end, mobs: {} } } } };
+    expect(totals(foldSessions(old, [s1], lookup).board.Flynny, baseExp)[0].kills).toBe(200);
   });
   it('isn\'t refilled from History after it was cleared', () => {
     const cleared = clearChar(foldSessions({}, [s1], lookup).board, 'Flynny', s1.end + 1);

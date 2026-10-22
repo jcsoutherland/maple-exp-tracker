@@ -147,7 +147,7 @@ export function soleMob(map: string): string | null {
   return here.length === 1 ? here[0].name : null;
 }
 /** what the monster leaderboard needs to know about maps (see core/leaderboard.ts) */
-export const mobLookup = { livesOn: (mob: string, map: string) => !!mobByName(mob)?.maps.includes(map), soleMob };
+export const mobLookup = { livesOn: (mob: string, map: string) => !!mobByName(mob)?.maps.includes(map), soleMob, baseExp: (mob: string) => mobByName(mob)?.exp ?? null };
 
 const mobUrls = new Map<string, Promise<string | null>>();
 /** Object URL for a monster's animated idle (or still) image; fetched from OSMS once, then from IndexedDB. */

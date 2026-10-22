@@ -71,9 +71,9 @@ The app reads `/data/` first and only asks the original site for a file the mirr
 `src/core/leaderboard.ts` (pure, tested) estimates kills per monster, stored apart from History in `met.kills` as `char → { clearedAt?, sessions: id → per-monster EXP, time, drops, time per map }`. It's stored per session, so syncing, re-importing and backfilling never count twice.
 
 - **While a session runs**, the tracker credits each EXP gain to a monster only when it's fairly clear which one is being fought: that monster's etc drop came on this map in the last 5 minutes, or it's the map's only regular monster (`soleMob` in `data/osms.ts`). It adds the time since the previous gain, capped at 60 s. This is stored as `Session.kills`.
-- **Older sessions** (no `kills`) are estimated from EXP per map. A map counts when one monster with etc drops that session lives on it, or else when it has a single regular monster; time is split by each map's share of the EXP.
+- **Older sessions** (no `kills`) are estimated from EXP per map. A map's EXP is split between the monsters living there that dropped etc items that session, with kills in proportion to drops (as if they drop alike); with none, it goes to the map's single regular monster, else nowhere. Time is split the same way. Each stored session carries the rule version (`RULE`); raising it makes every session still in History be worked out again.
 - **`controller.syncLeaderboard()`** folds every History session not yet on the board, once the monster data has loaded. It runs on load, when a session is saved, on desktop sync and on JSON import. Sessions that ended before a character's `clearedAt` are skipped.
-- **Kills shown** = `max(round(EXP ÷ the monster's base EXP), etc drops)`. Only monsters with 100+ kills are listed.
+- **Kills shown** = `max(round(EXP ÷ the monster's base EXP), etc drops)`. Only monsters with 50+ kills are listed.
 
 ## Desktop overlay app
 

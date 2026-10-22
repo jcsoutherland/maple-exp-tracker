@@ -36,7 +36,7 @@ Each potion's count is then read live: when it goes down you drank one, and poti
 - **Live**: your session at a glance: character, stats, monsters, potions, level goal, kills estimate, charts, activity and loot & profit.
 - **Potions**: your hotbar and potion lists (drag one to the top to make it Active).
 - **Drops**: everything picked up this session, with links to player prices on meowdb and meso.watch.
-- **Killcount**: your all-time leaderboard per character: roughly how many of each monster you've killed (once a monster passes 100), with the EXP it gave you, time spent on it, your top map for it, and when you first and last hunted it. Kills are an estimate, worked out from EXP and etc drops, and a session's kills are added when it ends. Clearing History doesn't touch it; **Clear leaderboard** starts it over.
+- **Killcount**: your all-time leaderboard per character: roughly how many of each monster you've killed (once a monster passes 50), with the EXP it gave you, time spent on it, your top map for it, and when you first and last hunted it. Kills are an estimate, worked out from EXP and etc drops, and a session's kills are added when it ends. Clearing History doesn't touch it; **Clear leaderboard** starts it over.
 - **History**: past sessions per character. **Archive sessions** groups them by day with daily totals, **Clear history** deletes a character's sessions, and you can export or import them as a JSON file.
 - **Setup**: screen regions, read speeds and other settings.
 

@@ -9,7 +9,10 @@ import type { SavedSession } from './session';
 
 /** one monster in one session: EXP credited to it, time spent fighting it (ms, also per map), etc drops from it */
 export interface MobKills { exp: number; ms: number; drops: number; maps: Record<string, number> }
-export interface SessionKills { start: number; end: number; mobs: Record<string, MobKills> }
+/** `v`: the counting rule it was worked out with (sessions from an older rule are worked out again) */
+export interface SessionKills { start: number; end: number; mobs: Record<string, MobKills>; v?: number }
+/** the counting rule: raise it whenever the estimate changes, so past sessions are re-checked */
+const RULE = 2;
 export interface CharBoard { sessions: Record<string, SessionKills>; clearedAt?: number }
 export type Board = Record<string, CharBoard>;
 
@@ -19,39 +22,54 @@ export interface MobLookup {
   livesOn(mob: string, map: string): boolean;
   /** the map's only regular monster (null when there are several, or none known) */
   soleMob(map: string): string | null;
+  /** the EXP one kill of this monster gives (null when unknown) */
+  baseExp(mob: string): number | null;
 }
 
 /**
  * A finished session's kills: as credited while it ran, or, for sessions from before that, estimated from its EXP
- * per map. A map counts only when one monster clearly goes with it: the one monster whose etc drops came that session
- * and lives there, or else the map's only regular monster.
+ * per map. A map's EXP goes to the monsters living there whose etc drops came that session, split as if each of them
+ * drops alike (kills in proportion to drops); with none of them, to the map's only regular monster; else to nobody.
  */
 export function sessionKills(s: SavedSession, lookup: MobLookup): SessionKills {
-  const out: SessionKills = { start: s.start, end: s.end, mobs: {} };
+  const out: SessionKills = { start: s.start, end: s.end, mobs: {}, v: RULE };
   const dropsOf = (mob: string) => s.mobs?.[mob]?.n ?? 0;
   if (s.kills) {
     for (const [mob, k] of Object.entries(s.kills)) out.mobs[mob] = { exp: k.exp, ms: k.ms, maps: { ...k.maps }, drops: dropsOf(mob) };
     return out;
   }
-  const dropped = Object.keys(s.mobs ?? {});
   for (const [map, exp] of Object.entries(s.maps)) {
-    const here = dropped.filter(m => lookup.livesOn(m, map));
-    const mob = here.length === 1 ? here[0] : here.length === 0 ? lookup.soleMob(map) : null;
-    if (!mob) continue;
     const ms = s.exp > 0 ? Math.round(s.activeMs * exp / s.exp) : 0;
-    const k = out.mobs[mob] ??= { exp: 0, ms: 0, drops: dropsOf(mob), maps: {} };
-    k.exp += exp; k.ms += ms; k.maps[map] = (k.maps[map] ?? 0) + ms;
+    for (const [mob, share] of mapShares(s, map, lookup)) {
+      const k = out.mobs[mob] ??= { exp: 0, ms: 0, drops: dropsOf(mob), maps: {} };
+      k.exp += Math.round(exp * share); k.ms += Math.round(ms * share);
+      k.maps[map] = (k.maps[map] ?? 0) + Math.round(ms * share);
+    }
   }
   return out;
 }
 
-/** History's sessions added to the board: each once, and none from before a character's leaderboard was cleared. */
+/** Who a map's EXP goes to, and what share each: monsters that dropped there by kills (∝ drops) × EXP per kill. */
+function mapShares(s: SavedSession, map: string, lookup: MobLookup): [string, number][] {
+  const weights = Object.entries(s.mobs ?? {})
+    .map(([mob, d]) => [mob, lookup.livesOn(mob, map) ? d.n * (lookup.baseExp(mob) ?? 0) : 0] as [string, number])
+    .filter(([, w]) => w > 0);
+  const sum = weights.reduce((a, [, w]) => a + w, 0);
+  if (sum > 0) return weights.map(([mob, w]) => [mob, w / sum]);
+  const sole = lookup.soleMob(map);
+  return sole ? [[sole, 1]] : [];
+}
+
+/**
+ * History's sessions added to the board: each once (again only when the counting rule changed since), and none from
+ * before a character's leaderboard was cleared.
+ */
 export function foldSessions(board: Board, sessions: SavedSession[], lookup: MobLookup): { board: Board; added: number } {
   let added = 0;
   const next: Board = { ...board };
   for (const s of sessions) {
     const cur = next[s.char] ?? { sessions: {} };
-    if (cur.sessions[s.id] || (cur.clearedAt != null && s.end <= cur.clearedAt)) continue;
+    if (cur.sessions[s.id]?.v === RULE || (cur.clearedAt != null && s.end <= cur.clearedAt)) continue;
     next[s.char] = { ...cur, sessions: { ...cur.sessions, [s.id]: sessionKills(s, lookup) } };
     added++;
   }
