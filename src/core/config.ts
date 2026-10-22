@@ -124,6 +124,7 @@ export const FEATURES = {
   drops: { label: 'Drop tracking', reads: 'pickup log, map name' },
   potions: { label: 'Potion tracking', reads: 'HP/MP numbers, quickslot' },
   activity: { label: 'Activity log', reads: '' },
+  leaderboard: { label: 'Killcount', reads: '' },
 } as const;
 export type Feature = keyof typeof FEATURES;
 /** Is this feature on? (all are, unless switched off) */

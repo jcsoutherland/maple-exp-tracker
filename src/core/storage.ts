@@ -1,5 +1,6 @@
 import type { CharLook } from './avatar/msio';
 import { DEFAULT_SETTINGS, presetRegions, type Region, type RegionKey, type Settings, type UiRatio } from './config';
+import type { Board } from './leaderboard';
 import type { SavedSession, Session } from './session';
 
 /** localStorage helpers; every access is guarded (private windows and blocked storage throw). */
@@ -10,7 +11,7 @@ function write(k: string, v: unknown) {
   try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { console.warn('storage write failed', k, e); }
 }
 
-const K = { settings: 'met.settings', regions: 'met.regions', sessions: 'met.sessions', chars: 'met.chars', active: 'met.active' };
+const K = { settings: 'met.settings', regions: 'met.regions', sessions: 'met.sessions', chars: 'met.chars', active: 'met.active', kills: 'met.kills' };
 
 export const loadSettings = (): Settings => {
   const s = read<Partial<Settings>>(K.settings, {});
@@ -37,6 +38,10 @@ export const hasSavedRegions = (ratio: UiRatio) => read<unknown>(regionsKey(rati
 
 export const loadSessions = () => read<SavedSession[]>(K.sessions, []);
 export const saveSessions = (s: SavedSession[]) => write(K.sessions, s);
+
+/** the monster leaderboard (kept apart from History, so clearing History doesn't erase it) */
+export const loadKills = () => read<Board>(K.kills, {});
+export const saveKills = (b: Board) => write(K.kills, b);
 
 export interface CharInfo {
   cls?: string; level?: number | null; last?: number;

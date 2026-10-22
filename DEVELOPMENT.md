@@ -66,6 +66,15 @@ To keep traffic to those community sites tiny, the app doesn't download from the
 
 The app reads `/data/` first and only asks the original site for a file the mirror doesn't have yet (`src/core/mirror.ts`); each device also keeps what it loaded in IndexedDB.
 
+## Monster leaderboard
+
+`src/core/leaderboard.ts` (pure, tested) estimates kills per monster, stored apart from History in `met.kills` as `char → { clearedAt?, sessions: id → per-monster EXP, time, drops, time per map }`. It's stored per session, so syncing, re-importing and backfilling never count twice.
+
+- **While a session runs**, the tracker credits each EXP gain to a monster only when it's fairly clear which one is being fought: that monster's etc drop came on this map in the last 5 minutes, or it's the map's only regular monster (`soleMob` in `data/osms.ts`). It adds the time since the previous gain, capped at 60 s. This is stored as `Session.kills`.
+- **Older sessions** (no `kills`) are estimated from EXP per map. A map counts when one monster with etc drops that session lives on it, or else when it has a single regular monster; time is split by each map's share of the EXP.
+- **`controller.syncLeaderboard()`** folds every History session not yet on the board, once the monster data has loaded. It runs on load, when a session is saved, on desktop sync and on JSON import. Sessions that ended before a character's `clearedAt` are skipped.
+- **Kills shown** = `max(round(EXP ÷ the monster's base EXP), etc drops)`. Only monsters with 100+ kills are listed.
+
 ## Desktop overlay app
 
 `desktop/` is a small Electron app: the overlay window (`overlay.html`), the main process (`main.js`: windows, menu, buttons, updates), the link (`link.js`), what it keeps on disk (`store.js`: `overlay.json`, `outbox.json`, `setup.json`, `overlay.log` in its userData folder) and the game lookup (`game.js`).

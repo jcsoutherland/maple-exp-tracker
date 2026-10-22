@@ -21,6 +21,8 @@ export interface TrackerDeps {
   potsCounted?: (kind: 'hp' | 'mp') => boolean;
   /** the monster an etc drop comes from (null = not known) */
   mobForDrop?: (item: string, map: string | null) => string | null;
+  /** the map's only regular monster (null when there are several, or none known) */
+  soleMob?: (map: string) => string | null;
   now?: () => number;
   /** every event also goes here (the diagnostics log) */
   onEvent?: (type: EventType, text: string) => void;
@@ -32,6 +34,10 @@ export type ExpResult = 'level' | 'candidate' | null;
 const DEFAULT_KILL_EXP = 1000;
 /** believable kill rate and party / event bonus: the EXP cap is killExp × KILLS_PER_SEC × BONUS per second */
 const KILLS_PER_SEC = 2, BONUS = 2;
+/** a monster's etc drop names the one being fought on that map for this long */
+const DROP_NAMES_MOB_MS = 5 * 60_000;
+/** time between EXP gains counts as fighting up to this long (a longer gap is a break) */
+const GAIN_GAP_MAX_MS = 60_000;
 /** a suspected level-up that neither the level number nor the EXP total confirms within this long was a misread */
 const LEVEL_CONFIRM_MS = 180_000;
 
@@ -107,6 +113,9 @@ export class Tracker {
   // pickup log
   private logPrev: string[] = [];
   private mesoAmts: number[] = [];
+  // monster leaderboard: each monster's latest etc drop (map and when), and when EXP last came in
+  private dropMob = new Map<string, { map: string; at: number }>();
+  private lastGainAt = 0;
 
   constructor(public sess: Session, private deps: TrackerDeps) {}
 
@@ -121,12 +130,30 @@ export class Tracker {
 
   /** Forget bar/log baselines (after a pause) so changes while paused aren't counted. */
   rebaseline() {
-    this.exp = null; this.firsts = []; this.big = null; this.pend = null; this.drop = null; this.strikes = 0; this.lvCand = null;
+    this.exp = null; this.firsts = []; this.big = null; this.pend = null; this.drop = null; this.strikes = 0; this.lvCand = null; this.lastGainAt = 0;
     this.hp.cur = this.mp.cur = null; this.hp.buf = []; this.mp.buf = []; this.logPrev = [];
     this.gauge = { hp: newGauge(), mp: newGauge() };
   }
 
-  private gain(d: number) { const s = this.sess; s.exp += d; const m = this.mapName; s.maps[m] = (s.maps[m] || 0) + d; }
+  private gain(d: number) { const s = this.sess; s.exp += d; const m = this.mapName; s.maps[m] = (s.maps[m] || 0) + d; this.creditMob(d); }
+  /**
+   * For the monster leaderboard: EXP goes to the monster being fought when that's fairly clear (its etc drop came on
+   * this map in the last few minutes, or it's the map's only regular monster), with the time since the last gain.
+   */
+  private creditMob(d: number) {
+    const map = this.mapCur, now = this.now();
+    const ms = this.lastGainAt ? Math.min(now - this.lastGainAt, GAIN_GAP_MAX_MS) : 0;
+    this.lastGainAt = now;
+    const mob = map ? this.mobFought(map, now) : null;
+    if (!map || !mob) return;
+    const k = ((this.sess.kills ??= {})[mob] ??= { exp: 0, ms: 0, maps: {} });
+    k.exp += d; k.ms += ms; k.maps[map] = (k.maps[map] ?? 0) + ms;
+  }
+  /** the monster being fought on this map: the latest etc drop's, or the map's only regular monster */
+  private mobFought(map: string, now: number) {
+    const recent = [...this.dropMob].filter(([, x]) => x.map === map && now - x.at <= DROP_NAMES_MOB_MS).sort((a, b) => b[1].at - a[1].at);
+    return recent[0]?.[0] ?? this.deps.soleMob?.(map) ?? null;
+  }
   /** EXP the current level takes, from the game's table (null when the level isn't known) */
   private tableTotal() { const lv = this.sess.level; return lv != null ? expToNext(lv) : null; }
   private setTotal(r: ExpReading) {
@@ -416,7 +443,10 @@ export class Tracker {
         d.qty += it.qty;
         this.event('drop', `${nm} ×${it.qty}`);
         const mob = this.deps.mobForDrop?.(nm, this.mapCur);
-        if (mob) { const m = ((s.mobs ??= {})[mob] ??= { n: 0, last: 0 }); m.n += it.qty; m.last = elapsed(s, this.now()); }
+        if (mob) {
+          const m = ((s.mobs ??= {})[mob] ??= { n: 0, last: 0 }); m.n += it.qty; m.last = elapsed(s, this.now());
+          if (this.mapCur) this.dropMob.set(mob, { map: this.mapCur, at: this.now() });
+        }
       } else if (kind === 'meso') {
         const n = lineAmount(l);
         if (!n) continue;

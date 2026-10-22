@@ -15,7 +15,7 @@ const HOTBAR_SCAN_MS = 2000;
 
 /** a potion sighting that isn't confirmed by then is dropped */
 const PENDING_MAX_MS = 30_000;
-import { allItems, canonItem, canonMap, dropsOnMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobsSettled, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
+import { allItems, canonItem, canonMap, dropsOnMap, loadOsms, mapsReady, maxMobExp, mobForItem, mobLookup, mobsReady, mobsSettled, soleMob, onOsmsLoaded, osmsReady, osmsSettled } from '../core/data/osms';
 import { ExpLineFilter, LineShapeFilter, LogAnchor, snapInk, snapLine, type LineSnap } from '../core/logqueue';
 import { readLogSnap } from '../core/logread';
 import { matchLine, matchSnap, nativeStrip, parenScore, type LineMatch, type NameLists } from '../core/logmatch';
@@ -28,6 +28,7 @@ import { cleanMap, cleanName, lineAmount, lineKind, lineQuality, matchClass, par
 import { elapsed, finalize, newSession, type SavedSession, type Session } from '../core/session';
 import * as store from '../core/storage';
 import { diag, onDiag } from '../core/diaglog';
+import { foldSessions } from '../core/leaderboard';
 import { Ticker } from '../core/ticker';
 import { Tracker } from '../core/tracker';
 import { median, normLine, sim } from '../core/util';
@@ -202,8 +203,8 @@ export class Controller {
       this.notify();
     };
     this.capture.onChange = () => this.notify();
-    loadOsms().then(() => this.notify());
-    onOsmsLoaded(() => this.notify());
+    loadOsms().then(() => { this.syncLeaderboard(); this.notify(); });
+    onOsmsLoaded(() => { this.syncLeaderboard(); this.notify(); });
     setTimeout(() => this.notify(), BOOT_MAX_MS + 50); // let the loading screen time out even if nothing else changes
     this.loadLook();
   }
@@ -269,6 +270,7 @@ export class Controller {
     return new Tracker(s, {
       hpMin: () => this.settings.hpMin, mpMin: () => this.settings.mpMin,
       canonItem: raw => canonItem(raw), canonMap: raw => canonMap(raw), itemsKnown: osmsReady, mapsKnown: mapsReady, maxMobExp, potsCounted: k => this.potsCounted(k), mobForDrop: (item, map) => mobForItem(item, map)?.name ?? null,
+      soleMob,
       onEvent: (type, text) => { if (type === 'info' || type === 'level' || type === 'death') diag('event', text); },
     });
   }
@@ -404,6 +406,7 @@ export class Controller {
     this.sess = null; this.tracker = null; this.lastFinished = out; this.historyVersion++;
     if (out.level) this.identity.level = out.level;
     if (inDesktopApp()) this.desktop.sendSaved(out); // for the website's History
+    this.syncLeaderboard();
     this.notify();
     return out;
   }
@@ -448,6 +451,16 @@ export class Controller {
         `timers=${this.ticker.describe()}`, `exp=${s?.exp ?? '-'}`, ...this.expReadSummary(), `link=${this.desktop.state}`, `mirror=${!!this.remote}`,
       ].join(' '));
     }, 60_000);
+  }
+
+  // ---------- monster leaderboard ----------
+  /** Add saved sessions that aren't on the monster leaderboard yet (once the monster data is in to tell monsters apart). */
+  syncLeaderboard() {
+    if (!mobsReady()) return;
+    const { board, added } = foldSessions(store.loadKills(), store.loadSessions(), mobLookup);
+    if (!added) return;
+    store.saveKills(board);
+    this.historyVersion++;
   }
 
   // ---------- the desktop app ----------
@@ -498,6 +511,7 @@ export class Controller {
     store.saveChars(ch);
     // the newest one stays up on the dashboard (this page shows no session of its own, or the app's that just ended)
     if (!this.sess || this.remote) this.lastFinished = merged[merged.length - 1];
+    this.syncLeaderboard();
     this.historyVersion++;
     this.notify();
   }

@@ -110,6 +110,22 @@ describe('EXP bar', () => {
     t.onExp(L(85927));
     expect(s.exp).toBe(85927 - 85857);
   });
+  it('credits no monster with EXP on a map with several kinds and no recent drop', () => {
+    const s = newSession('Flynny', 'Hunter', 38, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => 0, soleMob: () => null });
+    t.mapCur = 'Subway';
+    const L = (exp: number) => ({ exp, pct: Math.floor(exp * 10000 / 240500) / 100 });
+    t.onExp(L(85857)); t.onExp(L(85892));
+    expect(s.kills).toBeUndefined();
+  });
+  it('credits EXP to the monster whose etc drop just came on this map', () => {
+    const s = newSession('Flynny', 'Hunter', 38, 0);
+    const t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => 0, soleMob: () => null, mobForDrop: () => 'Jr. Necki' });
+    t.mapCur = 'Subway';
+    const L = (exp: number) => ({ exp, pct: Math.floor(exp * 10000 / 240500) / 100 });
+    t.onLogLines(['Jr. Necki Skin x1 earned. (Etc)']);
+    t.onExp(L(85857)); t.onExp(L(85892));
+    expect(s.kills?.['Jr. Necki'].exp).toBe(35);
+  });
   it('says a counted read was counted (for the diagnostics log)', () => {
     const s = newSession('Flynny', 'Hunter', 38, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => 0 });
     const L = (exp: number) => ({ exp, pct: Math.floor(exp * 10000 / 240500) / 100 });

@@ -141,6 +141,13 @@ export function mobForItem(itemName: string, map: string | null): MobRec | null 
   return hits.find(m => map && m.maps.includes(map)) ?? hits[0] ?? null;
 }
 export const mobByName = (name: string) => mobs.find(m => m.name === name) ?? null;
+/** the map's only regular monster (null when there are several, or none known) */
+export function soleMob(map: string): string | null {
+  const here = mobsOnMap(map).filter(m => !m.boss);
+  return here.length === 1 ? here[0].name : null;
+}
+/** what the monster leaderboard needs to know about maps (see core/leaderboard.ts) */
+export const mobLookup = { livesOn: (mob: string, map: string) => !!mobByName(mob)?.maps.includes(map), soleMob };
 
 const mobUrls = new Map<string, Promise<string | null>>();
 /** Object URL for a monster's animated idle (or still) image; fetched from OSMS once, then from IndexedDB. */

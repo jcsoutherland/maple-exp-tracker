@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { summaryText, type SavedSession } from '../core/session';
+import { mergeBoards, type Board } from '../core/leaderboard';
 import * as store from '../core/storage';
 import { fmtHM, fmtK, fmtN } from '../core/util';
 import { DropTable } from './DropsTab';
@@ -39,7 +40,7 @@ export function HistoryTab() {
   };
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify({ sessions: all, chars }, null, 1)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ sessions: all, chars, kills: store.loadKills() }, null, 1)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `maple-exp-${new Date().toISOString().slice(0, 10)}.json`;
@@ -47,10 +48,12 @@ export function HistoryTab() {
   };
   const importJson = async (f: File) => {
     try {
-      const d = JSON.parse(await f.text()) as { sessions?: SavedSession[]; chars?: ReturnType<typeof store.loadChars> };
+      const d = JSON.parse(await f.text()) as { sessions?: SavedSession[]; chars?: ReturnType<typeof store.loadChars>; kills?: Board };
       const ids = new Set(all.map(s => s.id));
       store.saveSessions([...all, ...(d.sessions || []).filter(s => !ids.has(s.id))]);
       store.saveChars({ ...(d.chars || {}), ...chars });
+      if (d.kills) store.saveKills(mergeBoards(store.loadKills(), d.kills));
+      c.syncLeaderboard();
       refresh(); toast('Imported');
     } catch { toast('Import failed'); }
   };
