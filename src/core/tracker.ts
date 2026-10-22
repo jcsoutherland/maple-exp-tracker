@@ -144,10 +144,19 @@ export class Tracker {
     const map = this.mapCur, now = this.now();
     const ms = this.lastGainAt ? Math.min(now - this.lastGainAt, GAIN_GAP_MAX_MS) : 0;
     this.lastGainAt = now;
-    const mob = map ? this.mobFought(map, now) : null;
-    if (!map || !mob) return;
-    const k = ((this.sess.kills ??= {})[mob] ??= { exp: 0, ms: 0, maps: {} });
+    const k = this.foughtEntry(now);
+    if (!k || !map) return;
     k.exp += d; k.ms += ms; k.maps[map] = (k.maps[map] ?? 0) + ms;
+  }
+  /** For the monster leaderboard: mesos picked up go to the monster being fought, when that's fairly clear. */
+  private creditMobMesos(n: number) {
+    const k = this.foughtEntry(this.now());
+    if (k) k.mesos = (k.mesos ?? 0) + n;
+  }
+  /** the leaderboard entry of the monster being fought on this map (null when it isn't clear which) */
+  private foughtEntry(now: number) {
+    const map = this.mapCur, mob = map ? this.mobFought(map, now) : null;
+    return map && mob ? ((this.sess.kills ??= {})[mob] ??= { exp: 0, ms: 0, maps: {} }) : null;
   }
   /** the monster being fought on this map: the latest etc drop's, or the map's only regular monster */
   private mobFought(map: string, now: number) {
@@ -454,6 +463,7 @@ export class Tracker {
         this.mesoAmts.push(n);
         if (this.mesoAmts.length > 50) this.mesoAmts.shift();
         s.mesos += n;
+        this.creditMobMesos(n);
         this.event('meso', `+${fmtN(n)} mesos`);
       }
       // EXP lines are ignored: the EXP bar is exact, log lines can repeat identically and be missed

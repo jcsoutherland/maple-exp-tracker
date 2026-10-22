@@ -7,8 +7,8 @@ import { toast, useCtrl } from './hooks';
 
 /** monsters show up once they have this many kills */
 const MIN_KILLS = 50;
-type SortKey = 'kills' | 'level' | 'exp' | 'ms';
-const COLUMNS: [SortKey, string][] = [['level', 'Lv'], ['kills', '≈ Kills'], ['exp', 'EXP'], ['ms', 'Time']];
+type SortKey = 'kills' | 'level' | 'exp' | 'mesos' | 'ms';
+const COLUMNS: [SortKey, string][] = [['level', 'Lv'], ['kills', '≈ Kills'], ['exp', 'EXP'], ['mesos', '≈ Mesos'], ['ms', 'Time']];
 
 const baseExp = (name: string) => mobByName(name)?.exp ?? null;
 const levelOf = (name: string) => mobByName(name)?.level ?? 0;
@@ -48,6 +48,7 @@ export function MonstersTab() {
         <div className="mut small" style={{ marginBottom: 10 }}>
           Kills are an estimate: EXP earned while it's clear which monster you were fighting, divided by that monster's EXP, and
           never fewer than the etc drops it gave you. In a party each kill gives you less EXP, so the count comes out lower.
+          Mesos are the ones you picked up while fighting it (for older sessions, a share in line with its EXP).
           Monsters appear once they reach {MIN_KILLS} kills. Clearing History doesn't touch this leaderboard.
         </div>
         {!rows.length ? <div className="mut">No monster has {MIN_KILLS} kills yet. Each session's kills are added when it ends.</div> : (
@@ -69,6 +70,7 @@ export function MonstersTab() {
                   <td className="n">{levelOf(t.name) || '—'}</td>
                   <td className="n"><b>≈{fmtN(t.kills)}</b></td>
                   <td className="n">{fmtN(t.exp)}</td>
+                  <td className="n">≈{fmtN(t.mesos)}</td>
                   <td className="n">{fmtHM(t.ms)}</td>
                   <td>{t.topMap ?? '—'}</td>
                   <td>{day(t.first)}</td>

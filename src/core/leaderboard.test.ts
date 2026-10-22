@@ -34,6 +34,10 @@ describe('estimating a session\'s kills', () => {
     const k = sessionKills(session(1, { exp: 19000, maps: { Subway: 19000 }, mobs: { 'Jr. Necki': { n: 30, last: 0 }, Stirge: { n: 10, last: 0 } } }), lookup);
     expect(k.mobs.Stirge.exp).toBe(4000);
   });
+  it('gives a monster an old session\'s mesos in proportion to the EXP it gave', () => {
+    const k = sessionKills(session(1, { exp: 8000, mesos: 4000, maps: { Swamp: 2000, Subway: 6000 } }), lookup);
+    expect(k.mobs.Ligator.mesos).toBe(1000);
+  });
   it('splits an old session\'s time by each map\'s share of the EXP', () => {
     const k = sessionKills(session(1, { exp: 8000, maps: { Swamp: 2000, Subway: 6000 }, mobs: { 'Jr. Necki': { n: 1, last: 0 } } }), lookup);
     expect(k.mobs.Ligator.ms).toBe(900_000);

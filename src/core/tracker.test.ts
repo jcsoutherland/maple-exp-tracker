@@ -126,6 +126,13 @@ describe('EXP bar', () => {
     t.onExp(L(85857)); t.onExp(L(85892));
     expect(s.kills?.['Jr. Necki'].exp).toBe(35);
   });
+  it('credits mesos picked up to the monster being fought', () => {
+    const s = newSession('Flynny', 'Hunter', 38, 0);
+    const t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => 0, soleMob: () => 'Ligator' });
+    t.mapCur = 'Swamp';
+    t.onLogLines(['You have gained mesos (+120)']);
+    expect(s.kills?.Ligator.mesos).toBe(120);
+  });
   it('says a counted read was counted (for the diagnostics log)', () => {
     const s = newSession('Flynny', 'Hunter', 38, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => 0 });
     const L = (exp: number) => ({ exp, pct: Math.floor(exp * 10000 / 240500) / 100 });

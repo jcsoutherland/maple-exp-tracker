@@ -34,8 +34,8 @@ export interface Session {
   drops: Record<string, Drop>;
   /** monsters fought, from their etc drops: drops counted and when the last one came (session ms) */
   mobs?: Record<string, { n: number; last: number }>;
-  /** EXP credited to a monster while it was clearly the one being fought, the time that took (ms), and per map */
-  kills?: Record<string, { exp: number; ms: number; maps: Record<string, number> }>;
+  /** EXP and mesos credited to a monster while it was clearly the one being fought, the time that took (ms), and per map */
+  kills?: Record<string, { exp: number; ms: number; mesos?: number; maps: Record<string, number> }>;
   hp: Flow;
   mp: Flow;
   /** [minute, cumulative exp, cumulative mesos] sampled every ~30 s */
