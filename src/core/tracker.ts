@@ -88,6 +88,8 @@ export class Tracker {
   /** the previous level's EXP total (to sanity-check reads right after a level-up) */
   private lastTotal: number | null = null;
   private strikes = 0;
+  /** what the last EXP read did (counted, or why it wasn't), for the diagnostics log */
+  verdict = '';
   /** when the EXP baseline last moved (the EXP cap grows with the time between accepted reads) */
   private expAt = 0;
   /** the bar rolled over: a level-up, once the level number or the new level's EXP total confirms it */
@@ -188,14 +190,14 @@ export class Tracker {
   /** Feed one EXP bar reading. 'level' = a level-up was confirmed; 'candidate' = the bar rolled over (read the level number). */
   onExp(r: ExpReading): ExpResult {
     const vetted = this.checkTable(r);
-    if (!vetted) return null;
+    if (!vetted) { this.verdict = 'off-table'; return null; }
     r = vetted;
     if (this.exp == null) {
       // the baseline needs two reads that agree (out of the last few), so one misread can't become the starting point;
       // they must imply the same level total as closely as the % display allows (a digit misread by a few hundred
       // EXP, e.g. 124,156 for 124,516, would otherwise be counted as a gain)
       const f = this.firsts.slice().reverse().find(f => r.exp >= f.exp && r.exp - f.exp <= Math.max(2000, f.exp * 0.05) && sameTotal(f, r, 0.0005));
-      if (!f) { this.firsts = [...this.firsts.slice(-2), r]; return null; }
+      if (!f) { this.firsts = [...this.firsts.slice(-2), r]; this.verdict = 'baseline-wait'; return null; }
       this.firsts = []; this.accept(f);
     }
     const base = this.exp!;
@@ -205,11 +207,12 @@ export class Tracker {
       const d = r.exp - base, est = this.lastTotal ? this.lastTotal * 1.2 : null;
       const ok = d >= 0 && r.pct >= (this.pct ?? 0) - 0.01 && sameTotal({ exp: base, pct: this.pct ?? 0 }, r, 0.02)
         && (!est || Math.abs(r.exp * 100 / est - r.pct) <= r.pct * 0.3 + 0.05);
-      if (!ok) return null;
+      if (!ok) { this.verdict = 'fresh-level-rejected'; return null; }
       const v = d > 0 ? this.vet(d, r, r.pct > 0 ? r.exp * 100 / r.pct : Infinity) : 'ok';
-      if (v === 'wait') return null;
+      if (v === 'wait') { this.verdict = 'jump-wait'; return null; }
       if (v === 'ok' && d > 0) this.gain(d);
       this.accept(r);
+      this.verdict = v === 'skip' ? 'jump-skipped' : d > 0 ? 'counted' : 'same';
       return null;
     }
     // a misread digit shifts exp but not %, so compare the % predicted from exp with the % read
@@ -227,9 +230,10 @@ export class Tracker {
       const d = r.exp - base;
       if (d > 0) {
         const v = this.vet(d, r, total);
-        if (v === 'wait') return null;
+        if (v === 'wait') { this.verdict = 'jump-wait'; return null; }
         if (v === 'ok') this.gain(d);
         this.accept(r); this.drop = null;
+        this.verdict = v === 'ok' ? 'counted' : 'jump-skipped';
       } else if (d < 0) {
         // EXP went backwards (death without a safety charm): require a second matching read before logging it
         if (this.drop && Math.abs(this.drop.exp - r.exp) <= Math.max(2, total * 0.0002)) {
@@ -237,17 +241,19 @@ export class Tracker {
           this.sess.expLost += lost; this.sess.deaths++;
           this.event('death', `EXP lost: -${fmtN(lost)} (death?)`);
           this.accept(r, false); this.drop = null;
-        } else this.drop = r;
-      } else this.drop = null;
+          this.verdict = 'death';
+        } else { this.drop = r; this.verdict = 'drop-wait'; }
+      } else { this.drop = null; this.verdict = 'same'; }
       return null;
     }
     // inconsistent: a level-up (the bar rolled over) or a bad read
     if (bigDrop || (r.exp < base && this.pct != null && r.pct < this.pct)) return this.rollover(r, total);
     // rebaseline after repeated disagreement (e.g. a drifting total estimate) only if the new reads agree with each
     // other AND imply about the same level total; a consistently misread digit on a still frame must not get in
-    if (r.pct >= 1 && Math.abs(r.exp * 100 / r.pct / total - 1) > 0.03) return null;
+    if (r.pct >= 1 && Math.abs(r.exp * 100 / r.pct / total - 1) > 0.03) { this.verdict = 'off-total'; return null; }
     if (this.reb && Math.abs(this.reb.exp - r.exp) < this.reb.exp * 0.01) this.strikes++; else { this.strikes = 1; this.reb = r; }
-    if (this.strikes >= 4) { this.accept(r, false); this.totalStale = true; this.setTotal(r); this.strikes = 0; this.reb = null; }
+    this.verdict = 'disagrees';
+    if (this.strikes >= 4) { this.accept(r, false); this.totalStale = true; this.setTotal(r); this.strikes = 0; this.reb = null; this.verdict = 're-synced'; }
     return null;
   }
 
@@ -260,15 +266,16 @@ export class Tracker {
     const s = this.sess, base = this.exp!;
     const again = this.pend && r.exp >= this.pend.exp && r.pct >= this.pend.pct;
     this.pend = r;
+    this.verdict = 'rolled-over';
     if (!again) return null;
     const g = Math.max(0, total - base) + r.exp;
-    if (g >= total * 0.5) return null; // nobody earns half a level between two reads: a misread
+    if (g >= total * 0.5) { this.verdict = 'rolled-over-too-far'; return null; } // nobody earns half a level between two reads: a misread
     const newTotal = r.pct >= MIN_TOTAL_PCT ? r.exp * 100 / r.pct : null;
     const byTotal = newTotal != null && newTotal > total * 1.01;
     const byLevel = this.lvSeen != null && this.lvSeen > (s.level ?? 0);
     if (!byTotal && !byLevel) {
       if (!this.lvCand) { this.lvCand = { since: this.now() }; return 'candidate'; }
-      if (this.now() - this.lvCand.since < LEVEL_CONFIRM_MS) return null;
+      if (this.now() - this.lvCand.since < LEVEL_CONFIRM_MS) { this.verdict = 'level-unconfirmed'; return null; }
       this.event('info', 'The EXP bar dropped but the level number never changed: re-synced (nothing counted)');
       this.lvCand = null; this.pend = null; this.lastTotal = total;
       this.accept(r, false); this.total = null; this.totalPct = 0; this.setTotal(r);
@@ -281,6 +288,7 @@ export class Tracker {
     this.event('level', `Level up! → ${s.level}`);
     this.lastTotal = total; this.total = null; this.totalPct = 0; this.accept(r);
     this.pend = null; this.strikes = 0; this.lvCand = null; this.lvSeen = null;
+    this.verdict = 'level-up';
     return 'level';
   }
 

@@ -421,6 +421,20 @@ export class Controller {
    * still in progress), the capture, the text reader and the link to the desktop app. Inside the app the lines also
    * go to the app's own log.
    */
+  /** what the EXP reads did since the last heartbeat (counted, or why not), and the last one as read */
+  private expReads: Record<string, number> = {};
+  private lastExpRead = '';
+  private noteExpRead(raw: string, verdict: string) {
+    this.expReads[verdict] = (this.expReads[verdict] ?? 0) + 1;
+    this.lastExpRead = `"${raw.replace(/s+/g, ' ').trim().slice(0, 40)}" ${verdict}`;
+  }
+  private expReadSummary() {
+    const counts = Object.entries(this.expReads).map(([k, n]) => `${k}:${n}`).join(',') || 'none';
+    this.expReads = {};
+    const t = this.tracker;
+    return [`exp-reads=${counts}`, `last-read=${this.lastExpRead || '-'}`, `level=${this.sess?.level ?? '-'}`,
+      `bar=${t?.exp ?? '-'}/${t?.total != null ? Math.round(t.total) : '-'}`];
+  }
   private startHeartbeat() {
     if (inDesktopApp()) onDiag(line => this.desktop.sendDiag(line));
     window.setInterval(() => {
@@ -431,7 +445,7 @@ export class Controller {
         `session=${!s ? 'none' : s.paused ? (this.autoPaused ? 'auto-paused' : 'paused') : 'on'}`,
         `capture=${this.capture.ready ? 'ready' : this.capture.sharing ? 'no-frames' : 'off'}`, `ocr=${this.ocrState}`,
         `busy=${busy}`, `level-busy=${this.levelBusy}`, `log-queue=${this.logQueue.length}`, `reading=${this.reading}`,
-        `timers=${this.ticker.describe()}`, `exp=${s?.exp ?? '-'}`, `link=${this.desktop.state}`, `mirror=${!!this.remote}`,
+        `timers=${this.ticker.describe()}`, `exp=${s?.exp ?? '-'}`, ...this.expReadSummary(), `link=${this.desktop.state}`, `mirror=${!!this.remote}`,
       ].join(' '));
     }, 60_000);
   }
@@ -1004,11 +1018,13 @@ export class Controller {
     if (!this.canRun || this.busy.exp || !anyOn(this.settings, ...EXP_FEATURES)) return;
     this.busy.exp = true;
     try {
-      const r = parseExp(await this.read('exp', this.capture.video));
+      const raw = await this.read('exp', this.capture.video), r = parseExp(raw);
       const s = this.sess, t = this.tracker;
+      if (!r) this.noteExpRead(raw, 'unreadable');
       if (!r || !s || !t) return;
       const before = s.exp;
       const res = t.onExp(r);
+      this.noteExpRead(raw, t.verdict);
       if (s.exp > before) this.markActive();
       if (res === 'level') { this.identity.level = s.level; this.ensureLook(); } // new gear for the new level
       // the bar rolled over (a level-up needs the level number to confirm it), and a regular check once a minute

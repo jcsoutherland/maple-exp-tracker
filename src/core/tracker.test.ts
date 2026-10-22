@@ -110,6 +110,19 @@ describe('EXP bar', () => {
     t.onExp(L(85927));
     expect(s.exp).toBe(85927 - 85857);
   });
+  it('says a counted read was counted (for the diagnostics log)', () => {
+    const s = newSession('Flynny', 'Hunter', 38, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => 0 });
+    const L = (exp: number) => ({ exp, pct: Math.floor(exp * 10000 / 240500) / 100 });
+    t.onExp(L(85857)); t.onExp(L(85892));
+    expect(t.verdict).toBe('counted');
+  });
+  it('says why a read was turned away (for the diagnostics log)', () => {
+    const s = newSession('Flynny', 'Hunter', 38, 0), t = new Tracker(s, { hpMin: () => 40, mpMin: () => 25, now: () => 0 });
+    const L = (exp: number) => ({ exp, pct: Math.floor(exp * 10000 / 240500) / 100 });
+    t.onExp(L(85857)); t.onExp(L(85892));
+    t.onExp({ exp: 99999, pct: L(85900).pct });
+    expect(t.verdict).toBe('off-table');
+  });
   it('does not take a misread first reading as the baseline', () => {
     const { s, t } = make();
     t.onExp({ exp: 1124632, pct: R(124632).pct }); // first read garbled
