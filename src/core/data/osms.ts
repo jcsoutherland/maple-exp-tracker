@@ -53,8 +53,6 @@ async function list<T, R>(file: string, shape: (raw: R) => T[]): Promise<T[]> {
 export function loadOsms(): Promise<void> {
   return (loading ??= (async () => {
     // monsters are a nice-to-have: without them the app works as before
-    loadMeowdbIndex(); // links only: without it they fall back to copy-and-open
-    loadDrops(); // the log matcher's item names: without them it tries every item
     cached('mobs-v3', () => list('monsters.json', shapeMobs), LIST_TTL).then(m => { mobs = m; }).catch(e => console.warn('OSMS monsters unavailable', e))
       .finally(() => { mobsDone = true; listeners.forEach(l => l()); });
     const [it, mp] = await Promise.all([
@@ -136,10 +134,11 @@ export function maxMobExp(map: string | null): number | null {
 export function mobForItem(itemName: string, map: string | null): MobRec | null {
   const it = itemByName(itemName), desc = it?.cat === 'Etc' ? it.desc.toLowerCase() : '';
   if (!desc || !mobs.length) return null;
-  const hits = mobs.filter(m => new RegExp(`\\b${m.name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(desc))
-    .sort((a, b) => b.name.length - a.name.length);
+  const hits = mobs.filter(m => nameRegex(m.name).test(desc)).sort((a, b) => b.name.length - a.name.length);
   return hits.find(m => map && m.maps.includes(map)) ?? hits[0] ?? null;
 }
+/** a monster's name as a whole word, for matching item descriptions (lower case) */
+const nameRegex = (name: string) => new RegExp(`\\b${name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
 export const mobByName = (name: string) => mobs.find(m => m.name === name) ?? null;
 /** the map's only regular monster (null when there are several, or none known) */
 export function soleMob(map: string): string | null {
@@ -195,41 +194,27 @@ export function itemIcon(id: number): Promise<string | null> {
 }
 
 /**
- * Item lookups on fan sites. Neither deep-links by game item id (meowdb numbers items its own way and its search isn't
- * part of the address; meso.watch only has an on-page filter), so both open with the item name copied, ready to paste.
+ * Item lookups on fan sites, as links only (no data is taken from them). Neither deep-links by game item id (meowdb
+ * numbers items its own way and its search isn't part of the address; meso.watch only has an on-page filter), so both
+ * open with the item name copied, ready to paste.
  */
 export const MEOWDB_ITEMS_URL = 'https://meowdb.com/msclassic/item-db/all';
 
+const dropsByMap = new Map<string, string[]>();
 /**
- * meowdb's own page number for each item (lower-cased name → n, so Red Viper is item-db/669). Built weekly by the
- * mirror from one page of meowdb (dev/mirror-data.mjs) and only ever read from the mirror, never from meowdb.
+ * Items the monsters on this map drop, as far as the item data says: etc items whose description names one of them
+ * ("A tablecloth donned by a Jr. Wraith."). The pickup-log matcher tries these names first; empty when not known.
  */
-let meowIndex: Record<string, number> = {};
-let meowLoading: Promise<void> | null = null;
-export function loadMeowdbIndex(): Promise<void> {
-  return (meowLoading ??= cached('meowdb-v1', async () => {
-    const r = await fetchFirst([MIRROR + 'meowdb.json']);
-    if (!r) throw new Error('no meowdb index on the mirror'); // not cached: try again next visit
-    return await r.json() as Record<string, number>;
-  }, LIST_TTL).then(m => { meowIndex = m; listeners.forEach(l => l()); }).catch(() => undefined));
+export function dropsOnMap(map: string | null): string[] {
+  if (!map || !items || !mobs.length) return [];
+  let names = dropsByMap.get(map);
+  if (!names) {
+    const here = mobsOnMap(map).map(m => nameRegex(m.name));
+    names = here.length ? items.filter(i => i.cat === 'Etc' && here.some(r => r.test(i.desc.toLowerCase()))).map(i => i.name) : [];
+    dropsByMap.set(map, names);
+  }
+  return names;
 }
-/** The item's own meowdb page, or null when the index doesn't know it (then copy the name and open the list). */
-export const meowdbItemUrl = (name: string) => { const n = meowIndex[name.toLowerCase()]; return n ? `https://meowdb.com/msclassic/item-db/${n}` : null; };
-/**
- * What each monster drops (monster name → item names), from meowdb's monster pages. Built weekly by the mirror
- * (dev/mirror-data.mjs) and only ever read from the mirror. The pickup-log matcher tries these names first.
- */
-let drops: Record<string, string[]> = {};
-let dropsLoading: Promise<void> | null = null;
-export function loadDrops(): Promise<void> {
-  return (dropsLoading ??= cached('drops-v1', async () => {
-    const r = await fetchFirst([MIRROR + 'drops.json']);
-    if (!r) throw new Error('no drop tables on the mirror'); // not cached: try again next visit
-    return await r.json() as Record<string, string[]>;
-  }, LIST_TTL).then(d => { drops = d; }).catch(() => undefined));
-}
-/** Items the monsters on this map drop (empty when the map or its monsters' drops aren't known). */
-export const dropsOnMap = (map: string | null) => [...new Set(mobsOnMap(map).flatMap(m => drops[m.name] ?? []))];
 
 export const MESO_WATCH_URL = 'https://meso.watch/';
 /** Copy an item name for pasting into a fan site's search, with a toast saying where. */

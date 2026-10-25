@@ -66,6 +66,8 @@ To keep traffic to those community sites tiny, the app doesn't download from the
 
 The app reads `/data/` first and only asks the original site for a file the mirror doesn't have yet (`src/core/mirror.ts`); each device also keeps what it loaded in IndexedDB.
 
+No data is taken from meowdb (or niadb): the mirror never contacts it, and the app only links to it. The pickup-log reader's likely items on a map come from the OSMS etc-item descriptions that name the map's monsters (`dropsOnMap`).
+
 ## Monster leaderboard
 
 `src/core/leaderboard.ts` (pure, tested) estimates kills per monster, stored apart from History in `met.kills` as `char → { clearedAt?, sessions: id → per-monster EXP, time, drops, time per map }`. It's stored per session, so syncing, re-importing and backfilling never count twice.
